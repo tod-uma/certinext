@@ -87,11 +87,18 @@ class Domain:
 
     @property
     def created_at(self) -> datetime | None:
-        """Creation timestamp as a timezone-aware UTC ``datetime``, or ``None``."""
+        """Creation timestamp as a timezone-aware UTC ``datetime``, or ``None``.
+
+        Returns ``None`` when the field is absent, null, or not a parseable
+        ISO 8601 string.
+        """
         raw = self._data.get("createdAt")
         if not raw:
             return None
-        return datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        try:
+            return datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        except (ValueError, TypeError):
+            return None
 
     # --- dunder methods ---
 
@@ -120,13 +127,15 @@ class Domain:
 
     def to_row(self) -> dict[str, str]:
         """Return a flat ``dict[str, str]`` of key fields suitable for tabular display."""
+        def _s(val: Any) -> str:
+            return str(val) if val is not None else ""
         return {
-            "name": self.name or "",
-            "status": self.status or "",
-            "dcv_status": self.dcv_status or "",
-            "organization": self.organization_name or "",
+            "name": _s(self.name),
+            "status": _s(self.status),
+            "dcv_status": _s(self.dcv_status),
+            "organization": _s(self.organization_name),
             "created_at": self.created_at.isoformat() if self.created_at else "",
-            "id": self.id or "",
+            "id": _s(self.id),
         }
 
     # --- API methods ---
