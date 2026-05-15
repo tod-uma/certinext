@@ -1,0 +1,389 @@
+[
+  {
+    "domainId": "FakeDomainId001",
+    "domainName": "example.edu",
+    "organizationId": "FakeOrgId001",
+    "organizationName": "Example University System",
+    "status": "ACTIVE",
+    "dcvStatus": "VERIFIED",
+    "createdAt": "2026-05-04T21:27:14Z"
+  },
+  {
+    "domainId": "FakeDomainId002",
+    "domainName": "www.example.edu",
+    "organizationId": "FakeOrgId001",
+    "organizationName": "Example University System",
+    "status": "ACTIVE",
+    "dcvStatus": "PENDING",
+    "createdAt": "2026-05-04T21:27:14Z"
+  },
+  {
+    "domainId": "FakeDomainId003",
+    "domainName": "mail.example.edu",
+    "organizationId": "FakeOrgId001",
+    "organizationName": "Example University System",
+    "status": "ACTIVE",
+    "dcvStatus": "PENDING",
+    "createdAt": "2026-05-04T21:27:14Z"
+  },
+  {
+    "domainId": "FakeDomainId004",
+    "domainName": "library.example.edu",
+    "organizationId": "FakeOrgId001",
+    "organizationName": "Example University System",
+    "status": "ACTIVE",
+    "dcvStatus": "PENDING",
+    "createdAt": "2026-05-04T21:27:14Z"
+  },
+  {
+    "domainId": "FakeDomainId005",
+    "domainName": "canvas.example.edu",
+    "organizationId": "FakeOrgId001",
+    "organizationName": "Example University System",
+    "status": "ACTIVE",
+    "dcvStatus": "PENDING",
+    "createdAt": "2026-05-04T21:27:14Z"
+  },
+  {
+    "domainId": "FakeDomainId006",
+    "domainName": "my.example.edu",
+    "organizationId": "FakeOrgId001",
+    "organizationName": "Example University System",
+    "status": "ACTIVE",
+    "dcvStatus": "PENDING",
+    "createdAt": "2026-05-04T21:27:14Z"
+  },
+  {
+    "domainId": "FakeDomainId007",
+    "domainName": "portal.example.edu",
+    "organizationId": "FakeOrgId001",
+    "organizationName": "Example University System",
+    "status": "ACTIVE",
+    "dcvStatus": "PENDING",
+    "createdAt": "2026-05-04T21:27:14Z"
+  },
+  {
+    "domainId": "FakeDomainId008",
+    "domainName": "webmail.example.edu",
+    "organizationId": "FakeOrgId001",
+    "organizationName": "Example University System",
+    "status": "ACTIVE",
+    "dcvStatus": "PENDING",
+    "createdAt": "2026-05-04T21:27:14Z"
+  },
+  {
+    "domainId": "FakeDomainId009",
+    "domainName": "hr.example.edu",
+    "organizationId": "FakeOrgId001",
+    "organizationName": "Example University System",
+    "status": "ACTIVE",
+    "dcvStatus": "PENDING",
+    "createdAt": "2026-05-04T21:27:14Z"
+  },
+  {
+    "domainId": "FakeDomainId010",
+    "domainName": "finance.example.edu",
+    "organizationId": "FakeOrgId001",
+    "organizationName": "Example University System",
+    "status": "ACTIVE",
+    "dcvStatus": "PENDING",
+    "createdAt": "2026-05-04T21:27:14Z"
+  },
+  {
+    "domainId": "FakeDomainId011",
+    "domainName": "research.example.edu",
+    "organizationId": "FakeOrgId001",
+    "organizationName": "Example University System",
+    "status": "ACTIVE",
+    "dcvStatus": "PENDING",
+    "createdAt": "2026-05-04T21:27:14Z"
+  },
+  {
+    "domainId": "FakeDomainId012",
+    "domainName": "graduate.example.edu",
+    "organizationId": "FakeOrgId001",
+    "organizationName": "Example University System",
+    "status": "ACTIVE",
+    "dcvStatus": "PENDING",
+    "createdAt": "2026-05-04T21:27:14Z"
+  },
+  {
+    "domainId": "FakeDomainId013",
+    "domainName": "admissions.example.edu",
+    "organizationId": "FakeOrgId001",
+    "organizationName": "Example University System",
+    "status": "ACTIVE",
+    "dcvStatus": "PENDING",
+    "createdAt": "2026-05-04T21:27:14Z"
+  },
+  {
+    "domainId": "FakeDomainId014",
+    "domainName": "registrar.example.edu",
+    "organizationId": "FakeOrgId001",
+    "organizationName": "Example University System",
+    "status": "ACTIVE",
+    "dcvStatus": "PENDING",
+    "createdAt": "2026-05-04T21:27:14Z"
+  },
+  {
+    "domainId": "FakeDomainId015",
+    "domainName": "housing.example.edu",
+    "organizationId": "FakeOrgId001",
+    "organizationName": "Example University System",
+    "status": "ACTIVE",
+    "dcvStatus": "PENDING",
+    "createdAt": "2026-05-04T21:27:14Z"
+  },
+  {
+    "domainId": "FakeDomainId016",
+    "domainName": "athletics.example.edu",
+    "organizationId": "FakeOrgId001",
+    "organizationName": "Example University System",
+    "status": "ACTIVE",
+    "dcvStatus": "PENDING",
+    "createdAt": "2026-05-04T21:27:14Z"
+  },
+  {
+    "domainId": "FakeDomainId017",
+    "domainName": "news.example.edu",
+    "organizationId": "FakeOrgId001",
+    "organizationName": "Example University System",
+    "status": "ACTIVE",
+    "dcvStatus": "PENDING",
+    "createdAt": "2026-05-04T21:27:14Z"
+  },
+  {
+    "domainId": "FakeDomainId018",
+    "domainName": "events.example.edu",
+    "organizationId": "FakeOrgId001",
+    "organizationName": "Example University System",
+    "status": "ACTIVE",
+    "dcvStatus": "PENDING",
+    "createdAt": "2026-05-04T21:27:14Z"
+  },
+  {
+    "domainId": "FakeDomainId019",
+    "domainName": "giving.example.edu",
+    "organizationId": "FakeOrgId001",
+    "organizationName": "Example University System",
+    "status": "ACTIVE",
+    "dcvStatus": "PENDING",
+    "createdAt": "2026-05-04T21:27:14Z"
+  },
+  {
+    "domainId": "FakeDomainId020",
+    "domainName": "alumni.example.edu",
+    "organizationId": "FakeOrgId001",
+    "organizationName": "Example University System",
+    "status": "ACTIVE",
+    "dcvStatus": "PENDING",
+    "createdAt": "2026-05-04T21:27:14Z"
+  },
+  {
+    "domainId": "FakeDomainId021",
+    "domainName": "careers.example.edu",
+    "organizationId": "FakeOrgId001",
+    "organizationName": "Example University System",
+    "status": "ACTIVE",
+    "dcvStatus": "PENDING",
+    "createdAt": "2026-05-04T21:27:14Z"
+  },
+  {
+    "domainId": "FakeDomainId022",
+    "domainName": "computing.example.edu",
+    "organizationId": "FakeOrgId001",
+    "organizationName": "Example University System",
+    "status": "ACTIVE",
+    "dcvStatus": "PENDING",
+    "createdAt": "2026-05-04T21:27:14Z"
+  },
+  {
+    "domainId": "FakeDomainId023",
+    "domainName": "engineering.example.edu",
+    "organizationId": "FakeOrgId001",
+    "organizationName": "Example University System",
+    "status": "ACTIVE",
+    "dcvStatus": "PENDING",
+    "createdAt": "2026-05-04T21:27:14Z"
+  },
+  {
+    "domainId": "FakeDomainId024",
+    "domainName": "science.example.edu",
+    "organizationId": "FakeOrgId001",
+    "organizationName": "Example University System",
+    "status": "ACTIVE",
+    "dcvStatus": "PENDING",
+    "createdAt": "2026-05-04T21:27:14Z"
+  },
+  {
+    "domainId": "FakeDomainId025",
+    "domainName": "arts.example.edu",
+    "organizationId": "FakeOrgId001",
+    "organizationName": "Example University System",
+    "status": "ACTIVE",
+    "dcvStatus": "PENDING",
+    "createdAt": "2026-05-04T21:27:14Z"
+  },
+  {
+    "domainId": "FakeDomainId026",
+    "domainName": "business.example.edu",
+    "organizationId": "FakeOrgId001",
+    "organizationName": "Example University System",
+    "status": "ACTIVE",
+    "dcvStatus": "PENDING",
+    "createdAt": "2026-05-04T21:27:14Z"
+  },
+  {
+    "domainId": "FakeDomainId027",
+    "domainName": "education.example.edu",
+    "organizationId": "FakeOrgId001",
+    "organizationName": "Example University System",
+    "status": "ACTIVE",
+    "dcvStatus": "PENDING",
+    "createdAt": "2026-05-04T21:27:14Z"
+  },
+  {
+    "domainId": "FakeDomainId028",
+    "domainName": "nursing.example.edu",
+    "organizationId": "FakeOrgId001",
+    "organizationName": "Example University System",
+    "status": "ACTIVE",
+    "dcvStatus": "PENDING",
+    "createdAt": "2026-05-04T21:27:14Z"
+  },
+  {
+    "domainId": "FakeDomainId029",
+    "domainName": "pharmacy.example.edu",
+    "organizationId": "FakeOrgId001",
+    "organizationName": "Example University System",
+    "status": "ACTIVE",
+    "dcvStatus": "PENDING",
+    "createdAt": "2026-05-04T21:27:14Z"
+  },
+  {
+    "domainId": "FakeDomainId030",
+    "domainName": "law.example.edu",
+    "organizationId": "FakeOrgId001",
+    "organizationName": "Example University System",
+    "status": "ACTIVE",
+    "dcvStatus": "PENDING",
+    "createdAt": "2026-05-04T21:27:14Z"
+  },
+  {
+    "domainId": "FakeDomainId031",
+    "domainName": "medicine.example.edu",
+    "organizationId": "FakeOrgId001",
+    "organizationName": "Example University System",
+    "status": "ACTIVE",
+    "dcvStatus": "PENDING",
+    "createdAt": "2026-05-04T21:27:14Z"
+  },
+  {
+    "domainId": "FakeDomainId032",
+    "domainName": "dental.example.edu",
+    "organizationId": "FakeOrgId001",
+    "organizationName": "Example University System",
+    "status": "ACTIVE",
+    "dcvStatus": "PENDING",
+    "createdAt": "2026-05-04T21:27:14Z"
+  },
+  {
+    "domainId": "FakeDomainId033",
+    "domainName": "vpn.example.edu",
+    "organizationId": "FakeOrgId001",
+    "organizationName": "Example University System",
+    "status": "ACTIVE",
+    "dcvStatus": "PENDING",
+    "createdAt": "2026-05-04T21:27:14Z"
+  },
+  {
+    "domainId": "FakeDomainId034",
+    "domainName": "sso.example.edu",
+    "organizationId": "FakeOrgId001",
+    "organizationName": "Example University System",
+    "status": "ACTIVE",
+    "dcvStatus": "PENDING",
+    "createdAt": "2026-05-04T21:27:14Z"
+  },
+  {
+    "domainId": "FakeDomainId035",
+    "domainName": "api.example.edu",
+    "organizationId": "FakeOrgId001",
+    "organizationName": "Example University System",
+    "status": "ACTIVE",
+    "dcvStatus": "PENDING",
+    "createdAt": "2026-05-04T21:27:14Z"
+  },
+  {
+    "domainId": "FakeDomainId036",
+    "domainName": "dev.example.edu",
+    "organizationId": "FakeOrgId001",
+    "organizationName": "Example University System",
+    "status": "ACTIVE",
+    "dcvStatus": "PENDING",
+    "createdAt": "2026-05-04T21:27:14Z"
+  },
+  {
+    "domainId": "FakeDomainId037",
+    "domainName": "staging.example.edu",
+    "organizationId": "FakeOrgId001",
+    "organizationName": "Example University System",
+    "status": "ACTIVE",
+    "dcvStatus": "PENDING",
+    "createdAt": "2026-05-04T21:27:14Z"
+  },
+  {
+    "domainId": "FakeDomainId038",
+    "domainName": "oit.example.edu",
+    "organizationId": "FakeOrgId001",
+    "organizationName": "Example University System",
+    "status": "ACTIVE",
+    "dcvStatus": "PENDING",
+    "createdAt": "2026-05-04T21:27:14Z"
+  },
+  {
+    "domainId": "FakeDomainId039",
+    "domainName": "security.example.edu",
+    "organizationId": "FakeOrgId001",
+    "organizationName": "Example University System",
+    "status": "ACTIVE",
+    "dcvStatus": "PENDING",
+    "createdAt": "2026-05-04T21:27:14Z"
+  },
+  {
+    "domainId": "FakeDomainId040",
+    "domainName": "helpdesk.example.edu",
+    "organizationId": "FakeOrgId001",
+    "organizationName": "Example University System",
+    "status": "ACTIVE",
+    "dcvStatus": "PENDING",
+    "createdAt": "2026-05-04T21:27:14Z"
+  },
+  {
+    "domainId": "FakeDomainId041",
+    "domainName": "erp.example.edu",
+    "organizationId": "FakeOrgId001",
+    "organizationName": "Example University System",
+    "status": "ACTIVE",
+    "dcvStatus": "PENDING",
+    "createdAt": "2026-05-04T21:27:14Z"
+  },
+  {
+    "domainId": "FakeDomainId042",
+    "domainName": "video.example.edu",
+    "organizationId": "FakeOrgId001",
+    "organizationName": "Example University System",
+    "status": "ACTIVE",
+    "dcvStatus": "PENDING",
+    "createdAt": "2026-05-04T21:27:14Z"
+  },
+  {
+    "domainId": "FakeDomainId043",
+    "domainName": "maps.example.edu",
+    "organizationId": "FakeOrgId001",
+    "organizationName": "Example University System",
+    "status": "ACTIVE",
+    "dcvStatus": "PENDING",
+    "createdAt": "2026-05-04T21:27:14Z"
+  }
+]

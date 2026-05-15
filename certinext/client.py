@@ -13,7 +13,9 @@
 # limitations under the License.
 
 from typing import Any
+
 import requests
+
 from .auth import OAuth2ClientCredentials
 
 
@@ -118,4 +120,4 @@ class CertiNextClient:
         """
         resp = self._session.delete(f"{self.base_url}{path}", headers=self._headers())
         resp.raise_for_status()
-        return resp.json() if resp.content else None  # type: ignore[no-any-return]
+        return resp.json() if resp.content else None
