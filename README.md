@@ -1,5 +1,7 @@
 # certinext
 
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+
 Python library and CLI scripts for managing your [CertiNext](https://us.certinext.io) environment via the REST API.
 
 > **Work in progress:** Only the `list` and `get` domain operations have been tested against the live API so far. All other operations (create, deactivate, DCV methods) are implemented based on the API documentation but remain untested.
