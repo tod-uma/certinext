@@ -22,7 +22,6 @@ import requests
 from certinext.auth import OAuth2ClientCredentials
 from certinext.domains import Domain, DomainAccessor
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

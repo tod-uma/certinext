@@ -14,6 +14,7 @@
 
 from datetime import datetime
 from typing import Any
+
 from .client import CertiNextClient
 
 _BASE = "/api/certinext/v2/domains"
@@ -273,7 +274,7 @@ class DomainAccessor:
             raw = []
             for val in result.values():
                 if isinstance(val, list):
-                    raw = val  # type: ignore[assignment]
+                    raw = val
                     break
         return [Domain(self._client, item) for item in raw]
 
