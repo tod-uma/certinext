@@ -6,7 +6,31 @@ _BASE = "/api/certinext/v2/domains"
 
 
 class Domain:
+    """Represents a single CertiNext domain resource.
+
+    Instances are returned by `DomainAccessor` methods and should not be
+    constructed directly. All API response fields are exposed as read-only
+    properties; mutable fields (`name`, `dcv_method`) also have setters that
+    update the local object — call the appropriate API method to persist
+    changes to the server.
+
+    Supports ``str()`` for human-readable output and ``repr()`` for a concise
+    developer representation, so you can use ``print(domain)`` directly.
+
+    Example::
+
+        sess = certinext.session(client_id="...", client_secret="...")
+        domain = sess.domain.get("maine.edu")
+        print(domain)
+        domain.verify()
+    """
+
     def __init__(self, client: CertiNextClient, data: dict[str, Any]) -> None:
+        """
+        Args:
+            client: The underlying HTTP client used to make subsequent API calls.
+            data: Raw API response dict for this domain.
+        """
         self._client = client
         self._data: dict[str, Any] = data
 
@@ -14,34 +38,42 @@ class Domain:
 
     @property
     def id(self) -> str | None:
+        """Unique domain ID assigned by CertiNext."""
         return self._data.get("domainId")
 
     @property
     def name(self) -> str | None:
+        """Fully-qualified domain name (e.g. ``maine.edu``)."""
         return self._data.get("domainName")
 
     @name.setter
     def name(self, value: str) -> None:
+        """Update the domain name in the local object (does not call the API)."""
         self._data["domainName"] = value
 
     @property
     def organization_id(self) -> str | None:
+        """ID of the organization this domain belongs to."""
         return self._data.get("organizationId")
 
     @property
     def organization_name(self) -> str | None:
+        """Display name of the organization this domain belongs to."""
         return self._data.get("organizationName")
 
     @property
     def status(self) -> str | None:
+        """Domain status, e.g. ``ACTIVE`` or ``INACTIVE``."""
         return self._data.get("status")
 
     @property
     def dcv_status(self) -> str | None:
+        """Domain Control Validation status, e.g. ``VERIFIED`` or ``PENDING``."""
         return self._data.get("dcvStatus")
 
     @property
     def created_at(self) -> datetime | None:
+        """Creation timestamp as a timezone-aware UTC ``datetime``, or ``None``."""
         raw = self._data.get("createdAt")
         if not raw:
             return None
@@ -50,6 +82,7 @@ class Domain:
     # --- dunder methods ---
 
     def __str__(self) -> str:
+        """Return a human-readable multi-line summary of the domain."""
         def row(label: str, value: Any) -> str:
             return f"  {label:<16} {value or ''}"
         lines = [f"Domain: {self.name or '(unknown)'}"]
@@ -62,14 +95,17 @@ class Domain:
         return "\n".join(lines)
 
     def __repr__(self) -> str:
+        """Return a concise developer representation of the domain."""
         return f"Domain(id={self.id!r}, name={self.name!r}, status={self.status!r}, dcv_status={self.dcv_status!r})"
 
     # --- public helpers ---
 
     def as_dict(self) -> dict[str, Any]:
+        """Return the raw API response dict for this domain."""
         return self._data
 
     def to_row(self) -> dict[str, str]:
+        """Return a flat ``dict[str, str]`` of key fields suitable for tabular display."""
         return {
             "name": self.name or "",
             "status": self.status or "",
@@ -82,40 +118,125 @@ class Domain:
     # --- API methods ---
 
     def refresh(self) -> "Domain":
+        """Re-fetch this domain from the API and update all properties in place.
+
+        Returns:
+            ``self``, allowing method chaining.
+        """
         result = self._client.get(f"{_BASE}/{self.id}")
         if isinstance(result, dict):
             self._data = result
         return self
 
     def deactivate(self) -> "Domain":
+        """Deactivate this domain and update properties from the API response.
+
+        Returns:
+            ``self``, allowing method chaining.
+
+        Raises:
+            requests.HTTPError: On a non-2xx API response.
+        """
         self._data = self._client.post(f"{_BASE}/{self.id}/deactivate")
         return self
 
     def get_dcv(self) -> dict[str, Any]:
+        """Return the current Domain Control Validation status from the API.
+
+        Returns:
+            Dict containing DCV details for this domain.
+
+        Raises:
+            requests.HTTPError: On a non-2xx API response.
+        """
         result = self._client.get(f"{_BASE}/{self.id}/dcv")
         return result if isinstance(result, dict) else {}
 
     def verify(self) -> dict[str, Any]:
+        """Trigger DCV verification for this domain.
+
+        Returns:
+            Dict containing the verification attempt result.
+
+        Raises:
+            requests.HTTPError: On a non-2xx API response.
+        """
         return self._client.post(f"{_BASE}/{self.id}/dcv/verify")
 
     def change_dcv_method(self, method: str) -> dict[str, Any]:
+        """Change the DCV method for this domain.
+
+        Args:
+            method: The new DCV method. Accepted values: ``EMAIL``, ``DNS``, ``HTTP``.
+
+        Returns:
+            Dict containing the updated DCV configuration.
+
+        Raises:
+            requests.HTTPError: On a non-2xx API response.
+        """
         return self._client.post(
             f"{_BASE}/{self.id}/dcv/change-method", json={"method": method}
         )
 
     def last_dcv_attempt(self) -> dict[str, Any]:
+        """Return details of the most recent DCV attempt for this domain.
+
+        Returns:
+            Dict containing the last DCV attempt details.
+
+        Raises:
+            requests.HTTPError: On a non-2xx API response.
+        """
         result = self._client.get(f"{_BASE}/{self.id}/dcv/last-attempt")
         return result if isinstance(result, dict) else {}
 
     def dcv_attempt_history(self) -> dict[str, Any] | list[Any]:
+        """Return the full DCV attempt history for this domain.
+
+        Returns:
+            Dict or list containing the history of DCV attempts.
+
+        Raises:
+            requests.HTTPError: On a non-2xx API response.
+        """
         return self._client.get(f"{_BASE}/{self.id}/dcv/attempt-history")
 
 
 class DomainAccessor:
+    """Accessor for the CertiNext Domains API.
+
+    Mounted on a session as ``session.domain``. Provides methods to list,
+    retrieve, and create domains. Returned domain objects are instances of
+    `Domain` and expose further API operations as methods.
+
+    Example::
+
+        sess = certinext.session(client_id="...", client_secret="...")
+        domains = sess.domain.list()
+        domain = sess.domain.get("maine.edu")
+    """
+
     def __init__(self, client: CertiNextClient) -> None:
+        """
+        Args:
+            client: The underlying HTTP client used for all API calls.
+        """
         self._client = client
 
     def list(self, offset: int | None = None, limit: int | None = None) -> list[Domain]:
+        """Return a list of all domains in the account.
+
+        Args:
+            offset: Number of records to skip (for pagination).
+            limit: Maximum number of records to return.
+
+        Returns:
+            List of `Domain` objects.
+
+        Raises:
+            requests.HTTPError: On a non-2xx API response.
+        """
         params: dict[str, Any] = {}
         if offset is not None:
             params["offset"] = offset
@@ -134,7 +255,23 @@ class DomainAccessor:
         return [Domain(self._client, item) for item in raw]
 
     def get(self, domain_id_or_name: str) -> Domain:
-        """Get a domain by ID or by name (e.g. 'maine.edu')."""
+        """Return a single domain by ID or by fully-qualified domain name.
+
+        When a name containing a ``.`` is passed, all domains are listed and
+        the match is found by name (case-insensitive). When an opaque ID is
+        passed, the single-domain endpoint is called directly.
+
+        Args:
+            domain_id_or_name: A domain name (e.g. ``maine.edu``) or a domain ID.
+
+        Returns:
+            The matching `Domain` object.
+
+        Raises:
+            KeyError: If a name lookup finds no matching domain.
+            ValueError: If the API returns an unexpected response type for an ID lookup.
+            requests.HTTPError: On a non-2xx API response.
+        """
         if "." in domain_id_or_name:
             name = domain_id_or_name.lower()
             for domain in self.list():
@@ -147,4 +284,16 @@ class DomainAccessor:
         return Domain(self._client, result)
 
     def create(self, name: str, **fields: Any) -> Domain:
+        """Create a new domain and return it as a `Domain` object.
+
+        Args:
+            name: The fully-qualified domain name to register (e.g. ``example.com``).
+            **fields: Additional fields to include in the API request body.
+
+        Returns:
+            The newly created `Domain`.
+
+        Raises:
+            requests.HTTPError: On a non-2xx API response.
+        """
         return Domain(self._client, self._client.post(_BASE, json={"name": name, **fields}))

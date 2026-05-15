@@ -5,7 +5,20 @@ import requests
 
 
 class OAuth2ClientCredentials:
-    def __init__(self, token_url: str, client_id: str, client_secret: str, scope: str = ""):
+    """Manages an OAuth 2.0 Client Credentials bearer token.
+
+    Fetches a token on first use and caches it, automatically refreshing it
+    60 seconds before expiry so callers always receive a valid token.
+    """
+
+    def __init__(self, token_url: str, client_id: str, client_secret: str, scope: str = "") -> None:
+        """
+        Args:
+            token_url: Full URL of the OAuth 2.0 token endpoint.
+            client_id: OAuth client ID (your CertiNext account number).
+            client_secret: OAuth client secret.
+            scope: Optional space-separated OAuth scopes.
+        """
         self.token_url = token_url
         self.client_id = client_id
         self.client_secret = client_secret
@@ -14,12 +27,21 @@ class OAuth2ClientCredentials:
         self._expires_at: float = 0.0
 
     def get_token(self) -> str:
+        """Return a valid bearer token, fetching a new one if necessary.
+
+        Returns:
+            A current OAuth access token string.
+
+        Raises:
+            RuntimeError: If the token endpoint returns an error or non-JSON response.
+        """
         if self._access_token and time.time() < self._expires_at - 60:
             return self._access_token
         self._fetch_token()
-        return self._access_token
+        return self._access_token  # type: ignore[return-value]
 
     def _fetch_token(self) -> None:
+        """Request a new token from the token endpoint and cache it."""
         data = {
             "grant_type": "client_credentials",
             "client_id": self.client_id,
