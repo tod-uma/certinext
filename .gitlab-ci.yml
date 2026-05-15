@@ -52,6 +52,10 @@ test:
 
 sast:
   stage: security
+  variables:
+    GIT_DEPTH: 0
 
 secret_detection:
   stage: security
+  variables:
+    GIT_DEPTH: 0
