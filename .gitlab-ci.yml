@@ -61,11 +61,17 @@ test:
 
 sast:
   stage: security
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH
   variables:
     GIT_DEPTH: 0
 
 secret_detection:
   stage: security
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH
   variables:
     GIT_DEPTH: 0
 
