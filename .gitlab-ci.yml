@@ -20,6 +20,8 @@ stages:
   - lint
   - test
   - security
+  - build
+  - release
 
 lint:
   stage: lint
@@ -59,3 +61,48 @@ secret_detection:
   stage: security
   variables:
     GIT_DEPTH: 0
+
+build-test:
+  stage: build
+  image: registry.gitlab.its.maine.edu/sysadmin-docker/ums-sysadmin-python-dev
+  rules:
+    - if: $CI_COMMIT_TAG
+      when: never
+    - if: $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH
+  script:
+    - pip3 install build twine
+    - python3 -m build
+
+publish-main:
+  stage: release
+  image: registry.gitlab.its.maine.edu/sysadmin-docker/ums-sysadmin-python-dev
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  script:
+    - pip3 install build twine
+    - BASE_VERSION=$(python3 -c "import re; print(re.search(r'(?m)^version\s*=\s*\"([^\"]+)\"', open('pyproject.toml').read()).group(1))")
+    - DEV_VERSION="${BASE_VERSION}.dev${CI_PIPELINE_ID}"
+    - sed -i "s/^version = \"${BASE_VERSION}\"/version = \"${DEV_VERSION}\"/" pyproject.toml
+    - python3 -m build
+    - TWINE_PASSWORD=${CI_JOB_TOKEN} TWINE_USERNAME=gitlab-ci-token python3 -m twine upload --repository-url ${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/pypi dist/*
+
+release_build:
+  stage: release
+  image: registry.gitlab.its.maine.edu/sysadmin-docker/ums-sysadmin-python-dev
+  rules:
+    - if: $CI_COMMIT_TAG
+  script:
+    - pip3 install build twine
+    - python3 -m build
+    - TWINE_PASSWORD=${CI_JOB_TOKEN} TWINE_USERNAME=gitlab-ci-token python3 -m twine upload --repository-url ${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/pypi dist/*
+
+release_job:
+  stage: release
+  image: registry.gitlab.com/gitlab-org/release-cli:latest
+  rules:
+    - if: $CI_COMMIT_TAG
+  script:
+    - echo "running release_job"
+  release:
+    tag_name: '$CI_COMMIT_TAG'
+    description: '$CI_COMMIT_TAG'
