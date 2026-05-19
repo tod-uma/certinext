@@ -1,0 +1,87 @@
+[
+  {
+    "_description": "createdAt is not a valid ISO 8601 string",
+    "domainId": "BadDate001",
+    "domainName": "bad-date.example.edu",
+    "organizationId": "FakeOrgId",
+    "organizationName": "Example University System",
+    "status": "ACTIVE",
+    "dcvStatus": "PENDING",
+    "createdAt": "not-a-date"
+  },
+  {
+    "_description": "createdAt is a bare integer (Unix epoch) instead of an ISO string",
+    "domainId": "BadDate002",
+    "domainName": "epoch-date.example.edu",
+    "organizationId": "FakeOrgId",
+    "organizationName": "Example University System",
+    "status": "ACTIVE",
+    "dcvStatus": "PENDING",
+    "createdAt": 1746396434
+  },
+  {
+    "_description": "createdAt is an empty string",
+    "domainId": "BadDate003",
+    "domainName": "empty-date.example.edu",
+    "organizationId": "FakeOrgId",
+    "organizationName": "Example University System",
+    "status": "ACTIVE",
+    "dcvStatus": "PENDING",
+    "createdAt": ""
+  },
+  {
+    "_description": "createdAt is explicitly null",
+    "domainId": "BadDate004",
+    "domainName": "null-date.example.edu",
+    "organizationId": "FakeOrgId",
+    "organizationName": "Example University System",
+    "status": "ACTIVE",
+    "dcvStatus": "PENDING",
+    "createdAt": null
+  },
+  {
+    "_description": "createdAt field is missing entirely",
+    "domainId": "MissingDate001",
+    "domainName": "no-date.example.edu",
+    "organizationId": "FakeOrgId",
+    "organizationName": "Example University System",
+    "status": "ACTIVE",
+    "dcvStatus": "PENDING"
+  },
+  {
+    "_description": "Only domainId present; all other fields missing"
+  },
+  {
+    "_description": "status and dcvStatus are integers instead of strings",
+    "domainId": "WrongTypes001",
+    "domainName": "wrong-types.example.edu",
+    "organizationId": "FakeOrgId",
+    "organizationName": "Example University System",
+    "status": 1,
+    "dcvStatus": 0,
+    "createdAt": "2026-05-04T21:27:14Z"
+  },
+  {
+    "_description": "domainName is null",
+    "domainId": "NullName001",
+    "domainName": null,
+    "organizationId": "FakeOrgId",
+    "organizationName": "Example University System",
+    "status": "ACTIVE",
+    "dcvStatus": "PENDING",
+    "createdAt": "2026-05-04T21:27:14Z"
+  },
+  {
+    "_description": "Unknown extra fields not part of the domain schema",
+    "domainId": "ExtraFields001",
+    "domainName": "extra-fields.example.edu",
+    "organizationId": "FakeOrgId",
+    "organizationName": "Example University System",
+    "status": "ACTIVE",
+    "dcvStatus": "PENDING",
+    "createdAt": "2026-05-04T21:27:14Z",
+    "unknownField": "some value",
+    "anotherUnknown": 42,
+    "nestedUnknown": {"key": "value"}
+  }
+]

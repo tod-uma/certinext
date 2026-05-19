@@ -18,7 +18,9 @@
 import argparse
 import json
 from typing import Any
+
 from tabulate import tabulate
+
 import certinext
 from certinext.domains import Domain
 
