@@ -71,3 +71,49 @@ jobs:
         with:
           files: artifacts/**/*.xml
           check_name: Test Results
+
+  publish-main:
+    runs-on: ubuntu-latest
+    needs: [lint, test]
+    if: false  # disabled — re-enable by restoring the condition below
+    # if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install build
+      - run: |
+          BASE_VERSION=$(python -c "import re; print(re.search(r'(?m)^version\s*=\s*\"([^\"]+)\"', open('pyproject.toml').read()).group(1))")
+          DEV_VERSION="${BASE_VERSION}.dev${{ github.run_id }}"
+          sed -i "s/^version = \"${BASE_VERSION}\"/version = \"${DEV_VERSION}\"/" pyproject.toml
+          python -m build
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://upload.pypi.pkg.github.com/tod-uma/
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+  release:
+    runs-on: ubuntu-latest
+    needs: [lint, test]
+    if: false  # disabled — re-enable by restoring the condition below
+    # if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    permissions:
+      packages: write
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install build
+      - run: python -m build
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://upload.pypi.pkg.github.com/tod-uma/
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
