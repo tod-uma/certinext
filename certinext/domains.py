@@ -300,18 +300,31 @@ class DomainAccessor:
         self,
         offset: int | None = None,
         limit: int | None = None,
+        search: str | None = None,
+        domain_status: str | None = None,
+        dcv_status: str | None = None,
         pattern: str | None = None,
     ) -> list[Domain]:
         """Return a list of all domains in the account.
 
+        Server-side filters (``search``, ``domain_status``, ``dcv_status``) are
+        passed to the API and reduce the data transferred. ``pattern`` is applied
+        client-side for cases that require regex matching.
+
         Args:
-            offset: Number of records to skip (for pagination).
-            limit: Maximum number of records to return.
-            pattern: Optional regex pattern to filter results by domain name.
-                Applied as a full match (``re.fullmatch``) with
-                ``re.IGNORECASE``. For example, ``r".*\\.maine\\.edu"`` returns
-                all maine.edu subdomains. To match multiple exact names, use
-                alternation: ``"maine\\.edu|umaine\\.edu"``.
+            offset: 0-based row offset for pagination.
+            limit: Page size (API default 50; keep ≤200 for performance).
+            search: Full FQDN for exact match (``maine.edu``) or a substring
+                for LIKE matching (``maine``). Maps to the API ``search`` param.
+            domain_status: Comma-separated status filter, e.g.
+                ``"ACTIVE,INACTIVE"``. Values: ACTIVE, INACTIVE, EXPIRED,
+                REVOKED.
+            dcv_status: Comma-separated DCV status filter, e.g.
+                ``"PENDING,REJECTED"``. Values: VERIFIED, PENDING, REJECTED,
+                EXPIRED.
+            pattern: Optional regex applied client-side after the API response.
+                Uses ``re.fullmatch`` with ``re.IGNORECASE``. Use when the API
+                ``search`` substring is not precise enough.
 
         Returns:
             List of `Domain` objects.
@@ -325,6 +338,12 @@ class DomainAccessor:
             params["offset"] = offset
         if limit is not None:
             params["limit"] = limit
+        if search is not None:
+            params["search"] = search
+        if domain_status is not None:
+            params["domainStatus"] = domain_status
+        if dcv_status is not None:
+            params["dcvStatus"] = dcv_status
         result = self._client.get(_BASE, params=params or None)
         raw: list[Any]
         if isinstance(result, list):
@@ -340,12 +359,16 @@ class DomainAccessor:
             domains = [d for d in domains if re.fullmatch(pattern, d.name or "", re.IGNORECASE)]
         return domains
 
-    def list_pending_dcv(self, pattern: str | None = None) -> list[Domain]:
+    def list_pending_dcv(self, search: str | None = None, pattern: str | None = None) -> list[Domain]:
         """Return all active domains that have not yet completed DCV verification.
 
+        Uses server-side ``dcvStatus`` and ``domainStatus`` filters to reduce
+        the data transferred. The returned list is further filtered by
+        :attr:`Domain.needs_dcv` to ensure consistency with the property.
+
         Args:
-            pattern: Optional regex pattern to filter by domain name.
-                See :meth:`list` for matching semantics.
+            search: Optional search string passed to the API. See :meth:`list`.
+            pattern: Optional client-side regex filter. See :meth:`list`.
 
         Returns:
             List of `Domain` objects where :attr:`Domain.needs_dcv` is ``True``.
@@ -354,7 +377,13 @@ class DomainAccessor:
             re.error: If ``pattern`` is not a valid regular expression.
             requests.HTTPError: On a non-2xx API response.
         """
-        return [d for d in self.list(pattern=pattern) if d.needs_dcv]
+        domains = self.list(
+            search=search,
+            pattern=pattern,
+            domain_status="ACTIVE",
+            dcv_status="PENDING,REJECTED,EXPIRED",
+        )
+        return [d for d in domains if d.needs_dcv]
 
     def get(self, domain_id_or_name: str) -> Domain:
         """Return a single domain by ID or by fully-qualified domain name.

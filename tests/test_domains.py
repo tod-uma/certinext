@@ -321,6 +321,33 @@ class TestDomainAccessorList:
         result = accessor.list(pattern=r".*\.edu")
         assert len(result) == 2
 
+    def test_search_passed_as_query_param(self, accessor: DomainAccessor, mock_client: MagicMock):
+        """list(search=) forwards the value as the 'search' query parameter."""
+        mock_client.get.return_value = []
+        accessor.list(search="maine.edu")
+        mock_client.get.assert_called_once_with("/api/certinext/v2/domains", params={"search": "maine.edu"})
+
+    def test_domain_status_passed_as_query_param(self, accessor: DomainAccessor, mock_client: MagicMock):
+        """list(domain_status=) forwards the value as the 'domainStatus' query parameter."""
+        mock_client.get.return_value = []
+        accessor.list(domain_status="ACTIVE")
+        mock_client.get.assert_called_once_with("/api/certinext/v2/domains", params={"domainStatus": "ACTIVE"})
+
+    def test_dcv_status_passed_as_query_param(self, accessor: DomainAccessor, mock_client: MagicMock):
+        """list(dcv_status=) forwards the value as the 'dcvStatus' query parameter."""
+        mock_client.get.return_value = []
+        accessor.list(dcv_status="PENDING")
+        mock_client.get.assert_called_once_with("/api/certinext/v2/domains", params={"dcvStatus": "PENDING"})
+
+    def test_server_side_params_combined(self, accessor: DomainAccessor, mock_client: MagicMock):
+        """list() can combine search, domain_status, and dcv_status in a single call."""
+        mock_client.get.return_value = []
+        accessor.list(search="maine", domain_status="ACTIVE", dcv_status="PENDING,REJECTED")
+        mock_client.get.assert_called_once_with(
+            "/api/certinext/v2/domains",
+            params={"search": "maine", "domainStatus": "ACTIVE", "dcvStatus": "PENDING,REJECTED"},
+        )
+
 
 class TestDomainAccessorListPendingDcv:
     """DomainAccessor.list_pending_dcv() returns only domains where needs_dcv is True."""
@@ -360,6 +387,15 @@ class TestDomainAccessorListPendingDcv:
         mock_client.get.return_value = [SAMPLE_DOMAIN_DATA_2]
         result = accessor.list_pending_dcv()
         assert all(isinstance(d, Domain) for d in result)
+
+    def test_passes_server_side_filters_to_api(self, accessor: DomainAccessor, mock_client: MagicMock):
+        """list_pending_dcv() passes domainStatus=ACTIVE and dcvStatus=PENDING,REJECTED,EXPIRED to the API."""
+        mock_client.get.return_value = []
+        accessor.list_pending_dcv()
+        mock_client.get.assert_called_once_with(
+            "/api/certinext/v2/domains",
+            params={"domainStatus": "ACTIVE", "dcvStatus": "PENDING,REJECTED,EXPIRED"},
+        )
 
 
 class TestDomainAccessorGet:
