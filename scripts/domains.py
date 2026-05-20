@@ -16,6 +16,7 @@
 """Manage CertiNext domains via the REST API."""
 
 import argparse
+import dataclasses
 import json
 from typing import Any
 
@@ -100,7 +101,7 @@ def cmd_deactivate(args: argparse.Namespace, sess: certinext.CertiNextSession) -
 
 
 def cmd_get_dcv(args: argparse.Namespace, sess: certinext.CertiNextSession) -> None:
-    _show_data(sess.domain.get(args.id).get_dcv(), args.json)
+    _show_data(dataclasses.asdict(sess.domain.get(args.id).get_dcv()), args.json)
 
 
 def cmd_verify_dcv(args: argparse.Namespace, sess: certinext.CertiNextSession) -> None:
