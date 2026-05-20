@@ -148,7 +148,7 @@ domain = sess.domain.create("newdomain.example.com")
 | Property | Type | Description |
 |---|---|---|
 | `id` | `str \| None` | Domain ID |
-| `name` | `str \| None` | Domain name (FQDN) |
+| `name` | `str \| None` | Domain name (FQDN). Settable, but only updates the local object — does not persist to the API. |
 | `status` | `str \| None` | `ACTIVE` or `INACTIVE` |
 | `dcv_status` | `str \| None` | `VERIFIED`, `PENDING`, `REJECTED`, `EXPIRED`, etc. |
 | `organization_id` | `str \| None` | Organization ID |
@@ -170,6 +170,16 @@ print(domain)
 repr(domain)
 # Domain(id='vuxwZgEXWWFXQQWC-...', name='maine.edu', status='ACTIVE', dcv_status='VERIFIED')
 ```
+
+#### DcvInfo
+
+`domain.get_dcv()` returns a `DcvInfo` dataclass with the following fields:
+
+| Field | Type | Description |
+|---|---|---|
+| `method` | `str` | DCV method in upper case: `DNS-TXT` or `HTTP-URL` |
+| `token` | `str` | Challenge value to publish (TXT record content for DNS-TXT, file token for HTTP-URL) |
+| `host` | `str` | Sub-domain prefix for the challenge record (e.g. `_emudhra-challenge`). Empty string if not returned by the API. |
 
 #### Domain methods
 
