@@ -147,6 +147,11 @@ class Domain:
 
     # --- public helpers ---
 
+    @property
+    def needs_dcv(self) -> bool:
+        """Return True if this domain is active and not yet DCV-verified."""
+        return self.status == "ACTIVE" and self.dcv_status != "VERIFIED"
+
     def as_dict(self) -> dict[str, Any]:
         """Return the raw API response dict for this domain."""
         return self._data
@@ -319,6 +324,17 @@ class DomainAccessor:
                     raw = val
                     break
         return [Domain(self._client, item) for item in raw]
+
+    def list_pending_dcv(self) -> list[Domain]:
+        """Return all active domains that have not yet completed DCV verification.
+
+        Returns:
+            List of `Domain` objects where :attr:`Domain.needs_dcv` is ``True``.
+
+        Raises:
+            requests.HTTPError: On a non-2xx API response.
+        """
+        return [d for d in self.list() if d.needs_dcv]
 
     def get(self, domain_id_or_name: str) -> Domain:
         """Return a single domain by ID or by fully-qualified domain name.

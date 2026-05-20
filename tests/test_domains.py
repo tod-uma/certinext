@@ -137,6 +137,44 @@ class TestDomainHelpers:
         assert domain.to_row()["name"] == "umaine.edu"
 
 
+class TestDomainNeedsDcv:
+    """Domain.needs_dcv reflects whether a domain requires DCV verification."""
+
+    def _domain(self, client: MagicMock, status: str, dcv_status: str) -> Domain:
+        return Domain(client, {"domainId": "x", "status": status, "dcvStatus": dcv_status})
+
+    def test_active_pending_needs_dcv(self, mock_client: MagicMock):
+        """ACTIVE + PENDING → needs_dcv is True."""
+        assert self._domain(mock_client, "ACTIVE", "PENDING").needs_dcv is True
+
+    def test_active_verified_does_not_need_dcv(self, mock_client: MagicMock):
+        """ACTIVE + VERIFIED → needs_dcv is False."""
+        assert self._domain(mock_client, "ACTIVE", "VERIFIED").needs_dcv is False
+
+    def test_inactive_pending_does_not_need_dcv(self, mock_client: MagicMock):
+        """INACTIVE domain is excluded even if DCV status is PENDING."""
+        assert self._domain(mock_client, "INACTIVE", "PENDING").needs_dcv is False
+
+    def test_active_failed_needs_dcv(self, mock_client: MagicMock):
+        """ACTIVE + FAILED → needs_dcv is True (any non-VERIFIED status counts)."""
+        assert self._domain(mock_client, "ACTIVE", "FAILED").needs_dcv is True
+
+    def test_sample_domain_data_does_not_need_dcv(self, domain: Domain):
+        """The standard fixture (ACTIVE/VERIFIED) has needs_dcv False."""
+        assert domain.needs_dcv is False
+
+    def test_sample_domain_data_2_needs_dcv(self, mock_client: MagicMock):
+        """SAMPLE_DOMAIN_DATA_2 (ACTIVE/PENDING) has needs_dcv True."""
+        from tests.conftest import SAMPLE_DOMAIN_DATA_2
+        d = Domain(mock_client, dict(SAMPLE_DOMAIN_DATA_2))
+        assert d.needs_dcv is True
+
+    def test_missing_status_does_not_need_dcv(self, mock_client: MagicMock):
+        """Domain with no status field has needs_dcv False (None != 'ACTIVE')."""
+        d = Domain(mock_client, {})
+        assert d.needs_dcv is False
+
+
 class TestDomainAPIMethods:
     """Domain API methods delegate to the underlying client with the correct paths."""
 
@@ -247,6 +285,46 @@ class TestDomainAccessorList:
         """list returns an empty list when the API returns an empty array."""
         mock_client.get.return_value = []
         assert accessor.list() == []
+
+
+class TestDomainAccessorListPendingDcv:
+    """DomainAccessor.list_pending_dcv() returns only domains where needs_dcv is True."""
+
+    def test_returns_only_pending_domains(self, accessor: DomainAccessor, mock_client: MagicMock):
+        """list_pending_dcv() excludes already-verified domains."""
+        mock_client.get.return_value = [SAMPLE_DOMAIN_DATA, SAMPLE_DOMAIN_DATA_2]
+        result = accessor.list_pending_dcv()
+        assert len(result) == 1
+        assert result[0].name == "maine.edu"
+
+    def test_returns_empty_when_all_verified(self, accessor: DomainAccessor, mock_client: MagicMock):
+        """list_pending_dcv() returns an empty list when all domains are verified."""
+        mock_client.get.return_value = [SAMPLE_DOMAIN_DATA]
+        assert accessor.list_pending_dcv() == []
+
+    def test_returns_all_when_all_pending(self, accessor: DomainAccessor, mock_client: MagicMock):
+        """list_pending_dcv() returns all domains when none are verified."""
+        pending_data = dict(SAMPLE_DOMAIN_DATA, dcvStatus="PENDING")
+        mock_client.get.return_value = [pending_data, SAMPLE_DOMAIN_DATA_2]
+        result = accessor.list_pending_dcv()
+        assert len(result) == 2
+
+    def test_returns_empty_when_no_domains(self, accessor: DomainAccessor, mock_client: MagicMock):
+        """list_pending_dcv() returns an empty list when there are no domains."""
+        mock_client.get.return_value = []
+        assert accessor.list_pending_dcv() == []
+
+    def test_excludes_inactive_domains(self, accessor: DomainAccessor, mock_client: MagicMock):
+        """list_pending_dcv() excludes INACTIVE domains even if DCV status is PENDING."""
+        inactive = dict(SAMPLE_DOMAIN_DATA_2, status="INACTIVE")
+        mock_client.get.return_value = [inactive]
+        assert accessor.list_pending_dcv() == []
+
+    def test_result_contains_domain_instances(self, accessor: DomainAccessor, mock_client: MagicMock):
+        """list_pending_dcv() returns Domain instances."""
+        mock_client.get.return_value = [SAMPLE_DOMAIN_DATA_2]
+        result = accessor.list_pending_dcv()
+        assert all(isinstance(d, Domain) for d in result)
 
 
 class TestDomainAccessorGet:
