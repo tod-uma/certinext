@@ -19,7 +19,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from certinext.domains import Domain, DomainAccessor
+from certinext.domains import DcvInfo, Domain, DomainAccessor
 from tests.conftest import SAMPLE_DOMAIN_DATA, SAMPLE_DOMAIN_DATA_2
 
 
@@ -158,10 +158,31 @@ class TestDomainAPIMethods:
         assert result is domain
 
     def test_get_dcv_calls_get(self, domain: Domain, mock_client: MagicMock):
-        """get_dcv() calls GET /domains/{id}/dcv."""
-        mock_client.get.return_value = {"method": "DNS", "token": "abc"}
-        domain.get_dcv()
+        """get_dcv() calls GET /domains/{id}/dcv and returns a DcvInfo."""
+        mock_client.get.return_value = {"dcvMethod": "DNS-TXT", "txtToken": "abc123"}
+        result = domain.get_dcv()
         mock_client.get.assert_called_once_with(f"/api/certinext/v2/domains/{domain.id}/dcv")
+        assert isinstance(result, DcvInfo)
+        assert result.method == "DNS-TXT"
+        assert result.token == "abc123"
+        assert result.host == ""
+
+    def test_get_dcv_normalises_alternate_field_names(self, domain: Domain, mock_client: MagicMock):
+        """get_dcv() handles the 'method'/'token'/'host' field name variants."""
+        mock_client.get.return_value = {"method": "dns-txt", "token": "xyz", "host": ""}
+        result = domain.get_dcv()
+        assert result.method == "DNS-TXT"
+        assert result.token == "xyz"
+        assert result.host == ""
+
+    def test_get_dcv_returns_empty_dcvinfo_on_bad_response(self, domain: Domain, mock_client: MagicMock):
+        """get_dcv() returns a DcvInfo with empty strings when the API returns a non-dict."""
+        mock_client.get.return_value = None
+        result = domain.get_dcv()
+        assert isinstance(result, DcvInfo)
+        assert result.method == ""
+        assert result.token == ""
+        assert result.host == ""
 
     def test_verify_calls_post(self, domain: Domain, mock_client: MagicMock):
         """verify() calls POST /domains/{id}/dcv/verify."""
@@ -169,26 +190,26 @@ class TestDomainAPIMethods:
         domain.verify()
         mock_client.post.assert_called_once_with(f"/api/certinext/v2/domains/{domain.id}/dcv/verify")
 
-    def test_change_dcv_method_calls_post_with_method(self, domain: Domain, mock_client: MagicMock):
-        """change_dcv_method() calls POST /domains/{id}/dcv/change-method with the method."""
-        mock_client.post.return_value = {"method": "DNS"}
-        domain.change_dcv_method("DNS")
-        mock_client.post.assert_called_once_with(
-            f"/api/certinext/v2/domains/{domain.id}/dcv/change-method",
-            json={"method": "DNS"},
+    def test_change_dcv_method_calls_patch_with_method(self, domain: Domain, mock_client: MagicMock):
+        """change_dcv_method() calls PATCH /domains/{id}/dcv/method with dcvMethod in lowercase."""
+        mock_client.patch.return_value = {"dcvMethod": "dns-txt"}
+        domain.change_dcv_method("DNS-TXT")
+        mock_client.patch.assert_called_once_with(
+            f"/api/certinext/v2/domains/{domain.id}/dcv/method",
+            json={"dcvMethod": "dns-txt"},
         )
 
     def test_last_dcv_attempt_calls_get(self, domain: Domain, mock_client: MagicMock):
-        """last_dcv_attempt() calls GET /domains/{id}/dcv/last-attempt."""
+        """last_dcv_attempt() calls GET /domains/{id}/dcv/attempts/last."""
         mock_client.get.return_value = {"attemptedAt": "2026-05-04T21:27:14Z"}
         domain.last_dcv_attempt()
-        mock_client.get.assert_called_once_with(f"/api/certinext/v2/domains/{domain.id}/dcv/last-attempt")
+        mock_client.get.assert_called_once_with(f"/api/certinext/v2/domains/{domain.id}/dcv/attempts/last")
 
     def test_dcv_attempt_history_calls_get(self, domain: Domain, mock_client: MagicMock):
-        """dcv_attempt_history() calls GET /domains/{id}/dcv/attempt-history."""
+        """dcv_attempt_history() calls GET /domains/{id}/dcv/attempts."""
         mock_client.get.return_value = []
         domain.dcv_attempt_history()
-        mock_client.get.assert_called_once_with(f"/api/certinext/v2/domains/{domain.id}/dcv/attempt-history")
+        mock_client.get.assert_called_once_with(f"/api/certinext/v2/domains/{domain.id}/dcv/attempts")
 
 
 class TestDomainAccessorList:
