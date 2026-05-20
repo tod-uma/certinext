@@ -28,7 +28,7 @@ Typical usage::
 """
 
 from .client import CertiNextClient
-from .domains import Domain, DomainAccessor
+from .domains import VALID_DCV_METHODS, Domain, DomainAccessor
 from .session import CertiNextSession
 
 
@@ -58,4 +58,11 @@ def session(
     return CertiNextSession(base_url, token_url, client_id, client_secret, scope)
 
 
-__all__ = ["session", "CertiNextClient", "CertiNextSession", "Domain", "DomainAccessor"]
+__all__ = [
+    "session",
+    "CertiNextClient",
+    "CertiNextSession",
+    "Domain",
+    "DomainAccessor",
+    "VALID_DCV_METHODS",
+]

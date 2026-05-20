@@ -106,6 +106,23 @@ class CertiNextClient:
         resp.raise_for_status()
         return resp.json()  # type: ignore[no-any-return]
 
+    def patch(self, path: str, json: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Send a PATCH request with an optional JSON body and return the parsed response.
+
+        Args:
+            path: API path relative to ``base_url``.
+            json: Optional request body to serialize as JSON.
+
+        Returns:
+            Parsed JSON response as a dict.
+
+        Raises:
+            requests.HTTPError: On a non-2xx response.
+        """
+        resp = self._session.patch(f"{self.base_url}{path}", headers=self._headers(), json=json)
+        resp.raise_for_status()
+        return resp.json()  # type: ignore[no-any-return]
+
     def delete(self, path: str) -> dict[str, Any] | None:
         """Send a DELETE request and return the parsed response body if present.
 

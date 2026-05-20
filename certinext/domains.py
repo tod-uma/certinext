@@ -12,12 +12,37 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
 from .client import CertiNextClient
 
 _BASE = "/api/certinext/v2/domains"
+
+VALID_DCV_METHODS: frozenset[str] = frozenset({"DNS-TXT", "HTTP-URL"})
+
+
+@dataclass
+class DcvInfo:
+    """Parsed DCV configuration returned by :meth:`Domain.get_dcv`.
+
+    Normalises the raw API response so callers don't need to handle multiple
+    field name variants or case differences.
+
+    Attributes:
+        method: DCV method in upper case, e.g. ``DNS-TXT`` or ``HTTP-URL``.
+        token:  Challenge value to publish. For DNS-TXT this is the TXT record
+                content (``txtToken``); for HTTP-URL it is the file token
+                (``fileToken``).
+        host:   Sub-domain prefix for the challenge record. The Domains API
+                does not return this field; the DNS-TXT challenge is implicitly
+                placed at ``_emudhra-challenge.<domain>``.
+    """
+
+    method: str
+    token: str
+    host: str
 
 
 class Domain:
@@ -164,17 +189,27 @@ class Domain:
         self._data = self._client.post(f"{_BASE}/{self.id}/deactivate")
         return self
 
-    def get_dcv(self) -> dict[str, Any]:
-        """Return the current Domain Control Validation status from the API.
+    def get_dcv(self) -> DcvInfo:
+        """Return the current Domain Control Validation configuration from the API.
 
         Returns:
-            Dict containing DCV details for this domain.
+            :class:`DcvInfo` with normalised ``method``, ``token``, and ``host``.
 
         Raises:
             requests.HTTPError: On a non-2xx API response.
         """
-        result = self._client.get(f"{_BASE}/{self.id}/dcv")
-        return result if isinstance(result, dict) else {}
+        raw: dict[str, Any] = self._client.get(f"{_BASE}/{self.id}/dcv")
+        if not isinstance(raw, dict):
+            raw = {}
+        method = (raw.get("dcvMethod") or raw.get("method") or "").upper()
+        if method and method not in VALID_DCV_METHODS:
+            raise ValueError(
+                f"Unexpected DCV method {method!r} from API; "
+                f"expected one of {sorted(VALID_DCV_METHODS)}"
+            )
+        token = raw.get("txtToken") or raw.get("fileToken") or raw.get("token") or raw.get("dnsContents") or ""
+        host = raw.get("dnsHost") or raw.get("host") or ""
+        return DcvInfo(method=method, token=token, host=host)
 
     def verify(self) -> dict[str, Any]:
         """Trigger DCV verification for this domain.
@@ -191,16 +226,23 @@ class Domain:
         """Change the DCV method for this domain.
 
         Args:
-            method: The new DCV method. Accepted values: ``EMAIL``, ``DNS``, ``HTTP``.
+            method: The new DCV method. Accepted values: ``DNS-TXT``, ``HTTP-URL``.
+                    Case-insensitive; normalized to lower case before sending.
 
         Returns:
             Dict containing the updated DCV configuration.
 
         Raises:
+            ValueError: If ``method`` is not one of the accepted DCV methods.
             requests.HTTPError: On a non-2xx API response.
         """
-        return self._client.post(
-            f"{_BASE}/{self.id}/dcv/change-method", json={"method": method}
+        method_upper = method.upper()
+        if method_upper not in VALID_DCV_METHODS:
+            raise ValueError(
+                f"Invalid DCV method {method_upper!r}; must be one of {sorted(VALID_DCV_METHODS)}"
+            )
+        return self._client.patch(
+            f"{_BASE}/{self.id}/dcv/method", json={"dcvMethod": method_upper.lower()}
         )
 
     def last_dcv_attempt(self) -> dict[str, Any]:
@@ -212,7 +254,7 @@ class Domain:
         Raises:
             requests.HTTPError: On a non-2xx API response.
         """
-        result = self._client.get(f"{_BASE}/{self.id}/dcv/last-attempt")
+        result = self._client.get(f"{_BASE}/{self.id}/dcv/attempts/last")
         return result if isinstance(result, dict) else {}
 
     def dcv_attempt_history(self) -> dict[str, Any] | list[Any]:
@@ -224,7 +266,7 @@ class Domain:
         Raises:
             requests.HTTPError: On a non-2xx API response.
         """
-        return self._client.get(f"{_BASE}/{self.id}/dcv/attempt-history")
+        return self._client.get(f"{_BASE}/{self.id}/dcv/attempts")
 
 
 class DomainAccessor:
