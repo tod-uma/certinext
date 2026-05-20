@@ -305,10 +305,10 @@ python scripts/domains.py --account-number ACCT --client-secret SECRET verify-dc
 
 #### change-dcv-method
 
-Change the DCV method for a domain (`EMAIL`, `DNS`, or `HTTP`).
+Change the DCV method for a domain. Accepted values: `DNS-TXT`, `HTTP-URL`.
 
 ```bash
-python scripts/domains.py --account-number ACCT --client-secret SECRET change-dcv-method DOMAIN_ID DNS
+python scripts/domains.py --account-number ACCT --client-secret SECRET change-dcv-method DOMAIN_ID DNS-TXT
 ```
 
 #### last-dcv-attempt
@@ -337,6 +337,44 @@ python scripts/domains.py --account-number ACCT --client-secret SECRET --json li
 
 ---
 
+## pending_dcv script
+
+`scripts/pending_dcv.py` lists every active domain that has not yet completed
+DCV verification. It is a quick read-only diagnostic — no changes are made to
+any domain.
+
+### Arguments
+
+Credentials are resolved in priority order: CLI argument → environment variable
+→ interactive prompt. Secrets are read with `getpass` and are not echoed.
+
+```
+--account-number ACCT   CertiNext account number (env: CERTINEXT_CLIENT_ID)
+--client-secret SECRET  OAuth2 client secret (env: CERTINEXT_CLIENT_SECRET)
+--base-url URL          API base URL (default: https://us-api.certinext.io)
+--token-url URL         Token endpoint URL (default: https://us-api.certinext.io/oauth/token)
+--pattern REGEX         Filter by domain name regex (re.fullmatch, case-insensitive)
+--json                  Output raw JSON instead of tabular format
+```
+
+### Examples
+
+```bash
+# List all domains pending DCV (prompts for credentials if not set in env)
+python scripts/pending_dcv.py
+
+# Filter to a specific subdomain pattern
+python scripts/pending_dcv.py --pattern ".*\.maine\.edu"
+
+# Raw JSON output for scripting
+python scripts/pending_dcv.py --json | jq '.[] | .domainName'
+
+# Credentials from environment variables (no prompts)
+CERTINEXT_CLIENT_ID=ACCT CERTINEXT_CLIENT_SECRET=SECRET python scripts/pending_dcv.py
+```
+
+---
+
 ## Project structure
 
 ```
@@ -348,4 +386,5 @@ certinext/
     session.py       # CertiNextSession (session.domain accessor)
 scripts/
     domains.py       # CLI for domain management
+    pending_dcv.py   # list all domains with pending DCV verification
 ```
