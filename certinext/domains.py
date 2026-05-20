@@ -316,10 +316,10 @@ class DomainAccessor:
             limit: Page size (API default 50; keep ≤200 for performance).
             search: Full FQDN for exact match (``maine.edu``) or a substring
                 for LIKE matching (``maine``). Maps to the API ``search`` param.
-                **Warning:** as of 2026-05-20 the API ``search`` parameter does
-                not appear to filter results; all domains are returned regardless.
-                Use ``pattern`` for reliable client-side filtering until this is
-                resolved.
+                **Warning:** the API ``search`` parameter is a confirmed vendor
+                bug (reported 2026-05-20); all domains are returned regardless
+                of the value passed. Use ``pattern`` for reliable client-side
+                filtering until CertiNext notifies the fix is deployed.
             domain_status: Comma-separated status filter, e.g.
                 ``"ACTIVE,INACTIVE"``. Values: ACTIVE, INACTIVE, EXPIRED,
                 REVOKED.
@@ -368,9 +368,9 @@ class DomainAccessor:
 
         Fetches all domains and filters client-side using :attr:`Domain.needs_dcv`.
 
-        **Note:** As of 2026-05-20 the API ``domainStatus`` and ``dcvStatus`` filter
-        parameters return a 400 error when used together; server-side filtering is
-        therefore disabled here until the API behaviour is clarified.
+        **Note:** The API ``domainStatus`` and ``dcvStatus`` filter parameters return
+        a 400 error when used together — confirmed vendor bug (reported 2026-05-20).
+        Server-side filtering is disabled until CertiNext notifies the fix is deployed.
 
         Args:
             search: Optional search string passed to the API. See :meth:`list`.

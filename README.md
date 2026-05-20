@@ -88,10 +88,10 @@ Filter by status server-side (reduces data transferred):
 domains = sess.domain.list(domain_status="ACTIVE", dcv_status="PENDING,REJECTED,EXPIRED")
 ```
 
-> **Note:** The API also accepts a `search` parameter intended for full-FQDN or
-> substring matching. As of 2026-05-20 it does not appear to filter results
-> server-side — all domains are returned regardless. Use `pattern` (below) for
-> reliable filtering until this is resolved.
+> **Note:** The API `search` parameter is a confirmed vendor bug (reported
+> 2026-05-20) — all domains are returned regardless of the value passed. Use
+> `pattern` (below) for reliable filtering until CertiNext notifies the fix is
+> deployed.
 
 Filter by name with a regex (applied client-side after the API response):
 
@@ -119,9 +119,10 @@ domains = sess.domain.list(domain_status="ACTIVE", pattern=r".*\.maine\.edu")
 verification. It fetches all domains and filters client-side using
 `domain.needs_dcv`.
 
-> **Note:** As of 2026-05-20 the API `domainStatus` and `dcvStatus` filter
-> parameters return a 400 error when used together. Server-side status filtering
-> is disabled until the API behaviour is clarified.
+> **Note:** The API `domainStatus` and `dcvStatus` filter parameters return a
+> 400 error when used together — confirmed vendor bug (reported 2026-05-20).
+> Server-side status filtering is disabled until CertiNext notifies the fix is
+> deployed.
 
 ```python
 pending = sess.domain.list_pending_dcv()
