@@ -388,14 +388,15 @@ class TestDomainAccessorListPendingDcv:
         result = accessor.list_pending_dcv()
         assert all(isinstance(d, Domain) for d in result)
 
-    def test_passes_server_side_filters_to_api(self, accessor: DomainAccessor, mock_client: MagicMock):
-        """list_pending_dcv() passes domainStatus=ACTIVE and dcvStatus=PENDING,REJECTED,EXPIRED to the API."""
+    def test_calls_list_with_no_server_side_filters(self, accessor: DomainAccessor, mock_client: MagicMock):
+        """list_pending_dcv() fetches all domains without server-side status filters.
+
+        The API returns 400 when domainStatus and dcvStatus are combined, so
+        filtering is done client-side via needs_dcv instead.
+        """
         mock_client.get.return_value = []
         accessor.list_pending_dcv()
-        mock_client.get.assert_called_once_with(
-            "/api/certinext/v2/domains",
-            params={"domainStatus": "ACTIVE", "dcvStatus": "PENDING,REJECTED,EXPIRED"},
-        )
+        mock_client.get.assert_called_once_with("/api/certinext/v2/domains", params=None)
 
 
 class TestDomainAccessorGet:

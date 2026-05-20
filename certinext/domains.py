@@ -366,9 +366,11 @@ class DomainAccessor:
     def list_pending_dcv(self, search: str | None = None, pattern: str | None = None) -> list[Domain]:
         """Return all active domains that have not yet completed DCV verification.
 
-        Uses server-side ``dcvStatus`` and ``domainStatus`` filters to reduce
-        the data transferred. The returned list is further filtered by
-        :attr:`Domain.needs_dcv` to ensure consistency with the property.
+        Fetches all domains and filters client-side using :attr:`Domain.needs_dcv`.
+
+        **Note:** As of 2026-05-20 the API ``domainStatus`` and ``dcvStatus`` filter
+        parameters return a 400 error when used together; server-side filtering is
+        therefore disabled here until the API behaviour is clarified.
 
         Args:
             search: Optional search string passed to the API. See :meth:`list`.
@@ -381,12 +383,7 @@ class DomainAccessor:
             re.error: If ``pattern`` is not a valid regular expression.
             requests.HTTPError: On a non-2xx API response.
         """
-        domains = self.list(
-            search=search,
-            pattern=pattern,
-            domain_status="ACTIVE",
-            dcv_status="PENDING,REJECTED,EXPIRED",
-        )
+        domains = self.list(search=search, pattern=pattern)
         return [d for d in domains if d.needs_dcv]
 
     def get(self, domain_id_or_name: str) -> Domain:

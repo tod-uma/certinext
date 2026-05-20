@@ -116,8 +116,12 @@ domains = sess.domain.list(domain_status="ACTIVE", pattern=r".*\.maine\.edu")
 #### List domains needing DCV
 
 `list_pending_dcv()` returns active domains that have not yet completed DCV
-verification. It applies server-side status filters automatically and is
-equivalent to `list()` filtered by `domain.needs_dcv`.
+verification. It fetches all domains and filters client-side using
+`domain.needs_dcv`.
+
+> **Note:** As of 2026-05-20 the API `domainStatus` and `dcvStatus` filter
+> parameters return a 400 error when used together. Server-side status filtering
+> is disabled until the API behaviour is clarified.
 
 ```python
 pending = sess.domain.list_pending_dcv()
