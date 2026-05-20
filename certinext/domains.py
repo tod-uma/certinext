@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import re
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -295,17 +296,28 @@ class DomainAccessor:
         """
         self._client = client
 
-    def list(self, offset: int | None = None, limit: int | None = None) -> list[Domain]:
+    def list(
+        self,
+        offset: int | None = None,
+        limit: int | None = None,
+        pattern: str | None = None,
+    ) -> list[Domain]:
         """Return a list of all domains in the account.
 
         Args:
             offset: Number of records to skip (for pagination).
             limit: Maximum number of records to return.
+            pattern: Optional regex pattern to filter results by domain name.
+                Applied as a full match (``re.fullmatch``) with
+                ``re.IGNORECASE``. For example, ``r".*\\.maine\\.edu"`` returns
+                all maine.edu subdomains. To match multiple exact names, use
+                alternation: ``"maine\\.edu|umaine\\.edu"``.
 
         Returns:
             List of `Domain` objects.
 
         Raises:
+            re.error: If ``pattern`` is not a valid regular expression.
             requests.HTTPError: On a non-2xx API response.
         """
         params: dict[str, Any] = {}
@@ -323,18 +335,26 @@ class DomainAccessor:
                 if isinstance(val, list):
                     raw = val
                     break
-        return [Domain(self._client, item) for item in raw]
+        domains = [Domain(self._client, item) for item in raw]
+        if pattern is not None:
+            domains = [d for d in domains if re.fullmatch(pattern, d.name or "", re.IGNORECASE)]
+        return domains
 
-    def list_pending_dcv(self) -> list[Domain]:
+    def list_pending_dcv(self, pattern: str | None = None) -> list[Domain]:
         """Return all active domains that have not yet completed DCV verification.
+
+        Args:
+            pattern: Optional regex pattern to filter by domain name.
+                See :meth:`list` for matching semantics.
 
         Returns:
             List of `Domain` objects where :attr:`Domain.needs_dcv` is ``True``.
 
         Raises:
+            re.error: If ``pattern`` is not a valid regular expression.
             requests.HTTPError: On a non-2xx API response.
         """
-        return [d for d in self.list() if d.needs_dcv]
+        return [d for d in self.list(pattern=pattern) if d.needs_dcv]
 
     def get(self, domain_id_or_name: str) -> Domain:
         """Return a single domain by ID or by fully-qualified domain name.

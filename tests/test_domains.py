@@ -286,6 +286,41 @@ class TestDomainAccessorList:
         mock_client.get.return_value = []
         assert accessor.list() == []
 
+    def test_pattern_filters_by_exact_name(self, accessor: DomainAccessor, mock_client: MagicMock):
+        """list(pattern=) returns only domains whose name fully matches the pattern."""
+        mock_client.get.return_value = [SAMPLE_DOMAIN_DATA, SAMPLE_DOMAIN_DATA_2]
+        result = accessor.list(pattern="umaine\\.edu")
+        assert len(result) == 1
+        assert result[0].name == "umaine.edu"
+
+    def test_pattern_alternation_matches_multiple(self, accessor: DomainAccessor, mock_client: MagicMock):
+        """list(pattern=) with alternation returns all matching domains."""
+        mock_client.get.return_value = [SAMPLE_DOMAIN_DATA, SAMPLE_DOMAIN_DATA_2]
+        result = accessor.list(pattern="umaine\\.edu|maine\\.edu")
+        assert len(result) == 2
+
+    def test_pattern_is_case_insensitive(self, accessor: DomainAccessor, mock_client: MagicMock):
+        """list(pattern=) matches regardless of case."""
+        mock_client.get.return_value = [SAMPLE_DOMAIN_DATA]
+        result = accessor.list(pattern="UMAINE\\.EDU")
+        assert len(result) == 1
+
+    def test_pattern_no_match_returns_empty(self, accessor: DomainAccessor, mock_client: MagicMock):
+        """list(pattern=) returns an empty list when no domains match."""
+        mock_client.get.return_value = [SAMPLE_DOMAIN_DATA, SAMPLE_DOMAIN_DATA_2]
+        assert accessor.list(pattern="notfound\\.edu") == []
+
+    def test_pattern_none_returns_all(self, accessor: DomainAccessor, mock_client: MagicMock):
+        """list(pattern=None) returns all domains unfiltered."""
+        mock_client.get.return_value = [SAMPLE_DOMAIN_DATA, SAMPLE_DOMAIN_DATA_2]
+        assert len(accessor.list(pattern=None)) == 2
+
+    def test_pattern_wildcard_matches_subdomain(self, accessor: DomainAccessor, mock_client: MagicMock):
+        """list(pattern=) supports regex wildcards for subdomain matching."""
+        mock_client.get.return_value = [SAMPLE_DOMAIN_DATA, SAMPLE_DOMAIN_DATA_2]
+        result = accessor.list(pattern=r".*\.edu")
+        assert len(result) == 2
+
 
 class TestDomainAccessorListPendingDcv:
     """DomainAccessor.list_pending_dcv() returns only domains where needs_dcv is True."""
