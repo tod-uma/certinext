@@ -81,6 +81,51 @@ Paginate with `offset` and `limit`:
 page = sess.domain.list(offset=50, limit=25)
 ```
 
+Filter by status server-side (reduces data transferred):
+
+```python
+# Only active domains with pending or rejected DCV
+domains = sess.domain.list(domain_status="ACTIVE", dcv_status="PENDING,REJECTED,EXPIRED")
+```
+
+> **Note:** The API also accepts a `search` parameter intended for full-FQDN or
+> substring matching. As of 2026-05-20 it does not appear to filter results
+> server-side — all domains are returned regardless. Use `pattern` (below) for
+> reliable filtering until this is resolved.
+
+Filter by name with a regex (applied client-side after the API response):
+
+```python
+# Exact match
+domains = sess.domain.list(pattern=r"maine\.edu")
+
+# Multiple names via alternation
+domains = sess.domain.list(pattern=r"maine\.edu|umaine\.edu")
+
+# Subdomain wildcard
+domains = sess.domain.list(pattern=r".*\.maine\.edu")
+```
+
+`pattern` uses `re.fullmatch` with `re.IGNORECASE`, so it must match the entire
+domain name. Combine with status filters to narrow the API response first:
+
+```python
+domains = sess.domain.list(domain_status="ACTIVE", pattern=r".*\.maine\.edu")
+```
+
+#### List domains needing DCV
+
+`list_pending_dcv()` returns active domains that have not yet completed DCV
+verification. It applies server-side status filters automatically and is
+equivalent to `list()` filtered by `domain.needs_dcv`.
+
+```python
+pending = sess.domain.list_pending_dcv()
+
+# Narrow to a subset by name
+pending = sess.domain.list_pending_dcv(pattern=r".*\.maine\.edu")
+```
+
 #### Get a domain
 
 Look up by domain name or by domain ID:
@@ -105,10 +150,11 @@ domain = sess.domain.create("newdomain.example.com")
 | `id` | `str \| None` | Domain ID |
 | `name` | `str \| None` | Domain name (FQDN) |
 | `status` | `str \| None` | `ACTIVE` or `INACTIVE` |
-| `dcv_status` | `str \| None` | `VERIFIED`, `PENDING`, etc. |
+| `dcv_status` | `str \| None` | `VERIFIED`, `PENDING`, `REJECTED`, `EXPIRED`, etc. |
 | `organization_id` | `str \| None` | Organization ID |
 | `organization_name` | `str \| None` | Organization display name |
 | `created_at` | `datetime \| None` | Creation timestamp (timezone-aware UTC) |
+| `needs_dcv` | `bool` | `True` if status is `ACTIVE` and `dcv_status` is not `VERIFIED` |
 
 `Domain` objects support `str()` and `repr()`:
 
@@ -135,9 +181,13 @@ domain.refresh()
 domain.deactivate()
 
 # DCV — Domain Control Validation
-dcv = domain.get_dcv()             # current DCV info
+dcv = domain.get_dcv()             # returns DcvInfo(method, token, host)
+print(dcv.method)                  # e.g. "DNS-TXT" or "HTTP-URL"
+print(dcv.token)                   # challenge value to publish
+print(dcv.host)                    # sub-domain prefix for the challenge record
+
 result = domain.verify()           # trigger verification
-domain.change_dcv_method("DNS")    # change method: EMAIL, DNS, or HTTP
+domain.change_dcv_method("DNS-TXT")   # accepted values: "DNS-TXT", "HTTP-URL"
 attempt = domain.last_dcv_attempt()
 history = domain.dcv_attempt_history()
 
@@ -155,8 +205,18 @@ sess = certinext.session(
     client_secret="YOUR_CLIENT_SECRET",
 )
 
+# list_pending_dcv() uses server-side filters to fetch only ACTIVE domains
+# with non-VERIFIED DCV status, then returns those where needs_dcv is True.
+for domain in sess.domain.list_pending_dcv():
+    print(f"Verifying {domain.name} ...")
+    domain.verify()
+```
+
+Or check `needs_dcv` manually if you already have a full domain list:
+
+```python
 for domain in sess.domain.list():
-    if domain.dcv_status == "PENDING":
+    if domain.needs_dcv:
         print(f"Verifying {domain.name} ...")
         domain.verify()
 ```
