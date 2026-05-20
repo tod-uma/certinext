@@ -154,8 +154,8 @@ def build_parser() -> argparse.ArgumentParser:
     list_p.add_argument("--offset", type=int, help="Number of records to skip")
     list_p.add_argument("--limit", type=int, help="Maximum records to return")
 
-    get_p = sub.add_parser("get", help="Get a single domain by ID")
-    get_p.add_argument("id", help="Domain ID")
+    get_p = sub.add_parser("get", help="Get a single domain by name or ID")
+    get_p.add_argument("id", metavar="NAME_OR_ID", help="Domain name (e.g. maine.edu) or domain ID")
 
     create_p = sub.add_parser("create", help="Create a new domain")
     create_p.add_argument("name", help="Domain name (e.g. example.com)")
@@ -174,7 +174,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     change_dcv_p = sub.add_parser("change-dcv-method", help="Change the DCV method for a domain")
     change_dcv_p.add_argument("id", help="Domain ID")
-    change_dcv_p.add_argument("method", help="DCV method (e.g. EMAIL, DNS, HTTP)")
+    change_dcv_p.add_argument("method", help="DCV method: DNS-TXT or HTTP-URL")
 
     last_attempt_p = sub.add_parser("last-dcv-attempt", help="Get the last DCV attempt for a domain")
     last_attempt_p.add_argument("id", help="Domain ID")
