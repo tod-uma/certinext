@@ -105,7 +105,7 @@ class TestDomainListFixture:
         """str() succeeds for every domain and includes the domain name."""
         for d in domains_list:
             text = str(d)
-            assert d.name in text
+            assert d.name is not None and d.name in text
 
     def test_repr_for_every_domain(self, domains_list: list[Domain]):
         """repr() succeeds for every domain."""
