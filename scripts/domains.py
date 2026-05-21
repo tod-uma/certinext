@@ -75,7 +75,7 @@ def cmd_list(args: argparse.Namespace, sess: certinext.CertiNextSession) -> None
         kwargs["offset"] = args.offset
     if args.limit is not None:
         kwargs["limit"] = args.limit
-    _show_domains(sess.domain.list(**kwargs), args.json)
+    _show_domains(sess.domain.get_list(**kwargs), args.json)
 
 
 def cmd_get(args: argparse.Namespace, sess: certinext.CertiNextSession) -> None:

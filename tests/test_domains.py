@@ -256,7 +256,7 @@ class TestDomainAccessorList:
     def test_returns_list_of_domain_objects(self, accessor: DomainAccessor, mock_client: MagicMock):
         """list() wraps each item in a Domain and returns a list."""
         mock_client.get.return_value = [SAMPLE_DOMAIN_DATA, SAMPLE_DOMAIN_DATA_2]
-        domains = accessor.list()
+        domains = accessor.get_list()
         assert len(domains) == 2
         assert all(isinstance(d, Domain) for d in domains)
 
@@ -266,83 +266,83 @@ class TestDomainAccessorList:
             "total": 2,
             "domains": [SAMPLE_DOMAIN_DATA, SAMPLE_DOMAIN_DATA_2],
         }
-        domains = accessor.list()
+        domains = accessor.get_list()
         assert len(domains) == 2
 
     def test_passes_offset_and_limit(self, accessor: DomainAccessor, mock_client: MagicMock):
         """list() forwards offset and limit as query parameters."""
         mock_client.get.return_value = []
-        accessor.list(offset=10, limit=5)
+        accessor.get_list(offset=10, limit=5)
         mock_client.get.assert_called_once_with("/api/certinext/v2/domains", params={"offset": 10, "limit": 5})
 
     def test_no_params_when_not_specified(self, accessor: DomainAccessor, mock_client: MagicMock):
         """list() passes params=None when offset and limit are not given."""
         mock_client.get.return_value = []
-        accessor.list()
+        accessor.get_list()
         mock_client.get.assert_called_once_with("/api/certinext/v2/domains", params=None)
 
     def test_returns_empty_list_when_no_domains(self, accessor: DomainAccessor, mock_client: MagicMock):
         """list returns an empty list when the API returns an empty array."""
         mock_client.get.return_value = []
-        assert accessor.list() == []
+        assert accessor.get_list() == []
 
     def test_pattern_filters_by_exact_name(self, accessor: DomainAccessor, mock_client: MagicMock):
         """list(pattern=) returns only domains whose name fully matches the pattern."""
         mock_client.get.return_value = [SAMPLE_DOMAIN_DATA, SAMPLE_DOMAIN_DATA_2]
-        result = accessor.list(pattern="umaine\\.edu")
+        result = accessor.get_list(pattern="umaine\\.edu")
         assert len(result) == 1
         assert result[0].name == "umaine.edu"
 
     def test_pattern_alternation_matches_multiple(self, accessor: DomainAccessor, mock_client: MagicMock):
         """list(pattern=) with alternation returns all matching domains."""
         mock_client.get.return_value = [SAMPLE_DOMAIN_DATA, SAMPLE_DOMAIN_DATA_2]
-        result = accessor.list(pattern="umaine\\.edu|maine\\.edu")
+        result = accessor.get_list(pattern="umaine\\.edu|maine\\.edu")
         assert len(result) == 2
 
     def test_pattern_is_case_insensitive(self, accessor: DomainAccessor, mock_client: MagicMock):
         """list(pattern=) matches regardless of case."""
         mock_client.get.return_value = [SAMPLE_DOMAIN_DATA]
-        result = accessor.list(pattern="UMAINE\\.EDU")
+        result = accessor.get_list(pattern="UMAINE\\.EDU")
         assert len(result) == 1
 
     def test_pattern_no_match_returns_empty(self, accessor: DomainAccessor, mock_client: MagicMock):
         """list(pattern=) returns an empty list when no domains match."""
         mock_client.get.return_value = [SAMPLE_DOMAIN_DATA, SAMPLE_DOMAIN_DATA_2]
-        assert accessor.list(pattern="notfound\\.edu") == []
+        assert accessor.get_list(pattern="notfound\\.edu") == []
 
     def test_pattern_none_returns_all(self, accessor: DomainAccessor, mock_client: MagicMock):
         """list(pattern=None) returns all domains unfiltered."""
         mock_client.get.return_value = [SAMPLE_DOMAIN_DATA, SAMPLE_DOMAIN_DATA_2]
-        assert len(accessor.list(pattern=None)) == 2
+        assert len(accessor.get_list(pattern=None)) == 2
 
     def test_pattern_wildcard_matches_subdomain(self, accessor: DomainAccessor, mock_client: MagicMock):
         """list(pattern=) supports regex wildcards for subdomain matching."""
         mock_client.get.return_value = [SAMPLE_DOMAIN_DATA, SAMPLE_DOMAIN_DATA_2]
-        result = accessor.list(pattern=r".*\.edu")
+        result = accessor.get_list(pattern=r".*\.edu")
         assert len(result) == 2
 
     def test_search_passed_as_query_param(self, accessor: DomainAccessor, mock_client: MagicMock):
         """list(search=) forwards the value as the 'search' query parameter."""
         mock_client.get.return_value = []
-        accessor.list(search="maine.edu")
+        accessor.get_list(search="maine.edu")
         mock_client.get.assert_called_once_with("/api/certinext/v2/domains", params={"search": "maine.edu"})
 
     def test_domain_status_passed_as_query_param(self, accessor: DomainAccessor, mock_client: MagicMock):
         """list(domain_status=) forwards the value as the 'domainStatus' query parameter."""
         mock_client.get.return_value = []
-        accessor.list(domain_status="ACTIVE")
+        accessor.get_list(domain_status="ACTIVE")
         mock_client.get.assert_called_once_with("/api/certinext/v2/domains", params={"domainStatus": "ACTIVE"})
 
     def test_dcv_status_passed_as_query_param(self, accessor: DomainAccessor, mock_client: MagicMock):
         """list(dcv_status=) forwards the value as the 'dcvStatus' query parameter."""
         mock_client.get.return_value = []
-        accessor.list(dcv_status="PENDING")
+        accessor.get_list(dcv_status="PENDING")
         mock_client.get.assert_called_once_with("/api/certinext/v2/domains", params={"dcvStatus": "PENDING"})
 
     def test_server_side_params_combined(self, accessor: DomainAccessor, mock_client: MagicMock):
         """list() can combine search, domain_status, and dcv_status in a single call."""
         mock_client.get.return_value = []
-        accessor.list(search="maine", domain_status="ACTIVE", dcv_status="PENDING,REJECTED")
+        accessor.get_list(search="maine", domain_status="ACTIVE", dcv_status="PENDING,REJECTED")
         mock_client.get.assert_called_once_with(
             "/api/certinext/v2/domains",
             params={"search": "maine", "domainStatus": "ACTIVE", "dcvStatus": "PENDING,REJECTED"},

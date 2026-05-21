@@ -70,7 +70,7 @@ The session obtains and caches an OAuth 2.0 bearer token automatically, refreshi
 #### List all domains
 
 ```python
-domains = sess.domain.list()
+domains = sess.domain.get_list()
 for d in domains:
     print(d)
 ```
@@ -78,14 +78,14 @@ for d in domains:
 Paginate with `offset` and `limit`:
 
 ```python
-page = sess.domain.list(offset=50, limit=25)
+page = sess.domain.get_list(offset=50, limit=25)
 ```
 
 Filter by status server-side (reduces data transferred):
 
 ```python
 # Only active domains with pending or rejected DCV
-domains = sess.domain.list(domain_status="ACTIVE", dcv_status="PENDING,REJECTED,EXPIRED")
+domains = sess.domain.get_list(domain_status="ACTIVE", dcv_status="PENDING,REJECTED,EXPIRED")
 ```
 
 > **Note:** The API `search` parameter is a confirmed vendor bug (reported
@@ -97,20 +97,20 @@ Filter by name with a regex (applied client-side after the API response):
 
 ```python
 # Exact match
-domains = sess.domain.list(pattern=r"maine\.edu")
+domains = sess.domain.get_list(pattern=r"maine\.edu")
 
 # Multiple names via alternation
-domains = sess.domain.list(pattern=r"maine\.edu|umaine\.edu")
+domains = sess.domain.get_list(pattern=r"maine\.edu|umaine\.edu")
 
 # Subdomain wildcard
-domains = sess.domain.list(pattern=r".*\.maine\.edu")
+domains = sess.domain.get_list(pattern=r".*\.maine\.edu")
 ```
 
 `pattern` uses `re.fullmatch` with `re.IGNORECASE`, so it must match the entire
 domain name. Combine with status filters to narrow the API response first:
 
 ```python
-domains = sess.domain.list(domain_status="ACTIVE", pattern=r".*\.maine\.edu")
+domains = sess.domain.get_list(domain_status="ACTIVE", pattern=r".*\.maine\.edu")
 ```
 
 #### List domains needing DCV
@@ -230,7 +230,7 @@ for domain in sess.domain.list_pending_dcv():
 Or check `needs_dcv` manually if you already have a full domain list:
 
 ```python
-for domain in sess.domain.list():
+for domain in sess.domain.get_list():
     if domain.needs_dcv:
         print(f"Verifying {domain.name} ...")
         domain.verify()

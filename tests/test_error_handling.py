@@ -198,23 +198,23 @@ class TestDomainAccessorBadResponses:
     def test_list_with_empty_dict_returns_empty_list(
         self, accessor: DomainAccessor, mock_client: MagicMock
     ):
-        """list() returns [] when the API returns an empty dict."""
+        """get_list() returns [] when the API returns an empty dict."""
         mock_client.get.return_value = {}
-        assert accessor.list() == []
+        assert accessor.get_list() == []
 
     def test_list_with_dict_containing_no_list_values_returns_empty(
         self, accessor: DomainAccessor, mock_client: MagicMock
     ):
-        """list() returns [] when the dict response has no list-typed values."""
+        """get_list() returns [] when the dict response has no list-typed values."""
         mock_client.get.return_value = {"total": 0, "page": 1}
-        assert accessor.list() == []
+        assert accessor.get_list() == []
 
     def test_list_with_empty_nested_list_returns_empty(
         self, accessor: DomainAccessor, mock_client: MagicMock
     ):
-        """list() returns [] when the nested list in a paginated response is empty."""
+        """get_list() returns [] when the nested list in a paginated response is empty."""
         mock_client.get.return_value = {"total": 0, "domains": []}
-        assert accessor.list() == []
+        assert accessor.get_list() == []
 
     def test_get_by_id_raises_value_error_when_api_returns_list(
         self, accessor: DomainAccessor, mock_client: MagicMock

@@ -204,9 +204,8 @@ class Domain:
         Raises:
             requests.HTTPError: On a non-2xx API response.
         """
-        raw: dict[str, Any] = self._client.get(f"{_BASE}/{self.id}/dcv")
-        if not isinstance(raw, dict):
-            raw = {}
+        result: dict[str, Any] | list[Any] = self._client.get(f"{_BASE}/{self.id}/dcv")
+        raw: dict[str, Any] = result if isinstance(result, dict) else {}
         method = (raw.get("dcvMethod") or raw.get("method") or "").upper()
         if method and method not in VALID_DCV_METHODS:
             raise ValueError(
@@ -296,7 +295,7 @@ class DomainAccessor:
         """
         self._client = client
 
-    def list(
+    def get_list(
         self,
         offset: int | None = None,
         limit: int | None = None,
@@ -383,7 +382,7 @@ class DomainAccessor:
             re.error: If ``pattern`` is not a valid regular expression.
             requests.HTTPError: On a non-2xx API response.
         """
-        domains = self.list(search=search, pattern=pattern)
+        domains = self.get_list(search=search, pattern=pattern)
         return [d for d in domains if d.needs_dcv]
 
     def get(self, domain_id_or_name: str) -> Domain:
@@ -406,7 +405,7 @@ class DomainAccessor:
         """
         if "." in domain_id_or_name:
             name = domain_id_or_name.lower()
-            for domain in self.list():
+            for domain in self.get_list():
                 if (domain.name or "").lower() == name:
                     return domain
             raise KeyError(f"No domain found with name {domain_id_or_name!r}")

@@ -119,9 +119,9 @@ class TestDomainAccessorWithFullList:
     def test_list_returns_all_43_domains(
         self, accessor: DomainAccessor, mock_client: MagicMock, domains_list_data: list[dict]
     ):
-        """DomainAccessor.list() returns all 43 Domain objects from a full list response."""
+        """DomainAccessor.get_list() returns all 43 Domain objects from a full list response."""
         mock_client.get.return_value = domains_list_data
-        result = accessor.list()
+        result = accessor.get_list()
         assert len(result) == 43
         assert all(isinstance(d, Domain) for d in result)
 
