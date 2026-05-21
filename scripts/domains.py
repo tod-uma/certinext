@@ -70,7 +70,7 @@ def _show_data(data: dict[str, Any] | list[Any], use_json: bool) -> None:
 # --- subcommand handlers ---
 
 def cmd_list(args: argparse.Namespace, sess: certinext.CertiNextSession) -> None:
-    kwargs: dict[str, int] = {}
+    kwargs: dict[str, Any] = {}
     if args.offset is not None:
         kwargs["offset"] = args.offset
     if args.limit is not None:

@@ -22,7 +22,7 @@ import requests
 from certinext.client import CertiNextClient
 
 
-def _make_client() -> CertiNextClient:
+def _make_client() -> tuple[CertiNextClient, MagicMock]:
     """Return a CertiNextClient with auth and session mocked out."""
     client = CertiNextClient(
         base_url="https://us-api.certinext.io",
@@ -32,8 +32,9 @@ def _make_client() -> CertiNextClient:
     )
     client._auth = MagicMock()
     client._auth.get_token.return_value = "test-token"
-    client._session = MagicMock()
-    return client
+    mock_session = MagicMock()
+    client._session = mock_session  # type: ignore[assignment]
+    return client, mock_session
 
 
 def _ok_response(payload: object = None) -> MagicMock:
@@ -50,13 +51,13 @@ class TestHeaders:
 
     def test_includes_bearer_token(self):
         """Authorization header contains the Bearer token from auth."""
-        client = _make_client()
+        client, _ = _make_client()
         headers = client._headers()
         assert headers["Authorization"] == "Bearer test-token"
 
     def test_includes_json_content_type(self):
         """Content-Type and Accept headers are set to application/json."""
-        client = _make_client()
+        client, _ = _make_client()
         headers = client._headers()
         assert headers["Content-Type"] == "application/json"
         assert headers["Accept"] == "application/json"
@@ -67,10 +68,10 @@ class TestGet:
 
     def test_calls_correct_url(self):
         """get() constructs the full URL from base_url and path."""
-        client = _make_client()
-        client._session.get.return_value = _ok_response({"domainId": "abc"})
+        client, mock_session = _make_client()
+        mock_session.get.return_value = _ok_response({"domainId": "abc"})
         client.get("/api/certinext/v2/domains/abc")
-        client._session.get.assert_called_once_with(
+        mock_session.get.assert_called_once_with(
             "https://us-api.certinext.io/api/certinext/v2/domains/abc",
             headers=client._headers(),
             params=None,
@@ -78,18 +79,18 @@ class TestGet:
 
     def test_passes_query_params(self):
         """get() forwards the params argument to the underlying session."""
-        client = _make_client()
-        client._session.get.return_value = _ok_response([])
+        client, mock_session = _make_client()
+        mock_session.get.return_value = _ok_response([])
         client.get("/api/certinext/v2/domains", params={"limit": 10})
-        _, kwargs = client._session.get.call_args
+        _, kwargs = mock_session.get.call_args
         assert kwargs["params"] == {"limit": 10}
 
     def test_raises_on_http_error(self):
         """get() propagates HTTPError when raise_for_status raises."""
-        client = _make_client()
+        client, mock_session = _make_client()
         resp = MagicMock()
         resp.raise_for_status.side_effect = requests.HTTPError("404")
-        client._session.get.return_value = resp
+        mock_session.get.return_value = resp
         with pytest.raises(requests.HTTPError):
             client.get("/api/certinext/v2/domains/missing")
 
@@ -99,16 +100,16 @@ class TestPost:
 
     def test_calls_correct_url_with_json(self):
         """post() constructs the full URL and passes the json body."""
-        client = _make_client()
-        client._session.post.return_value = _ok_response({"domainId": "new"})
+        client, mock_session = _make_client()
+        mock_session.post.return_value = _ok_response({"domainId": "new"})
         client.post("/api/certinext/v2/domains", json={"name": "test.example.edu"})
-        _, kwargs = client._session.post.call_args
+        _, kwargs = mock_session.post.call_args
         assert kwargs["json"] == {"name": "test.example.edu"}
 
     def test_returns_parsed_json(self):
         """post() returns the parsed JSON payload from the response."""
-        client = _make_client()
-        client._session.post.return_value = _ok_response({"domainId": "xyz"})
+        client, mock_session = _make_client()
+        mock_session.post.return_value = _ok_response({"domainId": "xyz"})
         result = client.post("/api/certinext/v2/domains", json={"name": "test.example.edu"})
         assert result == {"domainId": "xyz"}
 
@@ -118,21 +119,21 @@ class TestDelete:
 
     def test_returns_none_when_no_body(self):
         """delete() returns None when the response has no content."""
-        client = _make_client()
+        client, mock_session = _make_client()
         resp = MagicMock()
         resp.raise_for_status.return_value = None
         resp.content = b""
-        client._session.delete.return_value = resp
+        mock_session.delete.return_value = resp
         result = client.delete("/api/certinext/v2/domains/abc")
         assert result is None
 
     def test_returns_parsed_json_when_body_present(self):
         """delete() returns the parsed JSON body when content is present."""
-        client = _make_client()
+        client, mock_session = _make_client()
         resp = MagicMock()
         resp.raise_for_status.return_value = None
         resp.content = b'{"status": "deleted"}'
         resp.json.return_value = {"status": "deleted"}
-        client._session.delete.return_value = resp
+        mock_session.delete.return_value = resp
         result = client.delete("/api/certinext/v2/domains/abc")
         assert result == {"status": "deleted"}

@@ -20,6 +20,7 @@ import pytest
 import requests
 
 from certinext.auth import OAuth2ClientCredentials
+from certinext.client import CertiNextClient
 from certinext.domains import VALID_DCV_METHODS, Domain, DomainAccessor
 
 # ---------------------------------------------------------------------------
@@ -328,9 +329,8 @@ class TestAuthErrorMessages:
 class TestClientHTTPErrors:
     """CertiNextClient propagates HTTPError for non-2xx API responses."""
 
-    def _make_client(self):
+    def _make_client(self) -> tuple[CertiNextClient, MagicMock]:
         """Return a CertiNextClient with auth and session mocked."""
-        from certinext.client import CertiNextClient
         client = CertiNextClient(
             base_url="https://us-api.certinext.io",
             token_url="https://us-api.certinext.io/oauth/token",
@@ -339,55 +339,56 @@ class TestClientHTTPErrors:
         )
         client._auth = MagicMock()
         client._auth.get_token.return_value = "test-token"
-        client._session = MagicMock()
-        return client
+        mock_session = MagicMock()
+        client._session = mock_session  # type: ignore[assignment]
+        return client, mock_session
 
     def test_get_raises_on_401(self):
         """get() propagates HTTPError on a 401 Unauthorized response."""
-        client = self._make_client()
-        client._session.get.return_value = _make_http_error_response(401)
+        client, mock_session = self._make_client()
+        mock_session.get.return_value = _make_http_error_response(401)
         with pytest.raises(requests.HTTPError):
             client.get("/api/certinext/v2/domains")
 
     def test_get_raises_on_403(self):
         """get() propagates HTTPError on a 403 Forbidden response."""
-        client = self._make_client()
-        client._session.get.return_value = _make_http_error_response(403)
+        client, mock_session = self._make_client()
+        mock_session.get.return_value = _make_http_error_response(403)
         with pytest.raises(requests.HTTPError):
             client.get("/api/certinext/v2/domains")
 
     def test_get_raises_on_404(self):
         """get() propagates HTTPError on a 404 Not Found response."""
-        client = self._make_client()
-        client._session.get.return_value = _make_http_error_response(404)
+        client, mock_session = self._make_client()
+        mock_session.get.return_value = _make_http_error_response(404)
         with pytest.raises(requests.HTTPError):
             client.get("/api/certinext/v2/domains/missing-id")
 
     def test_get_raises_on_500(self):
         """get() propagates HTTPError on a 500 Internal Server Error response."""
-        client = self._make_client()
-        client._session.get.return_value = _make_http_error_response(500)
+        client, mock_session = self._make_client()
+        mock_session.get.return_value = _make_http_error_response(500)
         with pytest.raises(requests.HTTPError):
             client.get("/api/certinext/v2/domains")
 
     def test_post_raises_on_422(self):
         """post() propagates HTTPError on a 422 Unprocessable Entity response."""
-        client = self._make_client()
-        client._session.post.return_value = _make_http_error_response(422)
+        client, mock_session = self._make_client()
+        mock_session.post.return_value = _make_http_error_response(422)
         with pytest.raises(requests.HTTPError):
             client.post("/api/certinext/v2/domains", json={"name": ""})
 
     def test_post_raises_on_409(self):
         """post() propagates HTTPError on a 409 Conflict response."""
-        client = self._make_client()
-        client._session.post.return_value = _make_http_error_response(409)
+        client, mock_session = self._make_client()
+        mock_session.post.return_value = _make_http_error_response(409)
         with pytest.raises(requests.HTTPError):
             client.post("/api/certinext/v2/domains", json={"name": "duplicate.example.edu"})
 
     def test_delete_raises_on_404(self):
         """delete() propagates HTTPError on a 404 Not Found response."""
-        client = self._make_client()
-        client._session.delete.return_value = _make_http_error_response(404)
+        client, mock_session = self._make_client()
+        mock_session.delete.return_value = _make_http_error_response(404)
         with pytest.raises(requests.HTTPError):
             client.delete("/api/certinext/v2/domains/missing-id")
 
