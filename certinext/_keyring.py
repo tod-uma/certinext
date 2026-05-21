@@ -31,6 +31,7 @@ def keyring_get(service: str, key: str) -> str | None:
     """
     try:
         import keyring
-        return keyring.get_password(service, key)
+        value = keyring.get_password(service, key)
+        return value if isinstance(value, str) else None
     except Exception:
         return None
