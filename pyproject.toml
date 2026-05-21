@@ -20,6 +20,10 @@ dev = [
     "ruff>=0.4",
     "types-requests>=2.31",
     "types-tabulate>=0.9",
+    "keyring",
+]
+keyring = [
+    "keyring",
 ]
 
 [tool.setuptools.packages.find]

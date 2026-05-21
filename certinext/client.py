@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Any
+from typing import Any, cast
 
 import requests
 
@@ -70,7 +70,7 @@ class CertiNextClient:
         """
         resp = self._session.get(f"{self.base_url}{path}", headers=self._headers(), params=params)
         resp.raise_for_status()
-        return resp.json()  # type: ignore[no-any-return]
+        return cast(dict[str, Any], resp.json())
 
     def post(self, path: str, json: dict[str, Any] | None = None) -> dict[str, Any]:
         """Send a POST request with an optional JSON body and return the parsed response.
@@ -87,7 +87,7 @@ class CertiNextClient:
         """
         resp = self._session.post(f"{self.base_url}{path}", headers=self._headers(), json=json)
         resp.raise_for_status()
-        return resp.json()  # type: ignore[no-any-return]
+        return cast(dict[str, Any], resp.json())
 
     def put(self, path: str, json: dict[str, Any] | None = None) -> dict[str, Any]:
         """Send a PUT request with an optional JSON body and return the parsed response.
@@ -104,7 +104,7 @@ class CertiNextClient:
         """
         resp = self._session.put(f"{self.base_url}{path}", headers=self._headers(), json=json)
         resp.raise_for_status()
-        return resp.json()  # type: ignore[no-any-return]
+        return cast(dict[str, Any], resp.json())
 
     def patch(self, path: str, json: dict[str, Any] | None = None) -> dict[str, Any]:
         """Send a PATCH request with an optional JSON body and return the parsed response.
@@ -121,7 +121,7 @@ class CertiNextClient:
         """
         resp = self._session.patch(f"{self.base_url}{path}", headers=self._headers(), json=json)
         resp.raise_for_status()
-        return resp.json()  # type: ignore[no-any-return]
+        return cast(dict[str, Any], resp.json())
 
     def delete(self, path: str) -> dict[str, Any] | None:
         """Send a DELETE request and return the parsed response body if present.
