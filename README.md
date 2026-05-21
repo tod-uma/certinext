@@ -70,7 +70,7 @@ The session obtains and caches an OAuth 2.0 bearer token automatically, refreshi
 #### List all domains
 
 ```python
-domains = sess.domain.list()
+domains = sess.domain.get_list()
 for d in domains:
     print(d)
 ```
@@ -78,7 +78,57 @@ for d in domains:
 Paginate with `offset` and `limit`:
 
 ```python
-page = sess.domain.list(offset=50, limit=25)
+page = sess.domain.get_list(offset=50, limit=25)
+```
+
+Filter by status server-side (reduces data transferred):
+
+```python
+# Only active domains with pending or rejected DCV
+domains = sess.domain.get_list(domain_status="ACTIVE", dcv_status="PENDING,REJECTED,EXPIRED")
+```
+
+> **Note:** The API `search` parameter is a confirmed vendor bug (reported
+> 2026-05-20) — all domains are returned regardless of the value passed. Use
+> `pattern` (below) for reliable filtering until CertiNext notifies the fix is
+> deployed.
+
+Filter by name with a regex (applied client-side after the API response):
+
+```python
+# Exact match
+domains = sess.domain.get_list(pattern=r"maine\.edu")
+
+# Multiple names via alternation
+domains = sess.domain.get_list(pattern=r"maine\.edu|umaine\.edu")
+
+# Subdomain wildcard
+domains = sess.domain.get_list(pattern=r".*\.maine\.edu")
+```
+
+`pattern` uses `re.fullmatch` with `re.IGNORECASE`, so it must match the entire
+domain name. Combine with status filters to narrow the API response first:
+
+```python
+domains = sess.domain.get_list(domain_status="ACTIVE", pattern=r".*\.maine\.edu")
+```
+
+#### List domains needing DCV
+
+`list_pending_dcv()` returns active domains that have not yet completed DCV
+verification. It fetches all domains and filters client-side using
+`domain.needs_dcv`.
+
+> **Note:** The API `domainStatus` and `dcvStatus` filter parameters return a
+> 400 error when used together — confirmed vendor bug (reported 2026-05-20).
+> Server-side status filtering is disabled until CertiNext notifies the fix is
+> deployed.
+
+```python
+pending = sess.domain.list_pending_dcv()
+
+# Narrow to a subset by name
+pending = sess.domain.list_pending_dcv(pattern=r".*\.maine\.edu")
 ```
 
 #### Get a domain
@@ -103,12 +153,13 @@ domain = sess.domain.create("newdomain.example.com")
 | Property | Type | Description |
 |---|---|---|
 | `id` | `str \| None` | Domain ID |
-| `name` | `str \| None` | Domain name (FQDN) |
+| `name` | `str \| None` | Domain name (FQDN). Settable, but only updates the local object — does not persist to the API. |
 | `status` | `str \| None` | `ACTIVE` or `INACTIVE` |
-| `dcv_status` | `str \| None` | `VERIFIED`, `PENDING`, etc. |
+| `dcv_status` | `str \| None` | `VERIFIED`, `PENDING`, `REJECTED`, `EXPIRED`, etc. |
 | `organization_id` | `str \| None` | Organization ID |
 | `organization_name` | `str \| None` | Organization display name |
 | `created_at` | `datetime \| None` | Creation timestamp (timezone-aware UTC) |
+| `needs_dcv` | `bool` | `True` if status is `ACTIVE` and `dcv_status` is not `VERIFIED` |
 
 `Domain` objects support `str()` and `repr()`:
 
@@ -125,6 +176,16 @@ repr(domain)
 # Domain(id='vuxwZgEXWWFXQQWC-...', name='maine.edu', status='ACTIVE', dcv_status='VERIFIED')
 ```
 
+#### DcvInfo
+
+`domain.get_dcv()` returns a `DcvInfo` dataclass with the following fields:
+
+| Field | Type | Description |
+|---|---|---|
+| `method` | `str` | DCV method in upper case: `DNS-TXT` or `HTTP-URL` |
+| `token` | `str` | Challenge value to publish (TXT record content for DNS-TXT, file token for HTTP-URL) |
+| `host` | `str` | Sub-domain prefix for the challenge record (e.g. `_emudhra-challenge`). Empty string if not returned by the API. |
+
 #### Domain methods
 
 ```python
@@ -135,9 +196,13 @@ domain.refresh()
 domain.deactivate()
 
 # DCV — Domain Control Validation
-dcv = domain.get_dcv()             # current DCV info
+dcv = domain.get_dcv()             # returns DcvInfo(method, token, host)
+print(dcv.method)                  # e.g. "DNS-TXT" or "HTTP-URL"
+print(dcv.token)                   # challenge value to publish
+print(dcv.host)                    # sub-domain prefix for the challenge record
+
 result = domain.verify()           # trigger verification
-domain.change_dcv_method("DNS")    # change method: EMAIL, DNS, or HTTP
+domain.change_dcv_method("DNS-TXT")   # accepted values: "DNS-TXT", "HTTP-URL"
 attempt = domain.last_dcv_attempt()
 history = domain.dcv_attempt_history()
 
@@ -155,8 +220,18 @@ sess = certinext.session(
     client_secret="YOUR_CLIENT_SECRET",
 )
 
-for domain in sess.domain.list():
-    if domain.dcv_status == "PENDING":
+# list_pending_dcv() uses server-side filters to fetch only ACTIVE domains
+# with non-VERIFIED DCV status, then returns those where needs_dcv is True.
+for domain in sess.domain.list_pending_dcv():
+    print(f"Verifying {domain.name} ...")
+    domain.verify()
+```
+
+Or check `needs_dcv` manually if you already have a full domain list:
+
+```python
+for domain in sess.domain.get_list():
+    if domain.needs_dcv:
         print(f"Verifying {domain.name} ...")
         domain.verify()
 ```
@@ -235,10 +310,10 @@ python scripts/domains.py --account-number ACCT --client-secret SECRET verify-dc
 
 #### change-dcv-method
 
-Change the DCV method for a domain (`EMAIL`, `DNS`, or `HTTP`).
+Change the DCV method for a domain. Accepted values: `DNS-TXT`, `HTTP-URL`.
 
 ```bash
-python scripts/domains.py --account-number ACCT --client-secret SECRET change-dcv-method DOMAIN_ID DNS
+python scripts/domains.py --account-number ACCT --client-secret SECRET change-dcv-method DOMAIN_ID DNS-TXT
 ```
 
 #### last-dcv-attempt
@@ -267,6 +342,44 @@ python scripts/domains.py --account-number ACCT --client-secret SECRET --json li
 
 ---
 
+## pending_dcv script
+
+`scripts/pending_dcv.py` lists every active domain that has not yet completed
+DCV verification. It is a quick read-only diagnostic — no changes are made to
+any domain.
+
+### Arguments
+
+Credentials are resolved in priority order: CLI argument → environment variable
+→ interactive prompt. Secrets are read with `getpass` and are not echoed.
+
+```
+--account-number ACCT   CertiNext account number (env: CERTINEXT_CLIENT_ID)
+--client-secret SECRET  OAuth2 client secret (env: CERTINEXT_CLIENT_SECRET)
+--base-url URL          API base URL (default: https://us-api.certinext.io)
+--token-url URL         Token endpoint URL (default: https://us-api.certinext.io/oauth/token)
+--pattern REGEX         Filter by domain name regex (re.fullmatch, case-insensitive)
+--json                  Output raw JSON instead of tabular format
+```
+
+### Examples
+
+```bash
+# List all domains pending DCV (prompts for credentials if not set in env)
+python scripts/pending_dcv.py
+
+# Filter to a specific subdomain pattern
+python scripts/pending_dcv.py --pattern ".*\.maine\.edu"
+
+# Raw JSON output for scripting
+python scripts/pending_dcv.py --json | jq '.[] | .domainName'
+
+# Credentials from environment variables (no prompts)
+CERTINEXT_CLIENT_ID=ACCT CERTINEXT_CLIENT_SECRET=SECRET python scripts/pending_dcv.py
+```
+
+---
+
 ## Project structure
 
 ```
@@ -278,4 +391,5 @@ certinext/
     session.py       # CertiNextSession (session.domain accessor)
 scripts/
     domains.py       # CLI for domain management
+    pending_dcv.py   # list all domains with pending DCV verification
 ```

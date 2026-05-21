@@ -20,7 +20,7 @@ import pytest
 import requests
 
 from certinext.auth import OAuth2ClientCredentials
-from certinext.domains import Domain, DomainAccessor
+from certinext.domains import VALID_DCV_METHODS, Domain, DomainAccessor
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -198,23 +198,23 @@ class TestDomainAccessorBadResponses:
     def test_list_with_empty_dict_returns_empty_list(
         self, accessor: DomainAccessor, mock_client: MagicMock
     ):
-        """list() returns [] when the API returns an empty dict."""
+        """get_list() returns [] when the API returns an empty dict."""
         mock_client.get.return_value = {}
-        assert accessor.list() == []
+        assert accessor.get_list() == []
 
     def test_list_with_dict_containing_no_list_values_returns_empty(
         self, accessor: DomainAccessor, mock_client: MagicMock
     ):
-        """list() returns [] when the dict response has no list-typed values."""
+        """get_list() returns [] when the dict response has no list-typed values."""
         mock_client.get.return_value = {"total": 0, "page": 1}
-        assert accessor.list() == []
+        assert accessor.get_list() == []
 
     def test_list_with_empty_nested_list_returns_empty(
         self, accessor: DomainAccessor, mock_client: MagicMock
     ):
-        """list() returns [] when the nested list in a paginated response is empty."""
+        """get_list() returns [] when the nested list in a paginated response is empty."""
         mock_client.get.return_value = {"total": 0, "domains": []}
-        assert accessor.list() == []
+        assert accessor.get_list() == []
 
     def test_get_by_id_raises_value_error_when_api_returns_list(
         self, accessor: DomainAccessor, mock_client: MagicMock
@@ -390,3 +390,114 @@ class TestClientHTTPErrors:
         client._session.delete.return_value = _make_http_error_response(404)
         with pytest.raises(requests.HTTPError):
             client.delete("/api/certinext/v2/domains/missing-id")
+
+
+# ---------------------------------------------------------------------------
+# DCV method validation
+# ---------------------------------------------------------------------------
+
+class TestDcvMethodValidation:
+    """get_dcv() rejects unknown DCV methods; change_dcv_method() validates input."""
+
+    def _domain_with_id(self, client: MagicMock) -> Domain:
+        return Domain(client, {"domainId": "abc", "domainName": "test.example.edu"})
+
+    # get_dcv — API response validation
+
+    def test_get_dcv_accepts_dns_txt(self, mock_client: MagicMock):
+        """get_dcv() accepts DNS-TXT as a valid method."""
+        mock_client.get.return_value = {"dcvMethod": "DNS-TXT", "txtToken": "token123"}
+        d = self._domain_with_id(mock_client)
+        info = d.get_dcv()
+        assert info.method == "DNS-TXT"
+        assert info.token == "token123"
+
+    def test_get_dcv_accepts_http_url(self, mock_client: MagicMock):
+        """get_dcv() accepts HTTP-URL as a valid method."""
+        mock_client.get.return_value = {"dcvMethod": "HTTP-URL", "fileToken": "tok"}
+        d = self._domain_with_id(mock_client)
+        info = d.get_dcv()
+        assert info.method == "HTTP-URL"
+        assert info.token == "tok"
+
+    def test_get_dcv_rejects_email(self, mock_client: MagicMock):
+        """get_dcv() raises ValueError for EMAIL, which is not supported by the Domains API."""
+        mock_client.get.return_value = {"dcvMethod": "EMAIL"}
+        d = self._domain_with_id(mock_client)
+        with pytest.raises(ValueError, match="EMAIL"):
+            d.get_dcv()
+
+    def test_get_dcv_rejects_http(self, mock_client: MagicMock):
+        """get_dcv() raises ValueError for HTTP, which is not a valid Domains API method."""
+        mock_client.get.return_value = {"dcvMethod": "HTTP"}
+        d = self._domain_with_id(mock_client)
+        with pytest.raises(ValueError, match="HTTP"):
+            d.get_dcv()
+
+    def test_get_dcv_normalizes_lowercase_to_uppercase(self, mock_client: MagicMock):
+        """get_dcv() normalizes method values to upper case before checking."""
+        mock_client.get.return_value = {"dcvMethod": "dns-txt", "dnsContents": "tok"}
+        d = self._domain_with_id(mock_client)
+        info = d.get_dcv()
+        assert info.method == "DNS-TXT"
+
+    def test_get_dcv_raises_on_unknown_method(self, mock_client: MagicMock):
+        """get_dcv() raises ValueError when the API returns an unrecognised DCV method."""
+        mock_client.get.return_value = {"dcvMethod": "DNS", "dnsContents": "tok"}
+        d = self._domain_with_id(mock_client)
+        with pytest.raises(ValueError, match="DNS"):
+            d.get_dcv()
+
+    def test_get_dcv_raises_on_cname_method(self, mock_client: MagicMock):
+        """get_dcv() raises ValueError for any unrecognised method string."""
+        mock_client.get.return_value = {"dcvMethod": "CNAME"}
+        d = self._domain_with_id(mock_client)
+        with pytest.raises(ValueError):
+            d.get_dcv()
+
+    def test_get_dcv_empty_response_returns_empty_method(self, mock_client: MagicMock):
+        """get_dcv() returns an empty method string when the API omits dcvMethod."""
+        mock_client.get.return_value = {}
+        d = self._domain_with_id(mock_client)
+        info = d.get_dcv()
+        assert info.method == ""
+
+    # change_dcv_method — input validation
+
+    def test_change_dcv_method_accepts_dns_txt(self, mock_client: MagicMock):
+        """change_dcv_method() accepts DNS-TXT and calls the API."""
+        mock_client.patch.return_value = {}
+        d = self._domain_with_id(mock_client)
+        d.change_dcv_method("DNS-TXT")
+        mock_client.patch.assert_called_once()
+
+    def test_change_dcv_method_accepts_lowercase(self, mock_client: MagicMock):
+        """change_dcv_method() normalizes lowercase input and sends lowercase to the API."""
+        mock_client.patch.return_value = {}
+        d = self._domain_with_id(mock_client)
+        d.change_dcv_method("dns-txt")
+        _, kwargs = mock_client.patch.call_args
+        assert kwargs["json"]["dcvMethod"] == "dns-txt"
+
+    def test_change_dcv_method_raises_on_dns(self, mock_client: MagicMock):
+        """change_dcv_method() raises ValueError when passed the old 'DNS' method name."""
+        d = self._domain_with_id(mock_client)
+        with pytest.raises(ValueError, match="DNS"):
+            d.change_dcv_method("DNS")
+
+    def test_change_dcv_method_raises_on_unknown_value(self, mock_client: MagicMock):
+        """change_dcv_method() raises ValueError for any unrecognised method."""
+        d = self._domain_with_id(mock_client)
+        with pytest.raises(ValueError, match="BOGUS"):
+            d.change_dcv_method("BOGUS")
+
+    def test_change_dcv_method_raises_before_api_call(self, mock_client: MagicMock):
+        """change_dcv_method() raises ValueError without calling the API for bad input."""
+        d = self._domain_with_id(mock_client)
+        with pytest.raises(ValueError):
+            d.change_dcv_method("DNS")
+        mock_client.patch.assert_not_called()
+
+    def test_valid_dcv_methods_constant_contains_expected_values(self):
+        """VALID_DCV_METHODS contains DNS-TXT and HTTP-URL."""
+        assert VALID_DCV_METHODS == {"DNS-TXT", "HTTP-URL"}

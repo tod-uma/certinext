@@ -12,12 +12,38 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import re
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
 from .client import CertiNextClient
 
 _BASE = "/api/certinext/v2/domains"
+
+VALID_DCV_METHODS: frozenset[str] = frozenset({"DNS-TXT", "HTTP-URL"})
+
+
+@dataclass
+class DcvInfo:
+    """Parsed DCV configuration returned by :meth:`Domain.get_dcv`.
+
+    Normalises the raw API response so callers don't need to handle multiple
+    field name variants or case differences.
+
+    Attributes:
+        method: DCV method in upper case, e.g. ``DNS-TXT`` or ``HTTP-URL``.
+        token:  Challenge value to publish. For DNS-TXT this is the TXT record
+                content (``txtToken``); for HTTP-URL it is the file token
+                (``fileToken``).
+        host:   Sub-domain prefix for the challenge record. The Domains API
+                does not return this field; the DNS-TXT challenge is implicitly
+                placed at ``_emudhra-challenge.<domain>``.
+    """
+
+    method: str
+    token: str
+    host: str
 
 
 class Domain:
@@ -122,6 +148,11 @@ class Domain:
 
     # --- public helpers ---
 
+    @property
+    def needs_dcv(self) -> bool:
+        """Return True if this domain is active and not yet DCV-verified."""
+        return self.status == "ACTIVE" and self.dcv_status != "VERIFIED"
+
     def as_dict(self) -> dict[str, Any]:
         """Return the raw API response dict for this domain."""
         return self._data
@@ -164,17 +195,26 @@ class Domain:
         self._data = self._client.post(f"{_BASE}/{self.id}/deactivate")
         return self
 
-    def get_dcv(self) -> dict[str, Any]:
-        """Return the current Domain Control Validation status from the API.
+    def get_dcv(self) -> DcvInfo:
+        """Return the current Domain Control Validation configuration from the API.
 
         Returns:
-            Dict containing DCV details for this domain.
+            :class:`DcvInfo` with normalised ``method``, ``token``, and ``host``.
 
         Raises:
             requests.HTTPError: On a non-2xx API response.
         """
-        result = self._client.get(f"{_BASE}/{self.id}/dcv")
-        return result if isinstance(result, dict) else {}
+        result: dict[str, Any] | list[Any] = self._client.get(f"{_BASE}/{self.id}/dcv")
+        raw: dict[str, Any] = result if isinstance(result, dict) else {}
+        method = (raw.get("dcvMethod") or raw.get("method") or "").upper()
+        if method and method not in VALID_DCV_METHODS:
+            raise ValueError(
+                f"Unexpected DCV method {method!r} from API; "
+                f"expected one of {sorted(VALID_DCV_METHODS)}"
+            )
+        token = raw.get("txtToken") or raw.get("fileToken") or raw.get("token") or raw.get("dnsContents") or ""
+        host = raw.get("dnsHost") or raw.get("host") or ""
+        return DcvInfo(method=method, token=token, host=host)
 
     def verify(self) -> dict[str, Any]:
         """Trigger DCV verification for this domain.
@@ -191,16 +231,23 @@ class Domain:
         """Change the DCV method for this domain.
 
         Args:
-            method: The new DCV method. Accepted values: ``EMAIL``, ``DNS``, ``HTTP``.
+            method: The new DCV method. Accepted values: ``DNS-TXT``, ``HTTP-URL``.
+                    Case-insensitive; normalized to lower case before sending.
 
         Returns:
             Dict containing the updated DCV configuration.
 
         Raises:
+            ValueError: If ``method`` is not one of the accepted DCV methods.
             requests.HTTPError: On a non-2xx API response.
         """
-        return self._client.post(
-            f"{_BASE}/{self.id}/dcv/change-method", json={"method": method}
+        method_upper = method.upper()
+        if method_upper not in VALID_DCV_METHODS:
+            raise ValueError(
+                f"Invalid DCV method {method_upper!r}; must be one of {sorted(VALID_DCV_METHODS)}"
+            )
+        return self._client.patch(
+            f"{_BASE}/{self.id}/dcv/method", json={"dcvMethod": method_upper.lower()}
         )
 
     def last_dcv_attempt(self) -> dict[str, Any]:
@@ -212,7 +259,7 @@ class Domain:
         Raises:
             requests.HTTPError: On a non-2xx API response.
         """
-        result = self._client.get(f"{_BASE}/{self.id}/dcv/last-attempt")
+        result = self._client.get(f"{_BASE}/{self.id}/dcv/attempts/last")
         return result if isinstance(result, dict) else {}
 
     def dcv_attempt_history(self) -> dict[str, Any] | list[Any]:
@@ -224,7 +271,7 @@ class Domain:
         Raises:
             requests.HTTPError: On a non-2xx API response.
         """
-        return self._client.get(f"{_BASE}/{self.id}/dcv/attempt-history")
+        return self._client.get(f"{_BASE}/{self.id}/dcv/attempts")
 
 
 class DomainAccessor:
@@ -248,17 +295,45 @@ class DomainAccessor:
         """
         self._client = client
 
-    def list(self, offset: int | None = None, limit: int | None = None) -> list[Domain]:
+    def get_list(
+        self,
+        offset: int | None = None,
+        limit: int | None = None,
+        search: str | None = None,
+        domain_status: str | None = None,
+        dcv_status: str | None = None,
+        pattern: str | None = None,
+    ) -> list[Domain]:
         """Return a list of all domains in the account.
 
+        Server-side filters (``search``, ``domain_status``, ``dcv_status``) are
+        passed to the API and reduce the data transferred. ``pattern`` is applied
+        client-side for cases that require regex matching.
+
         Args:
-            offset: Number of records to skip (for pagination).
-            limit: Maximum number of records to return.
+            offset: 0-based row offset for pagination.
+            limit: Page size (API default 50; keep ≤200 for performance).
+            search: Full FQDN for exact match (``maine.edu``) or a substring
+                for LIKE matching (``maine``). Maps to the API ``search`` param.
+                **Warning:** the API ``search`` parameter is a confirmed vendor
+                bug (reported 2026-05-20); all domains are returned regardless
+                of the value passed. Use ``pattern`` for reliable client-side
+                filtering until CertiNext notifies the fix is deployed.
+            domain_status: Comma-separated status filter, e.g.
+                ``"ACTIVE,INACTIVE"``. Values: ACTIVE, INACTIVE, EXPIRED,
+                REVOKED.
+            dcv_status: Comma-separated DCV status filter, e.g.
+                ``"PENDING,REJECTED"``. Values: VERIFIED, PENDING, REJECTED,
+                EXPIRED.
+            pattern: Optional regex applied client-side after the API response.
+                Uses ``re.fullmatch`` with ``re.IGNORECASE``. Use when the API
+                ``search`` substring is not precise enough.
 
         Returns:
             List of `Domain` objects.
 
         Raises:
+            re.error: If ``pattern`` is not a valid regular expression.
             requests.HTTPError: On a non-2xx API response.
         """
         params: dict[str, Any] = {}
@@ -266,6 +341,12 @@ class DomainAccessor:
             params["offset"] = offset
         if limit is not None:
             params["limit"] = limit
+        if search is not None:
+            params["search"] = search
+        if domain_status is not None:
+            params["domainStatus"] = domain_status
+        if dcv_status is not None:
+            params["dcvStatus"] = dcv_status
         result = self._client.get(_BASE, params=params or None)
         raw: list[Any]
         if isinstance(result, list):
@@ -276,7 +357,33 @@ class DomainAccessor:
                 if isinstance(val, list):
                     raw = val
                     break
-        return [Domain(self._client, item) for item in raw]
+        domains = [Domain(self._client, item) for item in raw]
+        if pattern is not None:
+            domains = [d for d in domains if re.fullmatch(pattern, d.name or "", re.IGNORECASE)]
+        return domains
+
+    def list_pending_dcv(self, search: str | None = None, pattern: str | None = None) -> list[Domain]:
+        """Return all active domains that have not yet completed DCV verification.
+
+        Fetches all domains and filters client-side using :attr:`Domain.needs_dcv`.
+
+        **Note:** The API ``domainStatus`` and ``dcvStatus`` filter parameters return
+        a 400 error when used together — confirmed vendor bug (reported 2026-05-20).
+        Server-side filtering is disabled until CertiNext notifies the fix is deployed.
+
+        Args:
+            search: Optional search string passed to the API. See :meth:`list`.
+            pattern: Optional client-side regex filter. See :meth:`list`.
+
+        Returns:
+            List of `Domain` objects where :attr:`Domain.needs_dcv` is ``True``.
+
+        Raises:
+            re.error: If ``pattern`` is not a valid regular expression.
+            requests.HTTPError: On a non-2xx API response.
+        """
+        domains = self.get_list(search=search, pattern=pattern)
+        return [d for d in domains if d.needs_dcv]
 
     def get(self, domain_id_or_name: str) -> Domain:
         """Return a single domain by ID or by fully-qualified domain name.
@@ -298,7 +405,7 @@ class DomainAccessor:
         """
         if "." in domain_id_or_name:
             name = domain_id_or_name.lower()
-            for domain in self.list():
+            for domain in self.get_list():
                 if (domain.name or "").lower() == name:
                     return domain
             raise KeyError(f"No domain found with name {domain_id_or_name!r}")

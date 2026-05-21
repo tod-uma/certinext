@@ -19,7 +19,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from certinext.domains import Domain, DomainAccessor
+from certinext.domains import DcvInfo, Domain, DomainAccessor
 from tests.conftest import SAMPLE_DOMAIN_DATA, SAMPLE_DOMAIN_DATA_2
 
 
@@ -137,6 +137,44 @@ class TestDomainHelpers:
         assert domain.to_row()["name"] == "umaine.edu"
 
 
+class TestDomainNeedsDcv:
+    """Domain.needs_dcv reflects whether a domain requires DCV verification."""
+
+    def _domain(self, client: MagicMock, status: str, dcv_status: str) -> Domain:
+        return Domain(client, {"domainId": "x", "status": status, "dcvStatus": dcv_status})
+
+    def test_active_pending_needs_dcv(self, mock_client: MagicMock):
+        """ACTIVE + PENDING → needs_dcv is True."""
+        assert self._domain(mock_client, "ACTIVE", "PENDING").needs_dcv is True
+
+    def test_active_verified_does_not_need_dcv(self, mock_client: MagicMock):
+        """ACTIVE + VERIFIED → needs_dcv is False."""
+        assert self._domain(mock_client, "ACTIVE", "VERIFIED").needs_dcv is False
+
+    def test_inactive_pending_does_not_need_dcv(self, mock_client: MagicMock):
+        """INACTIVE domain is excluded even if DCV status is PENDING."""
+        assert self._domain(mock_client, "INACTIVE", "PENDING").needs_dcv is False
+
+    def test_active_failed_needs_dcv(self, mock_client: MagicMock):
+        """ACTIVE + FAILED → needs_dcv is True (any non-VERIFIED status counts)."""
+        assert self._domain(mock_client, "ACTIVE", "FAILED").needs_dcv is True
+
+    def test_sample_domain_data_does_not_need_dcv(self, domain: Domain):
+        """The standard fixture (ACTIVE/VERIFIED) has needs_dcv False."""
+        assert domain.needs_dcv is False
+
+    def test_sample_domain_data_2_needs_dcv(self, mock_client: MagicMock):
+        """SAMPLE_DOMAIN_DATA_2 (ACTIVE/PENDING) has needs_dcv True."""
+        from tests.conftest import SAMPLE_DOMAIN_DATA_2
+        d = Domain(mock_client, dict(SAMPLE_DOMAIN_DATA_2))
+        assert d.needs_dcv is True
+
+    def test_missing_status_does_not_need_dcv(self, mock_client: MagicMock):
+        """Domain with no status field has needs_dcv False (None != 'ACTIVE')."""
+        d = Domain(mock_client, {})
+        assert d.needs_dcv is False
+
+
 class TestDomainAPIMethods:
     """Domain API methods delegate to the underlying client with the correct paths."""
 
@@ -158,10 +196,31 @@ class TestDomainAPIMethods:
         assert result is domain
 
     def test_get_dcv_calls_get(self, domain: Domain, mock_client: MagicMock):
-        """get_dcv() calls GET /domains/{id}/dcv."""
-        mock_client.get.return_value = {"method": "DNS", "token": "abc"}
-        domain.get_dcv()
+        """get_dcv() calls GET /domains/{id}/dcv and returns a DcvInfo."""
+        mock_client.get.return_value = {"dcvMethod": "DNS-TXT", "txtToken": "abc123"}
+        result = domain.get_dcv()
         mock_client.get.assert_called_once_with(f"/api/certinext/v2/domains/{domain.id}/dcv")
+        assert isinstance(result, DcvInfo)
+        assert result.method == "DNS-TXT"
+        assert result.token == "abc123"
+        assert result.host == ""
+
+    def test_get_dcv_normalises_alternate_field_names(self, domain: Domain, mock_client: MagicMock):
+        """get_dcv() handles the 'method'/'token'/'host' field name variants."""
+        mock_client.get.return_value = {"method": "dns-txt", "token": "xyz", "host": ""}
+        result = domain.get_dcv()
+        assert result.method == "DNS-TXT"
+        assert result.token == "xyz"
+        assert result.host == ""
+
+    def test_get_dcv_returns_empty_dcvinfo_on_bad_response(self, domain: Domain, mock_client: MagicMock):
+        """get_dcv() returns a DcvInfo with empty strings when the API returns a non-dict."""
+        mock_client.get.return_value = None
+        result = domain.get_dcv()
+        assert isinstance(result, DcvInfo)
+        assert result.method == ""
+        assert result.token == ""
+        assert result.host == ""
 
     def test_verify_calls_post(self, domain: Domain, mock_client: MagicMock):
         """verify() calls POST /domains/{id}/dcv/verify."""
@@ -169,26 +228,26 @@ class TestDomainAPIMethods:
         domain.verify()
         mock_client.post.assert_called_once_with(f"/api/certinext/v2/domains/{domain.id}/dcv/verify")
 
-    def test_change_dcv_method_calls_post_with_method(self, domain: Domain, mock_client: MagicMock):
-        """change_dcv_method() calls POST /domains/{id}/dcv/change-method with the method."""
-        mock_client.post.return_value = {"method": "DNS"}
-        domain.change_dcv_method("DNS")
-        mock_client.post.assert_called_once_with(
-            f"/api/certinext/v2/domains/{domain.id}/dcv/change-method",
-            json={"method": "DNS"},
+    def test_change_dcv_method_calls_patch_with_method(self, domain: Domain, mock_client: MagicMock):
+        """change_dcv_method() calls PATCH /domains/{id}/dcv/method with dcvMethod in lowercase."""
+        mock_client.patch.return_value = {"dcvMethod": "dns-txt"}
+        domain.change_dcv_method("DNS-TXT")
+        mock_client.patch.assert_called_once_with(
+            f"/api/certinext/v2/domains/{domain.id}/dcv/method",
+            json={"dcvMethod": "dns-txt"},
         )
 
     def test_last_dcv_attempt_calls_get(self, domain: Domain, mock_client: MagicMock):
-        """last_dcv_attempt() calls GET /domains/{id}/dcv/last-attempt."""
+        """last_dcv_attempt() calls GET /domains/{id}/dcv/attempts/last."""
         mock_client.get.return_value = {"attemptedAt": "2026-05-04T21:27:14Z"}
         domain.last_dcv_attempt()
-        mock_client.get.assert_called_once_with(f"/api/certinext/v2/domains/{domain.id}/dcv/last-attempt")
+        mock_client.get.assert_called_once_with(f"/api/certinext/v2/domains/{domain.id}/dcv/attempts/last")
 
     def test_dcv_attempt_history_calls_get(self, domain: Domain, mock_client: MagicMock):
-        """dcv_attempt_history() calls GET /domains/{id}/dcv/attempt-history."""
+        """dcv_attempt_history() calls GET /domains/{id}/dcv/attempts."""
         mock_client.get.return_value = []
         domain.dcv_attempt_history()
-        mock_client.get.assert_called_once_with(f"/api/certinext/v2/domains/{domain.id}/dcv/attempt-history")
+        mock_client.get.assert_called_once_with(f"/api/certinext/v2/domains/{domain.id}/dcv/attempts")
 
 
 class TestDomainAccessorList:
@@ -197,7 +256,7 @@ class TestDomainAccessorList:
     def test_returns_list_of_domain_objects(self, accessor: DomainAccessor, mock_client: MagicMock):
         """list() wraps each item in a Domain and returns a list."""
         mock_client.get.return_value = [SAMPLE_DOMAIN_DATA, SAMPLE_DOMAIN_DATA_2]
-        domains = accessor.list()
+        domains = accessor.get_list()
         assert len(domains) == 2
         assert all(isinstance(d, Domain) for d in domains)
 
@@ -207,25 +266,137 @@ class TestDomainAccessorList:
             "total": 2,
             "domains": [SAMPLE_DOMAIN_DATA, SAMPLE_DOMAIN_DATA_2],
         }
-        domains = accessor.list()
+        domains = accessor.get_list()
         assert len(domains) == 2
 
     def test_passes_offset_and_limit(self, accessor: DomainAccessor, mock_client: MagicMock):
         """list() forwards offset and limit as query parameters."""
         mock_client.get.return_value = []
-        accessor.list(offset=10, limit=5)
+        accessor.get_list(offset=10, limit=5)
         mock_client.get.assert_called_once_with("/api/certinext/v2/domains", params={"offset": 10, "limit": 5})
 
     def test_no_params_when_not_specified(self, accessor: DomainAccessor, mock_client: MagicMock):
         """list() passes params=None when offset and limit are not given."""
         mock_client.get.return_value = []
-        accessor.list()
+        accessor.get_list()
         mock_client.get.assert_called_once_with("/api/certinext/v2/domains", params=None)
 
     def test_returns_empty_list_when_no_domains(self, accessor: DomainAccessor, mock_client: MagicMock):
         """list returns an empty list when the API returns an empty array."""
         mock_client.get.return_value = []
-        assert accessor.list() == []
+        assert accessor.get_list() == []
+
+    def test_pattern_filters_by_exact_name(self, accessor: DomainAccessor, mock_client: MagicMock):
+        """list(pattern=) returns only domains whose name fully matches the pattern."""
+        mock_client.get.return_value = [SAMPLE_DOMAIN_DATA, SAMPLE_DOMAIN_DATA_2]
+        result = accessor.get_list(pattern="umaine\\.edu")
+        assert len(result) == 1
+        assert result[0].name == "umaine.edu"
+
+    def test_pattern_alternation_matches_multiple(self, accessor: DomainAccessor, mock_client: MagicMock):
+        """list(pattern=) with alternation returns all matching domains."""
+        mock_client.get.return_value = [SAMPLE_DOMAIN_DATA, SAMPLE_DOMAIN_DATA_2]
+        result = accessor.get_list(pattern="umaine\\.edu|maine\\.edu")
+        assert len(result) == 2
+
+    def test_pattern_is_case_insensitive(self, accessor: DomainAccessor, mock_client: MagicMock):
+        """list(pattern=) matches regardless of case."""
+        mock_client.get.return_value = [SAMPLE_DOMAIN_DATA]
+        result = accessor.get_list(pattern="UMAINE\\.EDU")
+        assert len(result) == 1
+
+    def test_pattern_no_match_returns_empty(self, accessor: DomainAccessor, mock_client: MagicMock):
+        """list(pattern=) returns an empty list when no domains match."""
+        mock_client.get.return_value = [SAMPLE_DOMAIN_DATA, SAMPLE_DOMAIN_DATA_2]
+        assert accessor.get_list(pattern="notfound\\.edu") == []
+
+    def test_pattern_none_returns_all(self, accessor: DomainAccessor, mock_client: MagicMock):
+        """list(pattern=None) returns all domains unfiltered."""
+        mock_client.get.return_value = [SAMPLE_DOMAIN_DATA, SAMPLE_DOMAIN_DATA_2]
+        assert len(accessor.get_list(pattern=None)) == 2
+
+    def test_pattern_wildcard_matches_subdomain(self, accessor: DomainAccessor, mock_client: MagicMock):
+        """list(pattern=) supports regex wildcards for subdomain matching."""
+        mock_client.get.return_value = [SAMPLE_DOMAIN_DATA, SAMPLE_DOMAIN_DATA_2]
+        result = accessor.get_list(pattern=r".*\.edu")
+        assert len(result) == 2
+
+    def test_search_passed_as_query_param(self, accessor: DomainAccessor, mock_client: MagicMock):
+        """list(search=) forwards the value as the 'search' query parameter."""
+        mock_client.get.return_value = []
+        accessor.get_list(search="maine.edu")
+        mock_client.get.assert_called_once_with("/api/certinext/v2/domains", params={"search": "maine.edu"})
+
+    def test_domain_status_passed_as_query_param(self, accessor: DomainAccessor, mock_client: MagicMock):
+        """list(domain_status=) forwards the value as the 'domainStatus' query parameter."""
+        mock_client.get.return_value = []
+        accessor.get_list(domain_status="ACTIVE")
+        mock_client.get.assert_called_once_with("/api/certinext/v2/domains", params={"domainStatus": "ACTIVE"})
+
+    def test_dcv_status_passed_as_query_param(self, accessor: DomainAccessor, mock_client: MagicMock):
+        """list(dcv_status=) forwards the value as the 'dcvStatus' query parameter."""
+        mock_client.get.return_value = []
+        accessor.get_list(dcv_status="PENDING")
+        mock_client.get.assert_called_once_with("/api/certinext/v2/domains", params={"dcvStatus": "PENDING"})
+
+    def test_server_side_params_combined(self, accessor: DomainAccessor, mock_client: MagicMock):
+        """list() can combine search, domain_status, and dcv_status in a single call."""
+        mock_client.get.return_value = []
+        accessor.get_list(search="maine", domain_status="ACTIVE", dcv_status="PENDING,REJECTED")
+        mock_client.get.assert_called_once_with(
+            "/api/certinext/v2/domains",
+            params={"search": "maine", "domainStatus": "ACTIVE", "dcvStatus": "PENDING,REJECTED"},
+        )
+
+
+class TestDomainAccessorListPendingDcv:
+    """DomainAccessor.list_pending_dcv() returns only domains where needs_dcv is True."""
+
+    def test_returns_only_pending_domains(self, accessor: DomainAccessor, mock_client: MagicMock):
+        """list_pending_dcv() excludes already-verified domains."""
+        mock_client.get.return_value = [SAMPLE_DOMAIN_DATA, SAMPLE_DOMAIN_DATA_2]
+        result = accessor.list_pending_dcv()
+        assert len(result) == 1
+        assert result[0].name == "maine.edu"
+
+    def test_returns_empty_when_all_verified(self, accessor: DomainAccessor, mock_client: MagicMock):
+        """list_pending_dcv() returns an empty list when all domains are verified."""
+        mock_client.get.return_value = [SAMPLE_DOMAIN_DATA]
+        assert accessor.list_pending_dcv() == []
+
+    def test_returns_all_when_all_pending(self, accessor: DomainAccessor, mock_client: MagicMock):
+        """list_pending_dcv() returns all domains when none are verified."""
+        pending_data = dict(SAMPLE_DOMAIN_DATA, dcvStatus="PENDING")
+        mock_client.get.return_value = [pending_data, SAMPLE_DOMAIN_DATA_2]
+        result = accessor.list_pending_dcv()
+        assert len(result) == 2
+
+    def test_returns_empty_when_no_domains(self, accessor: DomainAccessor, mock_client: MagicMock):
+        """list_pending_dcv() returns an empty list when there are no domains."""
+        mock_client.get.return_value = []
+        assert accessor.list_pending_dcv() == []
+
+    def test_excludes_inactive_domains(self, accessor: DomainAccessor, mock_client: MagicMock):
+        """list_pending_dcv() excludes INACTIVE domains even if DCV status is PENDING."""
+        inactive = dict(SAMPLE_DOMAIN_DATA_2, status="INACTIVE")
+        mock_client.get.return_value = [inactive]
+        assert accessor.list_pending_dcv() == []
+
+    def test_result_contains_domain_instances(self, accessor: DomainAccessor, mock_client: MagicMock):
+        """list_pending_dcv() returns Domain instances."""
+        mock_client.get.return_value = [SAMPLE_DOMAIN_DATA_2]
+        result = accessor.list_pending_dcv()
+        assert all(isinstance(d, Domain) for d in result)
+
+    def test_calls_list_with_no_server_side_filters(self, accessor: DomainAccessor, mock_client: MagicMock):
+        """list_pending_dcv() fetches all domains without server-side status filters.
+
+        The API returns 400 when domainStatus and dcvStatus are combined, so
+        filtering is done client-side via needs_dcv instead.
+        """
+        mock_client.get.return_value = []
+        accessor.list_pending_dcv()
+        mock_client.get.assert_called_once_with("/api/certinext/v2/domains", params=None)
 
 
 class TestDomainAccessorGet:
