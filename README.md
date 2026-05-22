@@ -4,7 +4,7 @@
 
 Python library and CLI scripts for managing your [CertiNext](https://us.certinext.io) environment via the REST API.
 
-> **Work in progress:** Only the `list` and `get` domain operations have been tested against the live API so far. All other operations (create, deactivate, DCV methods) are implemented based on the API documentation but remain untested.
+> **Work in progress:** `list`, `get`, `get_dcv`, `verify`, and `change_dcv_method` have been tested against the live API. `create`, `deactivate`, `last_dcv_attempt`, and `dcv_attempt_history` are implemented based on the API documentation but remain untested against the live API.
 
 ## Contents
 
@@ -62,6 +62,9 @@ uv run scripts/certinext_setup_keyring.py
 Scripts read credentials from the keychain automatically — no CLI flags or
 environment variables needed for day-to-day use.
 
+<details>
+<summary>Named profiles and credential resolution order</summary>
+
 #### Named profiles
 
 Use `--profile NAME` to store multiple credential sets (e.g. different
@@ -79,7 +82,7 @@ python scripts/domains.py --profile prod list
 CERTINEXT_PROFILE=prod python scripts/pending_dcv.py
 ```
 
-### Credential resolution order
+#### Credential resolution order
 
 All scripts resolve credentials in this priority order:
 
@@ -87,6 +90,8 @@ All scripts resolve credentials in this priority order:
 2. OS keychain (active profile; see above)
 3. Environment variables (`CERTINEXT_CLIENT_ID`, `CERTINEXT_CLIENT_SECRET`)
 4. Interactive prompt (falls back to `getpass` for secrets)
+
+</details>
 
 ---
 
@@ -128,7 +133,8 @@ keychain (see [Credentials](#credentials) above).
 --json                  Output raw JSON instead of tabular format
 ```
 
-### Subcommands
+<details>
+<summary>Subcommands</summary>
 
 #### list
 
@@ -209,6 +215,8 @@ Show the full DCV attempt history for a domain.
 python scripts/domains.py dcv-attempt-history DOMAIN_ID
 ```
 
+</details>
+
 ### JSON output
 
 Add `--json` before the subcommand to get raw JSON instead of the default tabular output. Useful for piping into `jq`:
@@ -269,7 +277,8 @@ sess = certinext.session(
 )
 ```
 
-All parameters and their defaults:
+<details>
+<summary>All session() parameters</summary>
 
 ```python
 sess = certinext.session(
@@ -280,6 +289,8 @@ sess = certinext.session(
     scope="",                              # optional
 )
 ```
+
+</details>
 
 The session obtains and caches an OAuth 2.0 bearer token automatically, refreshing it before it expires.
 
@@ -366,6 +377,9 @@ When a name is passed (contains a `.`), the library lists all domains and finds 
 domain = sess.domain.create("newdomain.example.com")
 ```
 
+<details>
+<summary>Domain properties and DcvInfo fields</summary>
+
 #### Domain properties
 
 | Property | Type | Description |
@@ -403,6 +417,8 @@ repr(domain)
 | `method` | `str` | DCV method in upper case: `DNS-TXT` or `HTTP-URL` |
 | `token` | `str` | Challenge value to publish (TXT record content for DNS-TXT, file token for HTTP-URL) |
 | `host` | `str` | Sub-domain prefix for the challenge record (e.g. `_emudhra-challenge`). Empty string if not returned by the API. |
+
+</details>
 
 #### Domain methods
 
@@ -456,7 +472,8 @@ for domain in sess.domain.get_list():
 
 ---
 
-## Project structure
+<details>
+<summary>Project structure</summary>
 
 ```
 certinext/
@@ -471,3 +488,5 @@ scripts/
     domains.py                  # CLI for domain management
     pending_dcv.py              # list all domains with pending DCV verification
 ```
+
+</details>
