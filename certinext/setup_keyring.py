@@ -23,7 +23,7 @@ import sys
 try:
     import keyring
 except ImportError:
-    sys.exit("keyring is not installed. Run: pip install certinext[keyring]")
+    sys.exit("keyring is not installed. Run: uv pip install certinext[keyring]")
 
 
 def _service_name(profile: str | None) -> str:
