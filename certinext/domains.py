@@ -120,12 +120,12 @@ class Domain:
     @property
     def status(self) -> DomainStatus | None:
         """Domain status. One of ``ACTIVE``, ``INACTIVE``, ``EXPIRED``, ``REVOKED``."""
-        return self._data.get("status")  # type: ignore[return-value]
+        return self._data.get("status")
 
     @property
     def dcv_status(self) -> DcvStatus | None:
         """DCV status. One of ``VERIFIED``, ``PENDING``, ``REJECTED``, ``EXPIRED``."""
-        return self._data.get("dcvStatus")  # type: ignore[return-value]
+        return self._data.get("dcvStatus")
 
     @property
     def created_at(self) -> datetime | None:
