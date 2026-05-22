@@ -13,8 +13,8 @@ Switch profiles by setting DCV_PROFILE (or the equivalent env var for the
 consuming script) before running.
 
 Usage:
-    uv run scripts/certinext_setup_keyring.py                   # default profile
-    uv run scripts/certinext_setup_keyring.py --profile prod    # production profile
+    certinext-setup-keyring                        # default profile (installed command)
+    certinext-setup-keyring --profile prod         # production profile
 """
 import argparse
 import getpass
@@ -23,7 +23,7 @@ import sys
 try:
     import keyring
 except ImportError:
-    sys.exit("keyring is not installed. Run: pip install keyring  (or: pip install -e .[keyring])")
+    sys.exit("keyring is not installed. Run: pip install certinext[keyring]")
 
 
 def _service_name(profile: str | None) -> str:

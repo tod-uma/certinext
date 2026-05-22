@@ -30,6 +30,11 @@ dependencies = [
     "tabulate>=0.9.0",
 ]
 
+[project.scripts]
+certinext-setup-keyring = "certinext.setup_keyring:main"
+certinext-domains = "certinext.domains_cli:main"
+certinext-pending-dcv = "certinext.pending_dcv:main"
+
 [project.urls]
 Homepage = "https://github.com/tod-uma/certinext"
 Repository = "https://github.com/tod-uma/certinext"
@@ -68,7 +73,7 @@ select = [
 ]
 
 [tool.pyright]
-include = ["certinext", "scripts", "tests"]
+include = ["certinext", "tests"]
 pythonVersion = "3.10"
 typeCheckingMode = "standard"
 

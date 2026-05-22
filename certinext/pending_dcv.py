@@ -20,9 +20,9 @@ is not yet VERIFIED. Credentials are resolved in priority order: command-line
 argument → environment variable → interactive prompt.
 
 Usage:
-    python scripts/pending_dcv.py
-    python scripts/pending_dcv.py --pattern ".*\\.maine\\.edu"
-    python scripts/pending_dcv.py --json
+    certinext-pending-dcv                                    # (installed command)
+    certinext-pending-dcv --pattern ".*\\.maine\\.edu"
+    certinext-pending-dcv --json
 """
 
 import argparse
