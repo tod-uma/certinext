@@ -14,6 +14,7 @@
 
 """Tests that verify graceful error handling for bad data and failed API calls."""
 
+from typing import cast
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -21,7 +22,7 @@ import requests
 
 from certinext.auth import OAuth2ClientCredentials
 from certinext.client import CertiNextClient
-from certinext.domains import VALID_DCV_METHODS, Domain, DomainAccessor
+from certinext.domains import VALID_DCV_METHODS, DcvMethod, Domain, DomainAccessor
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -476,7 +477,7 @@ class TestDcvMethodValidation:
         """change_dcv_method() normalizes lowercase input and sends lowercase to the API."""
         mock_client.patch.return_value = {}
         d = self._domain_with_id(mock_client)
-        d.change_dcv_method("dns-txt")
+        d.change_dcv_method(cast(DcvMethod, "dns-txt"))  # cast: testing case-insensitive normalisation
         _, kwargs = mock_client.patch.call_args
         assert kwargs["json"]["dcvMethod"] == "dns-txt"
 
@@ -484,19 +485,19 @@ class TestDcvMethodValidation:
         """change_dcv_method() raises ValueError when passed the old 'DNS' method name."""
         d = self._domain_with_id(mock_client)
         with pytest.raises(ValueError, match="DNS"):
-            d.change_dcv_method("DNS")
+            d.change_dcv_method(cast(DcvMethod, "DNS"))  # cast: intentionally testing invalid runtime value
 
     def test_change_dcv_method_raises_on_unknown_value(self, mock_client: MagicMock):
         """change_dcv_method() raises ValueError for any unrecognised method."""
         d = self._domain_with_id(mock_client)
         with pytest.raises(ValueError, match="BOGUS"):
-            d.change_dcv_method("BOGUS")
+            d.change_dcv_method(cast(DcvMethod, "BOGUS"))  # cast: intentionally testing invalid runtime value
 
     def test_change_dcv_method_raises_before_api_call(self, mock_client: MagicMock):
         """change_dcv_method() raises ValueError without calling the API for bad input."""
         d = self._domain_with_id(mock_client)
         with pytest.raises(ValueError):
-            d.change_dcv_method("DNS")
+            d.change_dcv_method(cast(DcvMethod, "DNS"))  # cast: intentionally testing invalid runtime value
         mock_client.patch.assert_not_called()
 
     def test_valid_dcv_methods_constant_contains_expected_values(self):

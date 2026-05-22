@@ -66,7 +66,7 @@ class CertiNextClient:
             resp: The HTTP response to check.
 
         Raises:
-            CertiNextAPIError: On a non-2xx response.
+            CertiNextAPIError: On a non-2xx response. Provides ``.status_code`` and ``.body``.
         """
         try:
             resp.raise_for_status()
@@ -88,7 +88,7 @@ class CertiNextClient:
             Parsed JSON response as a dict or list.
 
         Raises:
-            CertiNextAPIError: On a non-2xx response.
+            CertiNextAPIError: On a non-2xx response. Provides ``.status_code`` and ``.body``.
         """
         resp = self._session.get(f"{self.base_url}{path}", headers=self._headers(), params=params)
         self._raise_api_error(resp)
@@ -105,7 +105,7 @@ class CertiNextClient:
             Parsed JSON response as a dict.
 
         Raises:
-            CertiNextAPIError: On a non-2xx response.
+            CertiNextAPIError: On a non-2xx response. Provides ``.status_code`` and ``.body``.
         """
         resp = self._session.post(f"{self.base_url}{path}", headers=self._headers(), json=json)
         self._raise_api_error(resp)
@@ -122,7 +122,7 @@ class CertiNextClient:
             Parsed JSON response as a dict.
 
         Raises:
-            CertiNextAPIError: On a non-2xx response.
+            CertiNextAPIError: On a non-2xx response. Provides ``.status_code`` and ``.body``.
         """
         resp = self._session.put(f"{self.base_url}{path}", headers=self._headers(), json=json)
         self._raise_api_error(resp)
@@ -139,7 +139,7 @@ class CertiNextClient:
             Parsed JSON response as a dict.
 
         Raises:
-            CertiNextAPIError: On a non-2xx response.
+            CertiNextAPIError: On a non-2xx response. Provides ``.status_code`` and ``.body``.
         """
         resp = self._session.patch(f"{self.base_url}{path}", headers=self._headers(), json=json)
         self._raise_api_error(resp)
@@ -155,7 +155,7 @@ class CertiNextClient:
             Parsed JSON response as a dict, or ``None`` if the response has no body.
 
         Raises:
-            CertiNextAPIError: On a non-2xx response.
+            CertiNextAPIError: On a non-2xx response. Provides ``.status_code`` and ``.body``.
         """
         resp = self._session.delete(f"{self.base_url}{path}", headers=self._headers())
         self._raise_api_error(resp)

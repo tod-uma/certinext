@@ -23,12 +23,26 @@ Typical usage::
         client_secret="YOUR_CLIENT_SECRET",
     )
 
-    for domain in sess.domain.list():
+    for domain in sess.domain.get_list():
         print(domain)
+
+Known API limitations (vendor bugs, pending fix):
+    - The ``search`` parameter to :meth:`~certinext.domains.DomainAccessor.get_list`
+      is ignored — all domains are returned regardless. Use ``pattern`` for
+      client-side filtering.
+    - Passing both ``domain_status`` and ``dcv_status`` to
+      :meth:`~certinext.domains.DomainAccessor.get_list` returns a 400 error.
+      :meth:`~certinext.domains.DomainAccessor.list_pending_dcv` works around this
+      by fetching all domains and filtering client-side.
+
+Errors:
+    All API errors raise :class:`CertiNextAPIError` (a subclass of
+    :class:`requests.HTTPError`) with ``.status_code`` (int) and ``.body``
+    (dict or str) attributes for inspection.
 """
 
 from .client import CertiNextClient
-from .domains import VALID_DCV_METHODS, Domain, DomainAccessor
+from .domains import VALID_DCV_METHODS, DcvInfo, DcvMethod, DcvStatus, Domain, DomainAccessor, DomainStatus
 from .exceptions import CertiNextAPIError
 from .session import CertiNextSession
 
@@ -66,5 +80,9 @@ __all__ = [
     "CertiNextSession",
     "Domain",
     "DomainAccessor",
+    "DcvInfo",
+    "DcvMethod",
+    "DcvStatus",
+    "DomainStatus",
     "VALID_DCV_METHODS",
 ]

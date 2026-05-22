@@ -15,11 +15,21 @@
 import re
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from .client import CertiNextClient
+from .exceptions import CertiNextAPIError  # noqa: F401 — referenced in Raises docstrings
 
 _BASE = "/api/certinext/v2/domains"
+
+DomainStatus = Literal["ACTIVE", "INACTIVE", "EXPIRED", "REVOKED"]
+"""Valid values returned by :attr:`Domain.status`."""
+
+DcvStatus = Literal["VERIFIED", "PENDING", "REJECTED", "EXPIRED"]
+"""Valid values returned by :attr:`Domain.dcv_status`."""
+
+DcvMethod = Literal["DNS-TXT", "HTTP-URL"]
+"""Valid DCV method strings accepted by :meth:`Domain.change_dcv_method`."""
 
 VALID_DCV_METHODS: frozenset[str] = frozenset({"DNS-TXT", "HTTP-URL"})
 
@@ -89,7 +99,12 @@ class Domain:
 
     @name.setter
     def name(self, value: str) -> None:
-        """Update the domain name in the local object (does not call the API)."""
+        """Update the domain name in the local object only — does not call the API.
+
+        Note:
+            The CertiNext API does not provide a rename endpoint. This setter
+            exists for internal use only; changes do not persist to the server.
+        """
         self._data["domainName"] = value
 
     @property
@@ -103,13 +118,13 @@ class Domain:
         return self._data.get("organizationName")
 
     @property
-    def status(self) -> str | None:
-        """Domain status, e.g. ``ACTIVE`` or ``INACTIVE``."""
+    def status(self) -> DomainStatus | None:
+        """Domain status. One of ``ACTIVE``, ``INACTIVE``, ``EXPIRED``, ``REVOKED``."""
         return self._data.get("status")
 
     @property
-    def dcv_status(self) -> str | None:
-        """Domain Control Validation status, e.g. ``VERIFIED`` or ``PENDING``."""
+    def dcv_status(self) -> DcvStatus | None:
+        """DCV status. One of ``VERIFIED``, ``PENDING``, ``REJECTED``, ``EXPIRED``."""
         return self._data.get("dcvStatus")
 
     @property
@@ -190,7 +205,7 @@ class Domain:
             ``self``, allowing method chaining.
 
         Raises:
-            requests.HTTPError: On a non-2xx API response.
+            CertiNextAPIError: On a non-2xx API response. Provides ``.status_code`` and ``.body``.
         """
         self._data = self._client.post(f"{_BASE}/{self.id}/deactivate")
         return self
@@ -202,7 +217,7 @@ class Domain:
             :class:`DcvInfo` with normalised ``method``, ``token``, and ``host``.
 
         Raises:
-            requests.HTTPError: On a non-2xx API response.
+            CertiNextAPIError: On a non-2xx API response. Provides ``.status_code`` and ``.body``.
         """
         result: dict[str, Any] | list[Any] = self._client.get(f"{_BASE}/{self.id}/dcv")
         raw: dict[str, Any] = result if isinstance(result, dict) else {}
@@ -220,26 +235,29 @@ class Domain:
         """Trigger DCV verification for this domain.
 
         Returns:
-            Dict containing the verification attempt result.
+            Raw API response dict. The structure is opaque; call
+            :meth:`refresh` and check :attr:`dcv_status` to confirm the
+            outcome rather than inspecting the response body directly.
 
         Raises:
-            requests.HTTPError: On a non-2xx API response.
+            CertiNextAPIError: On a non-2xx API response. Provides ``.status_code`` and ``.body``.
         """
         return self._client.post(f"{_BASE}/{self.id}/dcv/verify")
 
-    def change_dcv_method(self, method: str) -> dict[str, Any]:
+    def change_dcv_method(self, method: DcvMethod) -> dict[str, Any]:
         """Change the DCV method for this domain.
 
         Args:
-            method: The new DCV method. Accepted values: ``DNS-TXT``, ``HTTP-URL``.
-                    Case-insensitive; normalized to lower case before sending.
+            method: The new DCV method. Must be ``"DNS-TXT"`` or ``"HTTP-URL"``.
+                    Case-insensitive; normalized to upper case before validation
+                    and to lower case before sending to the API.
 
         Returns:
-            Dict containing the updated DCV configuration.
+            Raw API response dict containing the updated DCV configuration.
 
         Raises:
             ValueError: If ``method`` is not one of the accepted DCV methods.
-            requests.HTTPError: On a non-2xx API response.
+            CertiNextAPIError: On a non-2xx API response. Provides ``.status_code`` and ``.body``.
         """
         method_upper = method.upper()
         if method_upper not in VALID_DCV_METHODS:
@@ -254,10 +272,11 @@ class Domain:
         """Return details of the most recent DCV attempt for this domain.
 
         Returns:
-            Dict containing the last DCV attempt details.
+            Raw API response dict. Contains attempt metadata such as timestamp
+            and result; exact keys depend on the API version.
 
         Raises:
-            requests.HTTPError: On a non-2xx API response.
+            CertiNextAPIError: On a non-2xx API response. Provides ``.status_code`` and ``.body``.
         """
         result = self._client.get(f"{_BASE}/{self.id}/dcv/attempts/last")
         return result if isinstance(result, dict) else {}
@@ -266,10 +285,11 @@ class Domain:
         """Return the full DCV attempt history for this domain.
 
         Returns:
-            Dict or list containing the history of DCV attempts.
+            Raw API response. May be a list of attempt dicts or a wrapper dict
+            depending on the API version; iterate defensively.
 
         Raises:
-            requests.HTTPError: On a non-2xx API response.
+            CertiNextAPIError: On a non-2xx API response. Provides ``.status_code`` and ``.body``.
         """
         return self._client.get(f"{_BASE}/{self.id}/dcv/attempts")
 
@@ -334,7 +354,7 @@ class DomainAccessor:
 
         Raises:
             re.error: If ``pattern`` is not a valid regular expression.
-            requests.HTTPError: On a non-2xx API response.
+            CertiNextAPIError: On a non-2xx API response. Provides ``.status_code`` and ``.body``.
         """
         params: dict[str, Any] = {}
         if offset is not None:
@@ -380,7 +400,7 @@ class DomainAccessor:
 
         Raises:
             re.error: If ``pattern`` is not a valid regular expression.
-            requests.HTTPError: On a non-2xx API response.
+            CertiNextAPIError: On a non-2xx API response. Provides ``.status_code`` and ``.body``.
         """
         domains = self.get_list(search=search, pattern=pattern)
         return [d for d in domains if d.needs_dcv]
@@ -401,7 +421,7 @@ class DomainAccessor:
         Raises:
             KeyError: If a name lookup finds no matching domain.
             ValueError: If the API returns an unexpected response type for an ID lookup.
-            requests.HTTPError: On a non-2xx API response.
+            CertiNextAPIError: On a non-2xx API response. Provides ``.status_code`` and ``.body``.
         """
         if "." in domain_id_or_name:
             name = domain_id_or_name.lower()
@@ -425,6 +445,6 @@ class DomainAccessor:
             The newly created `Domain`.
 
         Raises:
-            requests.HTTPError: On a non-2xx API response.
+            CertiNextAPIError: On a non-2xx API response. Provides ``.status_code`` and ``.body``.
         """
         return Domain(self._client, self._client.post(_BASE, json={"name": name, **fields}))
