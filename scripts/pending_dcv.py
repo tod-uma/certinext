@@ -33,17 +33,40 @@ import os
 from tabulate import tabulate
 
 import certinext
+from certinext._keyring import keyring_get, keyring_service
 from certinext.domains import Domain
 
 
-def _resolve(arg_value: str | None, env_var: str, prompt: str, secret: bool = False) -> str:
-    """Resolve a credential value from CLI arg, environment variable, or interactive prompt.
+def _resolve(
+    arg_value: str | None,
+    env_var: str,
+    prompt: str,
+    secret: bool = False,
+    kr_service: str | None = None,
+    kr_key: str | None = None,
+) -> str:
+    """Resolve a credential from CLI arg, keyring, environment variable, or interactive prompt.
 
-    Checks in priority order: explicit argument → environment variable → prompt.
+    Checks in priority order: explicit argument → keyring → environment variable → prompt.
     Secrets are read with getpass so they are not echoed to the terminal.
+
+    Args:
+        arg_value: Value from a CLI argument, or None if not provided.
+        env_var: Environment variable name to fall back to.
+        prompt: Text shown when prompting interactively.
+        secret: If True, use getpass so input is not echoed.
+        kr_service: Keyring service name to check before the env var.
+        kr_key: Keyring key (username) to look up under kr_service.
+
+    Returns:
+        The resolved credential string.
     """
     if arg_value:
         return arg_value
+    if kr_service and kr_key:
+        kr_value = keyring_get(kr_service, kr_key)
+        if kr_value:
+            return kr_value
     env_value = os.environ.get(env_var)
     if env_value:
         return env_value
@@ -68,6 +91,10 @@ def main() -> None:
         description="List all active domains that have not completed DCV verification",
     )
     # Credentials: each can be supplied as a CLI arg, env var, or interactive prompt.
+    parser.add_argument(
+        "--profile", metavar="NAME", default=None,
+        help="Credential profile for keyring lookup (env: CERTINEXT_PROFILE; default: use the default profile)",
+    )
     parser.add_argument(
         "--account-number", "--client-id", dest="account_number", metavar="ACCT",
         help="CertiNext account number (env: CERTINEXT_CLIENT_ID)",
@@ -96,10 +123,16 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    # Resolve credentials, prompting interactively for any that are not provided.
-    client_id = _resolve(args.account_number, "CERTINEXT_CLIENT_ID", "CertiNext account number")
+    profile = args.profile or os.environ.get("CERTINEXT_PROFILE")
+    svc = keyring_service("certinext", profile)
+
+    client_id = _resolve(
+        args.account_number, "CERTINEXT_CLIENT_ID", "CertiNext account number",
+        kr_service=svc, kr_key="CERTINEXT_CLIENT_ID",
+    )
     client_secret = _resolve(
         args.client_secret, "CERTINEXT_CLIENT_SECRET", "CertiNext client secret", secret=True,
+        kr_service=svc, kr_key="CERTINEXT_CLIENT_SECRET",
     )
 
     sess = certinext.session(

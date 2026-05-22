@@ -6,6 +6,18 @@ Python library and CLI scripts for managing your [CertiNext](https://us.certinex
 
 > **Work in progress:** Only the `list` and `get` domain operations have been tested against the live API so far. All other operations (create, deactivate, DCV methods) are implemented based on the API documentation but remain untested.
 
+## Contents
+
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [Credentials](#credentials)
+- [Scripts](#scripts)
+  - [certinext_setup_keyring](#certinext_setup_keyring)
+  - [domains](#domains)
+  - [pending_dcv](#pending_dcv)
+- [Python library](#python-library)
+- [Project structure](#project-structure)
+
 ## Requirements
 
 - Python 3.10+
@@ -29,12 +41,218 @@ This installs the `certinext` package and its dependencies (`requests`, `tabulat
 
 You need two values from the CertiNext portal (Integrations → APIs → OAuth mode):
 
-| Argument | Description |
+| Value | Description |
 |---|---|
-| `--account-number` | Your CertiNext account number (used as the OAuth `client_id`) |
-| `--client-secret` | The OAuth access key generated in the portal |
+| Account number | Your CertiNext account number (used as the OAuth `client_id`) |
+| Client secret | The OAuth access key generated in the portal |
 
 The token endpoint defaults to `https://us-api.certinext.io/oauth/token`. Override with `--token-url` if yours differs.
+
+### Storing credentials in the OS keychain (recommended)
+
+Run the setup script once to store your credentials securely in the system
+keychain (Windows Credential Manager on Windows, Keychain on macOS,
+libsecret/SecretService on Linux):
+
+```bash
+pip install -e .[keyring]
+uv run scripts/certinext_setup_keyring.py
+```
+
+Scripts read credentials from the keychain automatically — no CLI flags or
+environment variables needed for day-to-day use.
+
+#### Named profiles
+
+Use `--profile NAME` to store multiple credential sets (e.g. different
+accounts or environments):
+
+```bash
+uv run scripts/certinext_setup_keyring.py --profile prod
+```
+
+Select a profile at runtime with `--profile` or the `CERTINEXT_PROFILE`
+environment variable:
+
+```bash
+python scripts/domains.py --profile prod list
+CERTINEXT_PROFILE=prod python scripts/pending_dcv.py
+```
+
+### Credential resolution order
+
+All scripts resolve credentials in this priority order:
+
+1. Explicit CLI argument (`--account-number`, `--client-secret`)
+2. OS keychain (active profile; see above)
+3. Environment variables (`CERTINEXT_CLIENT_ID`, `CERTINEXT_CLIENT_SECRET`)
+4. Interactive prompt (falls back to `getpass` for secrets)
+
+---
+
+## Scripts
+
+### certinext_setup_keyring
+
+`scripts/certinext_setup_keyring.py` stores CertiNext API credentials in the
+OS keychain interactively. Run it once before using the other scripts.
+
+```bash
+# Store credentials for the default profile
+uv run scripts/certinext_setup_keyring.py
+
+# Store credentials for a named profile
+uv run scripts/certinext_setup_keyring.py --profile prod
+```
+
+The script prompts for your account number and client secret, shows any
+currently stored value as a default so you can keep it by pressing Enter, and
+masks the secret with asterisks on confirmation.
+
+### domains
+
+`scripts/domains.py` is a command-line interface for the domains API.
+
+### Common arguments
+
+These appear before the subcommand. Credentials are optional when stored in the
+keychain (see [Credentials](#credentials) above).
+
+```
+--profile NAME          Credential profile for keyring lookup (env: CERTINEXT_PROFILE)
+--account-number ACCT   CertiNext account number / client_id (env: CERTINEXT_CLIENT_ID)
+--client-secret SECRET  OAuth2 client secret (env: CERTINEXT_CLIENT_SECRET)
+--base-url URL          API base URL (default: https://us-api.certinext.io)
+--token-url URL         Token endpoint URL (default: https://us-api.certinext.io/oauth/token)
+--scope SCOPE           OAuth2 scope (optional)
+--json                  Output raw JSON instead of tabular format
+```
+
+### Subcommands
+
+#### list
+
+List all domains.
+
+```bash
+# credentials from keychain
+python scripts/domains.py list
+python scripts/domains.py list --offset 50 --limit 25
+
+# credentials explicit
+python scripts/domains.py --account-number ACCT --client-secret SECRET list
+```
+
+#### get
+
+Get a single domain by name or ID.
+
+```bash
+python scripts/domains.py get maine.edu
+python scripts/domains.py get vuxwZgEXWWFXQQWC-...
+```
+
+#### create
+
+Create a new domain. Additional API fields can be passed as `KEY=VALUE` pairs.
+
+```bash
+python scripts/domains.py create newdomain.example.com
+```
+
+#### deactivate
+
+Deactivate a domain by ID. Prompts for confirmation unless `-y` is passed.
+
+```bash
+python scripts/domains.py deactivate DOMAIN_ID
+python scripts/domains.py deactivate DOMAIN_ID -y
+```
+
+#### get-dcv
+
+Show current DCV status for a domain.
+
+```bash
+python scripts/domains.py get-dcv DOMAIN_ID
+```
+
+#### verify-dcv
+
+Trigger DCV verification for a domain.
+
+```bash
+python scripts/domains.py verify-dcv DOMAIN_ID
+```
+
+#### change-dcv-method
+
+Change the DCV method for a domain. Accepted values: `DNS-TXT`, `HTTP-URL`.
+
+```bash
+python scripts/domains.py change-dcv-method DOMAIN_ID DNS-TXT
+```
+
+#### last-dcv-attempt
+
+Show the most recent DCV attempt for a domain.
+
+```bash
+python scripts/domains.py last-dcv-attempt DOMAIN_ID
+```
+
+#### dcv-attempt-history
+
+Show the full DCV attempt history for a domain.
+
+```bash
+python scripts/domains.py dcv-attempt-history DOMAIN_ID
+```
+
+### JSON output
+
+Add `--json` before the subcommand to get raw JSON instead of the default tabular output. Useful for piping into `jq`:
+
+```bash
+python scripts/domains.py --json list | jq '.[] | .domainName'
+```
+
+### pending_dcv
+
+`scripts/pending_dcv.py` lists every active domain that has not yet completed
+DCV verification. It is a quick read-only diagnostic — no changes are made to
+any domain.
+
+### Arguments
+
+```
+--profile NAME          Credential profile for keyring lookup (env: CERTINEXT_PROFILE)
+--account-number ACCT   CertiNext account number (env: CERTINEXT_CLIENT_ID)
+--client-secret SECRET  OAuth2 client secret (env: CERTINEXT_CLIENT_SECRET)
+--base-url URL          API base URL (default: https://us-api.certinext.io)
+--token-url URL         Token endpoint URL (default: https://us-api.certinext.io/oauth/token)
+--pattern REGEX         Filter by domain name regex (re.fullmatch, case-insensitive)
+--json                  Output raw JSON instead of tabular format
+```
+
+### Examples
+
+```bash
+# Credentials from keychain (no flags needed after setup)
+python scripts/pending_dcv.py
+
+# Use a named profile
+python scripts/pending_dcv.py --profile prod
+
+# Filter to a specific subdomain pattern
+python scripts/pending_dcv.py --pattern ".*\.maine\.edu"
+
+# Raw JSON output for scripting
+python scripts/pending_dcv.py --json | jq '.[] | .domainName'
+
+# Credentials from environment variables
+CERTINEXT_CLIENT_ID=ACCT CERTINEXT_CLIENT_SECRET=SECRET python scripts/pending_dcv.py
+```
 
 ---
 
@@ -238,158 +456,18 @@ for domain in sess.domain.get_list():
 
 ---
 
-## domains script
-
-`scripts/domains.py` is a command-line interface for the domains API.
-
-### Common arguments
-
-These appear before the subcommand and are required on every call:
-
-```
---account-number ACCT   CertiNext account number (also accepted as --client-id)
---client-secret SECRET  OAuth2 client secret
---base-url URL          API base URL (default: https://us-api.certinext.io)
---token-url URL         Token endpoint URL (default: https://us-api.certinext.io/oauth/token)
---scope SCOPE           OAuth2 scope (optional)
---json                  Output raw JSON instead of tabular format
-```
-
-### Subcommands
-
-#### list
-
-List all domains.
-
-```bash
-python scripts/domains.py --account-number ACCT --client-secret SECRET list
-python scripts/domains.py --account-number ACCT --client-secret SECRET list --offset 50 --limit 25
-```
-
-#### get
-
-Get a single domain by name or ID.
-
-```bash
-python scripts/domains.py --account-number ACCT --client-secret SECRET get maine.edu
-python scripts/domains.py --account-number ACCT --client-secret SECRET get vuxwZgEXWWFXQQWC-...
-```
-
-#### create
-
-Create a new domain. Additional API fields can be passed as `KEY=VALUE` pairs.
-
-```bash
-python scripts/domains.py --account-number ACCT --client-secret SECRET create newdomain.example.com
-```
-
-#### deactivate
-
-Deactivate a domain by ID. Prompts for confirmation unless `-y` is passed.
-
-```bash
-python scripts/domains.py --account-number ACCT --client-secret SECRET deactivate DOMAIN_ID
-python scripts/domains.py --account-number ACCT --client-secret SECRET deactivate DOMAIN_ID -y
-```
-
-#### get-dcv
-
-Show current DCV status for a domain.
-
-```bash
-python scripts/domains.py --account-number ACCT --client-secret SECRET get-dcv DOMAIN_ID
-```
-
-#### verify-dcv
-
-Trigger DCV verification for a domain.
-
-```bash
-python scripts/domains.py --account-number ACCT --client-secret SECRET verify-dcv DOMAIN_ID
-```
-
-#### change-dcv-method
-
-Change the DCV method for a domain. Accepted values: `DNS-TXT`, `HTTP-URL`.
-
-```bash
-python scripts/domains.py --account-number ACCT --client-secret SECRET change-dcv-method DOMAIN_ID DNS-TXT
-```
-
-#### last-dcv-attempt
-
-Show the most recent DCV attempt for a domain.
-
-```bash
-python scripts/domains.py --account-number ACCT --client-secret SECRET last-dcv-attempt DOMAIN_ID
-```
-
-#### dcv-attempt-history
-
-Show the full DCV attempt history for a domain.
-
-```bash
-python scripts/domains.py --account-number ACCT --client-secret SECRET dcv-attempt-history DOMAIN_ID
-```
-
-### JSON output
-
-Add `--json` before the subcommand to get raw JSON instead of the default tabular output. Useful for piping into `jq`:
-
-```bash
-python scripts/domains.py --account-number ACCT --client-secret SECRET --json list | jq '.[] | .domainName'
-```
-
----
-
-## pending_dcv script
-
-`scripts/pending_dcv.py` lists every active domain that has not yet completed
-DCV verification. It is a quick read-only diagnostic — no changes are made to
-any domain.
-
-### Arguments
-
-Credentials are resolved in priority order: CLI argument → environment variable
-→ interactive prompt. Secrets are read with `getpass` and are not echoed.
-
-```
---account-number ACCT   CertiNext account number (env: CERTINEXT_CLIENT_ID)
---client-secret SECRET  OAuth2 client secret (env: CERTINEXT_CLIENT_SECRET)
---base-url URL          API base URL (default: https://us-api.certinext.io)
---token-url URL         Token endpoint URL (default: https://us-api.certinext.io/oauth/token)
---pattern REGEX         Filter by domain name regex (re.fullmatch, case-insensitive)
---json                  Output raw JSON instead of tabular format
-```
-
-### Examples
-
-```bash
-# List all domains pending DCV (prompts for credentials if not set in env)
-python scripts/pending_dcv.py
-
-# Filter to a specific subdomain pattern
-python scripts/pending_dcv.py --pattern ".*\.maine\.edu"
-
-# Raw JSON output for scripting
-python scripts/pending_dcv.py --json | jq '.[] | .domainName'
-
-# Credentials from environment variables (no prompts)
-CERTINEXT_CLIENT_ID=ACCT CERTINEXT_CLIENT_SECRET=SECRET python scripts/pending_dcv.py
-```
-
----
-
 ## Project structure
 
 ```
 certinext/
-    __init__.py      # session() factory, top-level exports
-    auth.py          # OAuth 2.0 client credentials token management
-    client.py        # HTTP session wrapper (get/post/put/delete)
-    domains.py       # Domain class and DomainAccessor
-    session.py       # CertiNextSession (session.domain accessor)
+    __init__.py               # session() factory, top-level exports
+    _keyring.py               # shared keyring helpers (keyring_service, keyring_get)
+    auth.py                   # OAuth 2.0 client credentials token management
+    client.py                 # HTTP session wrapper (get/post/put/delete)
+    domains.py                # Domain class and DomainAccessor
+    session.py                # CertiNextSession (session.domain accessor)
 scripts/
-    domains.py       # CLI for domain management
-    pending_dcv.py   # list all domains with pending DCV verification
+    certinext_setup_keyring.py  # store API credentials in the OS keychain
+    domains.py                  # CLI for domain management
+    pending_dcv.py              # list all domains with pending DCV verification
 ```

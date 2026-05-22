@@ -79,7 +79,9 @@ class TestDomainListFixture:
         for d in domains_list:
             assert d.created_at is not None
             assert d.created_at.tzinfo is not None
-            assert d.created_at.utcoffset().total_seconds() == 0  # type: ignore[union-attr]
+            offset = d.created_at.utcoffset()
+            assert offset is not None
+            assert offset.total_seconds() == 0
 
     def test_all_created_at_same_date(self, domains_list: list[Domain]):
         """All fixture domains share the same creation timestamp."""

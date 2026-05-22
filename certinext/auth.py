@@ -52,7 +52,8 @@ class OAuth2ClientCredentials:
         if self._access_token and time.time() < self._expires_at - 60:
             return self._access_token
         self._fetch_token()
-        return self._access_token  # type: ignore[return-value]
+        assert self._access_token is not None
+        return self._access_token
 
     def _fetch_token(self) -> None:
         """Request a new token from the token endpoint and cache it."""

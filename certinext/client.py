@@ -12,11 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Any
+from typing import Any, cast
 
 import requests
 
 from .auth import OAuth2ClientCredentials
+from .exceptions import CertiNextAPIError
 
 
 class CertiNextClient:
@@ -24,7 +25,7 @@ class CertiNextClient:
 
     Handles authentication automatically by delegating to
     `OAuth2ClientCredentials`. All requests include a Bearer token and
-    JSON content-type headers. HTTP errors raise `requests.HTTPError`.
+    JSON content-type headers. HTTP errors raise `CertiNextAPIError`.
     """
 
     def __init__(
@@ -55,6 +56,27 @@ class CertiNextClient:
             "Accept": "application/json",
         }
 
+    def _raise_api_error(self, resp: requests.Response) -> None:
+        """Raise CertiNextAPIError if the response has a non-2xx status.
+
+        Preserves the API response body (parsed JSON or raw text) so callers
+        can inspect what the server actually returned.
+
+        Args:
+            resp: The HTTP response to check.
+
+        Raises:
+            CertiNextAPIError: On a non-2xx response.
+        """
+        try:
+            resp.raise_for_status()
+        except requests.HTTPError as exc:
+            try:
+                body: dict[str, Any] | str = resp.json()
+            except Exception:
+                body = resp.text
+            raise CertiNextAPIError(resp.status_code, body, response=resp) from exc
+
     def get(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any] | list[Any]:
         """Send a GET request and return the parsed JSON response.
 
@@ -66,11 +88,11 @@ class CertiNextClient:
             Parsed JSON response as a dict or list.
 
         Raises:
-            requests.HTTPError: On a non-2xx response.
+            CertiNextAPIError: On a non-2xx response.
         """
         resp = self._session.get(f"{self.base_url}{path}", headers=self._headers(), params=params)
-        resp.raise_for_status()
-        return resp.json()  # type: ignore[no-any-return]
+        self._raise_api_error(resp)
+        return cast(dict[str, Any], resp.json())
 
     def post(self, path: str, json: dict[str, Any] | None = None) -> dict[str, Any]:
         """Send a POST request with an optional JSON body and return the parsed response.
@@ -83,11 +105,11 @@ class CertiNextClient:
             Parsed JSON response as a dict.
 
         Raises:
-            requests.HTTPError: On a non-2xx response.
+            CertiNextAPIError: On a non-2xx response.
         """
         resp = self._session.post(f"{self.base_url}{path}", headers=self._headers(), json=json)
-        resp.raise_for_status()
-        return resp.json()  # type: ignore[no-any-return]
+        self._raise_api_error(resp)
+        return cast(dict[str, Any], resp.json())
 
     def put(self, path: str, json: dict[str, Any] | None = None) -> dict[str, Any]:
         """Send a PUT request with an optional JSON body and return the parsed response.
@@ -100,11 +122,11 @@ class CertiNextClient:
             Parsed JSON response as a dict.
 
         Raises:
-            requests.HTTPError: On a non-2xx response.
+            CertiNextAPIError: On a non-2xx response.
         """
         resp = self._session.put(f"{self.base_url}{path}", headers=self._headers(), json=json)
-        resp.raise_for_status()
-        return resp.json()  # type: ignore[no-any-return]
+        self._raise_api_error(resp)
+        return cast(dict[str, Any], resp.json())
 
     def patch(self, path: str, json: dict[str, Any] | None = None) -> dict[str, Any]:
         """Send a PATCH request with an optional JSON body and return the parsed response.
@@ -117,11 +139,11 @@ class CertiNextClient:
             Parsed JSON response as a dict.
 
         Raises:
-            requests.HTTPError: On a non-2xx response.
+            CertiNextAPIError: On a non-2xx response.
         """
         resp = self._session.patch(f"{self.base_url}{path}", headers=self._headers(), json=json)
-        resp.raise_for_status()
-        return resp.json()  # type: ignore[no-any-return]
+        self._raise_api_error(resp)
+        return cast(dict[str, Any], resp.json())
 
     def delete(self, path: str) -> dict[str, Any] | None:
         """Send a DELETE request and return the parsed response body if present.
@@ -133,8 +155,8 @@ class CertiNextClient:
             Parsed JSON response as a dict, or ``None`` if the response has no body.
 
         Raises:
-            requests.HTTPError: On a non-2xx response.
+            CertiNextAPIError: On a non-2xx response.
         """
         resp = self._session.delete(f"{self.base_url}{path}", headers=self._headers())
-        resp.raise_for_status()
+        self._raise_api_error(resp)
         return resp.json() if resp.content else None
