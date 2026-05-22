@@ -18,7 +18,7 @@ from datetime import datetime
 from typing import Any, Literal
 
 from .client import CertiNextClient
-from .exceptions import CertiNextAPIError
+from .exceptions import CertiNextAPIError  # noqa: F401 — referenced in Raises docstrings
 
 _BASE = "/api/certinext/v2/domains"
 
