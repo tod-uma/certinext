@@ -29,6 +29,7 @@ Typical usage::
 
 from .client import CertiNextClient
 from .domains import VALID_DCV_METHODS, Domain, DomainAccessor
+from .exceptions import CertiNextAPIError
 from .session import CertiNextSession
 
 
@@ -60,6 +61,7 @@ def session(
 
 __all__ = [
     "session",
+    "CertiNextAPIError",
     "CertiNextClient",
     "CertiNextSession",
     "Domain",
