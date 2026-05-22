@@ -25,14 +25,29 @@ Python library and CLI scripts for managing your [CertiNext](https://us.certinex
 
 ## Installation
 
-Install the package in editable mode inside a virtual environment:
+### From the package registry
 
 ```bash
-python -m venv .venv
+pip install certinext \
+  --extra-index-url https://gitlab.its.maine.edu/api/v4/groups/2236/-/packages/pypi/simple
+```
+
+Or with `uv`:
+
+```bash
+uv add certinext --index https://gitlab.its.maine.edu/api/v4/groups/2236/-/packages/pypi/simple
+```
+
+### Development install
+
+Clone the repository, then install in editable mode:
+
+```bash
+uv venv
 .venv\Scripts\activate        # Windows
 # source .venv/bin/activate   # macOS / Linux
 
-pip install -e .
+uv pip install -e .
 ```
 
 This installs the `certinext` package and its dependencies (`requests`, `tabulate`, `python-dotenv`).
@@ -55,7 +70,7 @@ keychain (Windows Credential Manager on Windows, Keychain on macOS,
 libsecret/SecretService on Linux):
 
 ```bash
-pip install -e .[keyring]
+uv pip install -e .[keyring]
 uv run scripts/certinext_setup_keyring.py
 ```
 
@@ -118,7 +133,7 @@ masks the secret with asterisks on confirmation.
 
 `scripts/domains.py` is a command-line interface for the domains API.
 
-### Common arguments
+#### Common arguments
 
 These appear before the subcommand. Credentials are optional when stored in the
 keychain (see [Credentials](#credentials) above).
@@ -217,7 +232,7 @@ python scripts/domains.py dcv-attempt-history DOMAIN_ID
 
 </details>
 
-### JSON output
+#### JSON output
 
 Add `--json` before the subcommand to get raw JSON instead of the default tabular output. Useful for piping into `jq`:
 
@@ -231,7 +246,7 @@ python scripts/domains.py --json list | jq '.[] | .domainName'
 DCV verification. It is a quick read-only diagnostic — no changes are made to
 any domain.
 
-### Arguments
+#### Arguments
 
 ```
 --profile NAME          Credential profile for keyring lookup (env: CERTINEXT_PROFILE)
@@ -243,7 +258,7 @@ any domain.
 --json                  Output raw JSON instead of tabular format
 ```
 
-### Examples
+#### Examples
 
 ```bash
 # Credentials from keychain (no flags needed after setup)
@@ -435,10 +450,10 @@ print(dcv.method)                  # e.g. "DNS-TXT" or "HTTP-URL"
 print(dcv.token)                   # challenge value to publish
 print(dcv.host)                    # sub-domain prefix for the challenge record
 
-result = domain.verify()           # trigger verification
+result = domain.verify()           # trigger verification; returns raw API response dict
 domain.change_dcv_method("DNS-TXT")   # accepted values: "DNS-TXT", "HTTP-URL"
-attempt = domain.last_dcv_attempt()
-history = domain.dcv_attempt_history()
+attempt = domain.last_dcv_attempt()   # returns raw API response dict
+history = domain.dcv_attempt_history() # returns raw API response dict or list
 
 # Get the raw API response dict
 raw = domain.as_dict()
@@ -454,8 +469,8 @@ sess = certinext.session(
     client_secret="YOUR_CLIENT_SECRET",
 )
 
-# list_pending_dcv() uses server-side filters to fetch only ACTIVE domains
-# with non-VERIFIED DCV status, then returns those where needs_dcv is True.
+# Due to a vendor API bug, server-side status filtering is currently disabled.
+# list_pending_dcv() fetches all domains and filters client-side for needs_dcv.
 for domain in sess.domain.list_pending_dcv():
     print(f"Verifying {domain.name} ...")
     domain.verify()
@@ -472,8 +487,10 @@ for domain in sess.domain.get_list():
 
 ---
 
+## Project structure
+
 <details>
-<summary>Project structure</summary>
+<summary>File tree</summary>
 
 ```
 certinext/
