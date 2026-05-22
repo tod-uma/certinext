@@ -183,7 +183,7 @@ def cmd_dcv_attempt_history(args: argparse.Namespace, sess: certinext.CertiNextS
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="domains",
+        prog="certinext-domains",
         description="Manage CertiNext domains",
     )
     parser.add_argument(

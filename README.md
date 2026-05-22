@@ -11,10 +11,10 @@ Python library and CLI scripts for managing your [CertiNext](https://us.certinex
 - [Requirements](#requirements)
 - [Installation](#installation)
 - [Credentials](#credentials)
-- [Scripts](#scripts)
-  - [certinext_setup_keyring](#certinext_setup_keyring)
-  - [domains](#domains)
-  - [pending_dcv](#pending_dcv)
+- [CLI commands](#cli-commands)
+  - [certinext-setup-keyring](#certinext-setup-keyring)
+  - [certinext-domains](#certinext-domains)
+  - [certinext-pending-dcv](#certinext-pending-dcv)
 - [Python library](#python-library)
 - [Project structure](#project-structure)
 
@@ -65,13 +65,13 @@ The token endpoint defaults to `https://us-api.certinext.io/oauth/token`. Overri
 
 ### Storing credentials in the OS keychain (recommended)
 
-Run the setup script once to store your credentials securely in the system
+Run the setup command once to store your credentials securely in the system
 keychain (Windows Credential Manager on Windows, Keychain on macOS,
 libsecret/SecretService on Linux):
 
 ```bash
-uv pip install -e .[keyring]
-uv run scripts/certinext_setup_keyring.py
+uv pip install certinext[keyring]
+certinext-setup-keyring
 ```
 
 Scripts read credentials from the keychain automatically — no CLI flags or
@@ -86,15 +86,15 @@ Use `--profile NAME` to store multiple credential sets (e.g. different
 accounts or environments):
 
 ```bash
-uv run scripts/certinext_setup_keyring.py --profile prod
+certinext-setup-keyring --profile prod
 ```
 
 Select a profile at runtime with `--profile` or the `CERTINEXT_PROFILE`
 environment variable:
 
 ```bash
-python scripts/domains.py --profile prod list
-CERTINEXT_PROFILE=prod python scripts/pending_dcv.py
+certinext-domains --profile prod list
+CERTINEXT_PROFILE=prod certinext-pending-dcv
 ```
 
 #### Credential resolution order
@@ -110,28 +110,28 @@ All scripts resolve credentials in this priority order:
 
 ---
 
-## Scripts
+## CLI commands
 
-### certinext_setup_keyring
+### certinext-setup-keyring
 
-`scripts/certinext_setup_keyring.py` stores CertiNext API credentials in the
-OS keychain interactively. Run it once before using the other scripts.
+`certinext-setup-keyring` stores CertiNext API credentials in the OS keychain
+interactively. Run it once before using the other commands.
 
 ```bash
 # Store credentials for the default profile
-uv run scripts/certinext_setup_keyring.py
+certinext-setup-keyring
 
 # Store credentials for a named profile
-uv run scripts/certinext_setup_keyring.py --profile prod
+certinext-setup-keyring --profile prod
 ```
 
 The script prompts for your account number and client secret, shows any
 currently stored value as a default so you can keep it by pressing Enter, and
 masks the secret with asterisks on confirmation.
 
-### domains
+### certinext-domains
 
-`scripts/domains.py` is a command-line interface for the domains API.
+`certinext-domains` is a command-line interface for the domains API.
 
 #### Common arguments
 
@@ -157,11 +157,11 @@ List all domains.
 
 ```bash
 # credentials from keychain
-python scripts/domains.py list
-python scripts/domains.py list --offset 50 --limit 25
+certinext-domains list
+certinext-domains list --offset 50 --limit 25
 
 # credentials explicit
-python scripts/domains.py --account-number ACCT --client-secret SECRET list
+certinext-domains --account-number ACCT --client-secret SECRET list
 ```
 
 #### get
@@ -169,8 +169,8 @@ python scripts/domains.py --account-number ACCT --client-secret SECRET list
 Get a single domain by name or ID.
 
 ```bash
-python scripts/domains.py get maine.edu
-python scripts/domains.py get vuxwZgEXWWFXQQWC-...
+certinext-domains get maine.edu
+certinext-domains get vuxwZgEXWWFXQQWC-...
 ```
 
 #### create
@@ -178,7 +178,7 @@ python scripts/domains.py get vuxwZgEXWWFXQQWC-...
 Create a new domain. Additional API fields can be passed as `KEY=VALUE` pairs.
 
 ```bash
-python scripts/domains.py create newdomain.example.com
+certinext-domains create newdomain.example.com
 ```
 
 #### deactivate
@@ -186,8 +186,8 @@ python scripts/domains.py create newdomain.example.com
 Deactivate a domain by ID. Prompts for confirmation unless `-y` is passed.
 
 ```bash
-python scripts/domains.py deactivate DOMAIN_ID
-python scripts/domains.py deactivate DOMAIN_ID -y
+certinext-domains deactivate DOMAIN_ID
+certinext-domains deactivate DOMAIN_ID -y
 ```
 
 #### get-dcv
@@ -195,7 +195,7 @@ python scripts/domains.py deactivate DOMAIN_ID -y
 Show current DCV status for a domain.
 
 ```bash
-python scripts/domains.py get-dcv DOMAIN_ID
+certinext-domains get-dcv DOMAIN_ID
 ```
 
 #### verify-dcv
@@ -203,7 +203,7 @@ python scripts/domains.py get-dcv DOMAIN_ID
 Trigger DCV verification for a domain.
 
 ```bash
-python scripts/domains.py verify-dcv DOMAIN_ID
+certinext-domains verify-dcv DOMAIN_ID
 ```
 
 #### change-dcv-method
@@ -211,7 +211,7 @@ python scripts/domains.py verify-dcv DOMAIN_ID
 Change the DCV method for a domain. Accepted values: `DNS-TXT`, `HTTP-URL`.
 
 ```bash
-python scripts/domains.py change-dcv-method DOMAIN_ID DNS-TXT
+certinext-domains change-dcv-method DOMAIN_ID DNS-TXT
 ```
 
 #### last-dcv-attempt
@@ -219,7 +219,7 @@ python scripts/domains.py change-dcv-method DOMAIN_ID DNS-TXT
 Show the most recent DCV attempt for a domain.
 
 ```bash
-python scripts/domains.py last-dcv-attempt DOMAIN_ID
+certinext-domains last-dcv-attempt DOMAIN_ID
 ```
 
 #### dcv-attempt-history
@@ -227,7 +227,7 @@ python scripts/domains.py last-dcv-attempt DOMAIN_ID
 Show the full DCV attempt history for a domain.
 
 ```bash
-python scripts/domains.py dcv-attempt-history DOMAIN_ID
+certinext-domains dcv-attempt-history DOMAIN_ID
 ```
 
 </details>
@@ -237,12 +237,12 @@ python scripts/domains.py dcv-attempt-history DOMAIN_ID
 Add `--json` before the subcommand to get raw JSON instead of the default tabular output. Useful for piping into `jq`:
 
 ```bash
-python scripts/domains.py --json list | jq '.[] | .domainName'
+certinext-domains --json list | jq '.[] | .domainName'
 ```
 
-### pending_dcv
+### certinext-pending-dcv
 
-`scripts/pending_dcv.py` lists every active domain that has not yet completed
+`certinext-pending-dcv` lists every active domain that has not yet completed
 DCV verification. It is a quick read-only diagnostic — no changes are made to
 any domain.
 
@@ -262,19 +262,19 @@ any domain.
 
 ```bash
 # Credentials from keychain (no flags needed after setup)
-python scripts/pending_dcv.py
+certinext-pending-dcv
 
 # Use a named profile
-python scripts/pending_dcv.py --profile prod
+certinext-pending-dcv --profile prod
 
 # Filter to a specific subdomain pattern
-python scripts/pending_dcv.py --pattern ".*\.maine\.edu"
+certinext-pending-dcv --pattern ".*\.maine\.edu"
 
 # Raw JSON output for scripting
-python scripts/pending_dcv.py --json | jq '.[] | .domainName'
+certinext-pending-dcv --json | jq '.[] | .domainName'
 
 # Credentials from environment variables
-CERTINEXT_CLIENT_ID=ACCT CERTINEXT_CLIENT_SECRET=SECRET python scripts/pending_dcv.py
+CERTINEXT_CLIENT_ID=ACCT CERTINEXT_CLIENT_SECRET=SECRET certinext-pending-dcv
 ```
 
 ---
@@ -499,11 +499,10 @@ certinext/
     auth.py                   # OAuth 2.0 client credentials token management
     client.py                 # HTTP session wrapper (get/post/put/delete)
     domains.py                # Domain class and DomainAccessor
+    domains_cli.py            # certinext-domains CLI entry point
+    pending_dcv.py            # certinext-pending-dcv CLI entry point
     session.py                # CertiNextSession (session.domain accessor)
-scripts/
-    certinext_setup_keyring.py  # store API credentials in the OS keychain
-    domains.py                  # CLI for domain management
-    pending_dcv.py              # list all domains with pending DCV verification
+    setup_keyring.py          # certinext-setup-keyring CLI entry point
 ```
 
 </details>
