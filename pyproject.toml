@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "certinext"
-version = "0.1.2a3"
+version = "0.1.2a4"
 description = "Python client library for the CertiNext certificate management API"
 readme = "README.md"
 license = "Apache-2.0"
@@ -73,7 +73,7 @@ select = [
 ]
 
 [tool.pyright]
-include = ["certinext", "tests"]
+include = ["certinext", "tests", "examples"]
 pythonVersion = "3.10"
 typeCheckingMode = "standard"
 
