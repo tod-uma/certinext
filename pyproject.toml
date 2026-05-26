@@ -73,7 +73,7 @@ select = [
 ]
 
 [tool.pyright]
-include = ["certinext", "tests"]
+include = ["certinext", "tests", "examples"]
 pythonVersion = "3.10"
 typeCheckingMode = "standard"
 
