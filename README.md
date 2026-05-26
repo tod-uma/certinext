@@ -16,6 +16,7 @@ Python library and CLI scripts for managing your [CertiNext](https://us.certinex
   - [certinext-domains](#certinext-domains)
   - [certinext-pending-dcv](#certinext-pending-dcv)
 - [Python library](#python-library)
+- [Examples](#examples)
 - [Project structure](#project-structure)
 
 ## Requirements
@@ -487,6 +488,50 @@ for domain in sess.domain.get_list():
 
 ---
 
+## Examples
+
+### DNS-TXT DCV automation
+
+[`examples/dns_txt_dcv.py`](examples/dns_txt_dcv.py) is a ready-to-adapt script that automates the full DNS-TXT DCV pipeline: publishing the challenge token, waiting for DNS propagation, and triggering `domain.verify()` once the token is visible everywhere.
+
+It contains two stub functions you implement for your DNS provider:
+
+| Function | Purpose |
+|---|---|
+| `set_dns_txt_record(fqdn, value, dry_run)` | Publish the TXT record via your DNS provider API |
+| `has_dns_txt_record(fqdn, value, nameserver)` | Check whether a nameserver returns the expected TXT value |
+
+Each stub raises `NotImplementedError` until implemented and includes inline examples using **dnspython** (nsupdate/TSIG) and **AWS Route 53** (boto3).
+
+<details>
+<summary>Usage</summary>
+
+```bash
+export CERTINEXT_CLIENT_ID="your-account-number"
+export CERTINEXT_CLIENT_SECRET="your-client-secret"
+
+# Process all pending domains
+python examples/dns_txt_dcv.py
+
+# Preview without making changes
+python examples/dns_txt_dcv.py --dry-run
+
+# Limit to a specific domain or pattern
+python examples/dns_txt_dcv.py example.com
+python examples/dns_txt_dcv.py --pattern r".*\.example\.com"
+
+# Configure nameserver propagation checks
+python examples/dns_txt_dcv.py \
+  --auth-nameservers ns1.example.com,ns2.example.com \
+  --public-nameservers 8.8.8.8,1.1.1.1
+```
+
+Run the script repeatedly — each run advances every pending domain as far as it can go and exits cleanly when waiting for propagation. Once a domain is fully propagated, the script calls `domain.verify()` automatically.
+
+</details>
+
+---
+
 ## Project structure
 
 <details>
@@ -503,6 +548,8 @@ certinext/
     pending_dcv.py            # certinext-pending-dcv CLI entry point
     session.py                # CertiNextSession (session.domain accessor)
     setup_keyring.py          # certinext-setup-keyring CLI entry point
+examples/
+    dns_txt_dcv.py            # DNS-TXT DCV automation example (see Examples above)
 ```
 
 </details>
