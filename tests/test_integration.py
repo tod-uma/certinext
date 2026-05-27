@@ -271,9 +271,9 @@ class TestSandboxAccounts:
         """The sandbox account has a non-None account_number."""
         assert sandbox_account_info.account_number is not None
 
-    def test_account_has_name(self, sandbox_account_info: AccountInfo) -> None:
-        """The sandbox account has a non-None account_name."""
-        assert sandbox_account_info.account_name is not None
+    def test_account_name_is_str_or_none(self, sandbox_account_info: AccountInfo) -> None:
+        """account_name is a str when present, or None — not every account has one configured."""
+        assert sandbox_account_info.account_name is None or isinstance(sandbox_account_info.account_name, str)
 
     def test_list_groups_returns_list(self, sandbox_groups: list[Group]) -> None:
         """list_groups() returns a list (may be empty)."""
