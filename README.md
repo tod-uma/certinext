@@ -15,6 +15,7 @@ Python library and CLI scripts for managing your [CertiNext](https://us.certinex
   - [certinext-setup-keyring](#certinext-setup-keyring)
   - [certinext-domains](#certinext-domains)
   - [certinext-pending-dcv](#certinext-pending-dcv)
+  - [certinext-domain-cert-count](#certinext-domain-cert-count)
 - [Python library](#python-library)
 - [Examples](#examples)
 - [Project structure](#project-structure)
@@ -278,6 +279,49 @@ certinext-pending-dcv --json | jq '.[] | .domainName'
 CERTINEXT_CLIENT_ID=ACCT CERTINEXT_CLIENT_SECRET=SECRET certinext-pending-dcv
 ```
 
+### certinext-domain-cert-count
+
+`certinext-domain-cert-count` shows all registered domains and how many
+certificates each one has. It fetches the domain list and the orders report,
+then matches each certificate to its most specific registered domain by suffix
+— a cert for `host.subdomain.example.org` counts toward `subdomain.example.org`
+when that domain is registered, rather than the less-specific `example.org`.
+
+#### Arguments
+
+```
+--profile NAME           Credential profile for keyring lookup (env: CERTINEXT_PROFILE)
+--account-number ACCT    CertiNext account number (env: CERTINEXT_CLIENT_ID)
+--client-secret SECRET   OAuth2 client secret (env: CERTINEXT_CLIENT_SECRET)
+--base-url URL           API base URL (default: https://us-api.certinext.io)
+--token-url URL          Token endpoint URL (default: https://us-api.certinext.io/oauth/token)
+--status issued|expired  Filter to only issued or only expired certificates
+--condense               Show only top-level domains; subdomain counts roll up into their apex
+--json                   Output raw JSON instead of tabular format
+```
+
+#### Examples
+
+```bash
+# All certificates, all statuses (credentials from keychain)
+certinext-domain-cert-count
+
+# Only issued (active) certificates
+certinext-domain-cert-count --status issued
+
+# Only expired certificates
+certinext-domain-cert-count --status expired
+
+# Collapse subdomains — subdomain.example.org rolls into example.org
+certinext-domain-cert-count --condense
+
+# Condense + issued only
+certinext-domain-cert-count --condense --status issued
+
+# Raw JSON for scripting
+certinext-domain-cert-count --json | jq '.[] | select(.certificates != "0")'
+```
+
 ---
 
 ## Python library
@@ -333,10 +377,10 @@ Filter by status server-side (reduces data transferred):
 domains = sess.domain.get_list(domain_status="ACTIVE", dcv_status="PENDING,REJECTED,EXPIRED")
 ```
 
-> **Note:** The API `search` parameter is a confirmed vendor bug (reported
-> 2026-05-20) — all domains are returned regardless of the value passed. Use
-> `pattern` (below) for reliable filtering until CertiNext notifies the fix is
-> deployed.
+> **Note:** The API `search` parameter remains broken after the vendor's
+> claimed fix (re-tested 2026-05-27). FQDN searches (any value containing `.`)
+> still return all domains; substring searches (no `.`) return 0 results. Use
+> `pattern` (below) for reliable filtering.
 
 Filter by name with a regex (applied client-side after the API response):
 
@@ -486,6 +530,49 @@ for domain in sess.domain.get_list():
         domain.verify()
 ```
 
+### Working with orders
+
+`sess.orders` provides access to the CertiNext orders report API
+(`GET /api/certinext/v2/reports/orders`).
+
+#### Fetch all orders
+
+```python
+orders = sess.orders.get_list()
+for o in orders:
+    print(o.common_name, o.certificate_status)
+```
+
+Filter by certificate status:
+
+```python
+issued = sess.orders.get_list(status="issued")
+expired = sess.orders.get_list(status="expired")
+```
+
+`get_list()` paginates automatically. Use `get_page()` for manual control:
+
+```python
+page = sess.orders.get_page(page=1, size=50, status="issued")
+```
+
+#### OrderRecord properties
+
+| Property | Type | Description |
+|---|---|---|
+| `order_number` | `str \| None` | CertiNext order number |
+| `request_number` | `str \| None` | Request number |
+| `product_code` | `str \| None` | Product code (e.g. `OV_SSL`, `DV_SSL`) |
+| `order_status` | `str \| None` | Order lifecycle status (e.g. `complete`) |
+| `certificate_status` | `str \| None` | Certificate status (`issued`, `expired`, etc.) |
+| `common_name` | `str \| None` | Certificate common name (hostname or domain) |
+
+```python
+o.as_dict()   # raw API response dict
+o.to_row()    # flat dict[str, str] for tabular display
+repr(o)       # OrderRecord(order_number='ORD-001', common_name='example.org', ...)
+```
+
 ---
 
 ## Examples
@@ -543,10 +630,12 @@ certinext/
     _keyring.py               # shared keyring helpers (keyring_service, keyring_get)
     auth.py                   # OAuth 2.0 client credentials token management
     client.py                 # HTTP session wrapper (get/post/put/delete)
+    domain_cert_count.py      # certinext-domain-cert-count CLI entry point
     domains.py                # Domain class and DomainAccessor
     domains_cli.py            # certinext-domains CLI entry point
+    orders.py                 # OrderRecord and OrderAccessor
     pending_dcv.py            # certinext-pending-dcv CLI entry point
-    session.py                # CertiNextSession (session.domain accessor)
+    session.py                # CertiNextSession (session.domain, session.orders)
     setup_keyring.py          # certinext-setup-keyring CLI entry point
 examples/
     dns_txt_dcv.py            # DNS-TXT DCV automation example (see Examples above)

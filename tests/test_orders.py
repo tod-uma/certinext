@@ -19,7 +19,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from certinext.client import CertiNextClient
-from certinext.domain_cert_count import _build_rows
+from certinext.domain_cert_count import _apex_domain, _build_rows, _match_domain
 from certinext.domains import Domain
 from certinext.orders import OrderAccessor, OrderRecord
 
@@ -347,3 +347,147 @@ class TestBuildRows:
         """An empty domain list with no orders returns no rows."""
         rows = _build_rows([], [])
         assert rows == []
+
+    def test_hostname_cert_matches_parent_domain(self):
+        """A cert CN that is a hostname under a registered domain counts toward that domain."""
+        domains = [self._domain(SAMPLE_DOMAIN_DATA)]  # maine.edu
+        order = OrderRecord({"orderNumber": "ORD-X", "certificateStatus": "issued", "commonName": "host.maine.edu"})
+        rows = _build_rows(domains, [order])
+        maine_row = next(r for r in rows if r["domain"] == "maine.edu")
+        assert maine_row["certificates"] == "1"
+
+    def test_most_specific_domain_wins(self):
+        """A hostname under a registered subdomain counts toward that subdomain, not the apex."""
+        domains = [self._domain(SAMPLE_DOMAIN_DATA), self._domain(SAMPLE_DOMAIN_DATA_2)]
+        # SAMPLE_DOMAIN_DATA_2 is sub.maine.edu; cert CN is host.sub.maine.edu
+        order = OrderRecord({"orderNumber": "ORD-X", "certificateStatus": "issued", "commonName": "host.sub.maine.edu"})
+        rows = _build_rows(domains, [order])
+        sub_row = next(r for r in rows if r["domain"] == "sub.maine.edu")
+        maine_row = next(r for r in rows if r["domain"] == "maine.edu")
+        assert sub_row["certificates"] == "1"
+        assert maine_row["certificates"] == "0"
+
+
+# ---------------------------------------------------------------------------
+# _match_domain helper
+# ---------------------------------------------------------------------------
+
+class TestMatchDomain:
+    """Tests for _match_domain."""
+
+    def test_exact_match(self):
+        """Exact CN match returns the domain name."""
+        assert _match_domain("maine.edu", {"maine.edu"}) == "maine.edu"
+
+    def test_suffix_match(self):
+        """A hostname under a registered domain returns that domain."""
+        assert _match_domain("host.maine.edu", {"maine.edu"}) == "maine.edu"
+
+    def test_most_specific_suffix_wins(self):
+        """The longest (most specific) suffix match is returned."""
+        assert _match_domain("host.noc.maine.edu", {"maine.edu", "noc.maine.edu"}) == "noc.maine.edu"
+
+    def test_no_match_returns_none(self):
+        """A CN with no registered suffix returns None."""
+        assert _match_domain("orphan.edu", {"maine.edu"}) is None
+
+    def test_partial_label_not_matched(self):
+        """A domain whose name is a substring but not a proper suffix label is not matched."""
+        # "emaine.edu" should NOT match "maine.edu"
+        assert _match_domain("emaine.edu", {"maine.edu"}) is None
+
+    def test_exact_beats_suffix(self):
+        """Exact match is preferred over any suffix match."""
+        assert _match_domain("noc.maine.edu", {"maine.edu", "noc.maine.edu"}) == "noc.maine.edu"
+
+
+# ---------------------------------------------------------------------------
+# _apex_domain helper
+# ---------------------------------------------------------------------------
+
+class TestApexDomain:
+    """Tests for _apex_domain."""
+
+    def test_apex_domain_is_itself(self):
+        """A domain with no registered parent returns itself."""
+        assert _apex_domain("maine.edu", {"maine.edu", "noc.maine.edu"}) == "maine.edu"
+
+    def test_subdomain_resolves_to_apex(self):
+        """A direct subdomain resolves to its apex."""
+        assert _apex_domain("noc.maine.edu", {"maine.edu", "noc.maine.edu"}) == "maine.edu"
+
+    def test_multi_level_resolves_to_apex(self):
+        """A three-level registered hierarchy resolves all the way to the apex."""
+        registered = {"maine.edu", "noc.maine.edu", "host.noc.maine.edu"}
+        assert _apex_domain("host.noc.maine.edu", registered) == "maine.edu"
+
+    def test_isolated_apex(self):
+        """A domain with no other registered entries is its own apex."""
+        assert _apex_domain("farmington.edu", {"farmington.edu"}) == "farmington.edu"
+
+
+# ---------------------------------------------------------------------------
+# _build_rows --condense
+# ---------------------------------------------------------------------------
+
+class TestBuildRowsCondense:
+    """Tests for _build_rows with condense=True."""
+
+    def _domain(self, data: dict) -> Domain:
+        """Build a Domain fixture."""
+        return Domain(MagicMock(spec=CertiNextClient), data)
+
+    def test_condense_hides_subdomain_rows(self):
+        """With condense=True, registered subdomains do not appear as rows."""
+        domains = [self._domain(SAMPLE_DOMAIN_DATA), self._domain(SAMPLE_DOMAIN_DATA_2)]
+        rows = _build_rows(domains, [], condense=True)
+        names = [r["domain"] for r in rows]
+        assert "maine.edu" in names
+        assert "sub.maine.edu" not in names
+
+    def test_condense_rolls_up_direct_subdomain_certs(self):
+        """Certs for a registered subdomain are counted under the apex when condensed."""
+        domains = [self._domain(SAMPLE_DOMAIN_DATA), self._domain(SAMPLE_DOMAIN_DATA_2)]
+        orders = [OrderRecord(dict(SAMPLE_ORDER_EXPIRED))]  # CN = sub.maine.edu
+        rows = _build_rows(domains, orders, condense=True)
+        maine_row = next(r for r in rows if r["domain"] == "maine.edu")
+        assert maine_row["certificates"] == "1"
+
+    def test_condense_rolls_up_hostname_certs(self):
+        """Certs for a hostname under a subdomain roll up to the apex."""
+        domains = [self._domain(SAMPLE_DOMAIN_DATA), self._domain(SAMPLE_DOMAIN_DATA_2)]
+        order = OrderRecord({"orderNumber": "ORD-X", "certificateStatus": "issued", "commonName": "host.sub.maine.edu"})
+        rows = _build_rows(domains, [order], condense=True)
+        maine_row = next(r for r in rows if r["domain"] == "maine.edu")
+        assert maine_row["certificates"] == "1"
+
+    def test_condense_sums_all_subtree_certs(self):
+        """Certs from multiple subdomains are all summed at the apex."""
+        domains = [self._domain(SAMPLE_DOMAIN_DATA), self._domain(SAMPLE_DOMAIN_DATA_2)]
+        orders = [
+            OrderRecord(dict(SAMPLE_ORDER)),           # CN = maine.edu (apex itself)
+            OrderRecord(dict(SAMPLE_ORDER_EXPIRED)),   # CN = sub.maine.edu
+        ]
+        rows = _build_rows(domains, orders, condense=True)
+        maine_row = next(r for r in rows if r["domain"] == "maine.edu")
+        assert maine_row["certificates"] == "2"
+
+    def test_condense_preserves_orphans(self):
+        """Orphaned orders still appear as '(not registered)' even with condense=True."""
+        domains = [self._domain(SAMPLE_DOMAIN_DATA)]
+        orphan = OrderRecord({"orderNumber": "ORD-999", "certificateStatus": "issued", "commonName": "orphan.edu"})
+        rows = _build_rows(domains, [orphan], condense=True)
+        orphan_row = next((r for r in rows if "orphan.edu" in r["domain"]), None)
+        assert orphan_row is not None
+        assert "not registered" in orphan_row["domain"]
+
+    def test_condense_sorted_alphabetically(self):
+        """Condensed apex rows are sorted alphabetically."""
+        domains = [
+            self._domain(SAMPLE_DOMAIN_DATA_NOCERTS),  # empty.maine.edu — subdomain
+            self._domain(SAMPLE_DOMAIN_DATA_2),         # sub.maine.edu — subdomain
+            self._domain(SAMPLE_DOMAIN_DATA),           # maine.edu — apex
+        ]
+        rows = _build_rows(domains, [], condense=True)
+        names = [r["domain"] for r in rows if "not registered" not in r["domain"]]
+        assert names == sorted(names)
