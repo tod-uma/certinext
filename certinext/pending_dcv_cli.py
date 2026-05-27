@@ -65,9 +65,9 @@ def main() -> None:
         apply_sandbox(args)
         sess = build_session(args)
 
-        # list_pending_dcv() uses server-side filters (ACTIVE + non-VERIFIED DCV status)
+        # get_pending_dcv() uses server-side filters (ACTIVE + non-VERIFIED DCV status)
         # to minimise data transferred, then applies the optional client-side pattern.
-        domains = sess.domain.list_pending_dcv(pattern=args.pattern)
+        domains = sess.domain.get_pending_dcv(pattern=args.pattern)
         _show_domains(domains, args.json)
     except KeyboardInterrupt:
         print("\nAborted.", file=sys.stderr)

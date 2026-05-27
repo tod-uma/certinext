@@ -523,7 +523,7 @@ domains = sess.domain.get_list(domain_status="ACTIVE", pattern=r".*\.maine\.edu"
 
 #### List domains needing DCV
 
-`list_pending_dcv()` returns active domains that have not yet completed DCV
+`get_pending_dcv()` returns active domains that have not yet completed DCV
 verification. It fetches all domains and filters client-side using
 `domain.needs_dcv`.
 
@@ -533,10 +533,10 @@ verification. It fetches all domains and filters client-side using
 > deployed.
 
 ```python
-pending = sess.domain.list_pending_dcv()
+pending = sess.domain.get_pending_dcv()
 
 # Narrow to a subset by name
-pending = sess.domain.list_pending_dcv(pattern=r".*\.maine\.edu")
+pending = sess.domain.get_pending_dcv(pattern=r".*\.maine\.edu")
 ```
 
 #### Get a domain
@@ -634,8 +634,8 @@ sess = certinext.session(
 )
 
 # Due to a vendor API bug, server-side status filtering is currently disabled.
-# list_pending_dcv() fetches all domains and filters client-side for needs_dcv.
-for domain in sess.domain.list_pending_dcv():
+# get_pending_dcv() fetches all domains and filters client-side for needs_dcv.
+for domain in sess.domain.get_pending_dcv():
     print(f"Verifying {domain.name} ...")
     domain.verify()
 ```
@@ -773,6 +773,8 @@ order = sess.ssl.create_dv_ucc(["example.com", "www.example.com"], validity=365)
 
 #### DV lifecycle
 
+Each mutation call returns an opaque response dict; call `order.refresh()` afterwards to see the updated `order.status`.
+
 ```python
 # 1. Get challenges
 for challenge in order.get_dcv():
@@ -780,19 +782,54 @@ for challenge in order.get_dcv():
 
 # 2. (Publish the DNS TXT or HTTP file challenge externally)
 
-# 3. Trigger verification
+# 3. Trigger verification (publish the challenge first, then call this)
 order.verify_dcv()
+order.refresh()
+print(order.status)  # "pending-csr" once DCV passes
 
 # 4. Submit CSR
 order.submit_csr(csr_pem)
+order.refresh()
 
 # 5. Accept agreement
 order.accept_agreement()
+order.refresh()
+print(order.status)  # "pending-approval" or "issued"
 
 # 6. Download once issued
 cert = order.download_certificate()        # JSON — cert + chain PEM strings
 pem  = order.download_certificate_pem()   # raw PEM text
 der  = order.download_certificate_der()   # raw DER bytes
+```
+
+**Complete end-to-end DV example:**
+
+```python
+import certinext, time
+
+sess = certinext.session(client_id="YOUR_ACCOUNT", client_secret="YOUR_SECRET")
+
+order = sess.ssl.create_dv("example.com", validity=365)
+print(f"Order {order.order_id} created, status={order.status}")
+
+for ch in order.get_dcv():
+    print(f"  {ch.domain}: add TXT at {ch.host!r}  value={ch.token!r}")
+
+input("Press Enter once DNS TXT records are published…")
+
+order.verify_dcv()
+order.submit_csr(open("csr.pem").read())
+order.accept_agreement()
+
+while True:
+    order.refresh()
+    if order.status == "issued":
+        break
+    print(f"  status={order.status}, waiting…")
+    time.sleep(30)
+
+open("cert.pem", "w").write(order.download_certificate_pem())
+print("Certificate written to cert.pem")
 ```
 
 #### Retrieve an existing order

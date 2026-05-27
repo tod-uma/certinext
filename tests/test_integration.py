@@ -135,9 +135,9 @@ class TestSandboxDomains:
         fetched = sandbox_session.domain.get(target.name)
         assert fetched.name == target.name
 
-    def test_list_pending_dcv_all_need_dcv(self, sandbox_session: certinext.CertiNextSession) -> None:
-        """list_pending_dcv() returns only domains whose needs_dcv is True."""
-        pending = sandbox_session.domain.list_pending_dcv()
+    def test_get_pending_dcv_all_need_dcv(self, sandbox_session: certinext.CertiNextSession) -> None:
+        """get_pending_dcv() returns only domains whose needs_dcv is True."""
+        pending = sandbox_session.domain.get_pending_dcv()
         assert all(d.needs_dcv for d in pending)
 
     def test_to_row_returns_string_values(self, sandbox_domains: list[Domain]) -> None:

@@ -159,7 +159,7 @@ class Domain:
 
     def __repr__(self) -> str:
         """Return a concise developer representation of the domain."""
-        return f"Domain(id={self.id!r}, name={self.name!r}, status={self.status!r}, dcv_status={self.dcv_status!r})"
+        return f"Domain(name={self.name!r}, status={self.status!r})"
 
     # --- public helpers ---
 
@@ -384,7 +384,7 @@ class DomainAccessor:
             domains = [d for d in domains if re.fullmatch(pattern, d.name or "", re.IGNORECASE)]
         return domains
 
-    def list_pending_dcv(self, search: str | None = None, pattern: str | None = None) -> list[Domain]:
+    def get_pending_dcv(self, search: str | None = None, pattern: str | None = None) -> list[Domain]:
         """Return all active domains that have not yet completed DCV verification.
 
         Fetches all domains and filters client-side using :attr:`Domain.needs_dcv`.
@@ -394,8 +394,8 @@ class DomainAccessor:
         Server-side filtering is disabled until CertiNext notifies the fix is deployed.
 
         Args:
-            search: Optional search string passed to the API. See :meth:`list`.
-            pattern: Optional client-side regex filter. See :meth:`list`.
+            search: Optional search string passed to the API. See :meth:`get_list`.
+            pattern: Optional client-side regex filter. See :meth:`get_list`.
 
         Returns:
             List of `Domain` objects where :attr:`Domain.needs_dcv` is ``True``.
@@ -410,9 +410,16 @@ class DomainAccessor:
     def get(self, domain_id_or_name: str) -> Domain:
         """Return a single domain by ID or by fully-qualified domain name.
 
-        When a name containing a ``.`` is passed, all domains are listed and
-        the match is found by name (case-insensitive). When an opaque ID is
-        passed, the single-domain endpoint is called directly.
+        The lookup strategy depends on whether the argument contains a dot:
+
+        - **Contains a dot** (e.g. ``maine.edu``): treated as a domain name.
+          All domains are fetched and the first case-insensitive match is returned.
+        - **No dot** (e.g. ``"dom-abc-123"``): treated as an opaque ID and the
+          single-domain endpoint is called directly.
+
+        **Edge case:** if a domain ID itself contains a dot, pass it via
+        :meth:`get_list` and filter on :attr:`Domain.id` directly to avoid the
+        ambiguity.
 
         Args:
             domain_id_or_name: A domain name (e.g. ``maine.edu``) or a domain ID.

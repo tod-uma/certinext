@@ -33,20 +33,29 @@ Known API limitations (vendor bugs, pending fix):
       client-side filtering.
     - Passing both ``domain_status`` and ``dcv_status`` to
       :meth:`~certinext.domains.DomainAccessor.get_list` returns a 400 error.
-      :meth:`~certinext.domains.DomainAccessor.list_pending_dcv` works around this
+      :meth:`~certinext.domains.DomainAccessor.get_pending_dcv` works around this
       by fetching all domains and filtering client-side.
 
 Errors:
-    All API errors raise :class:`CertiNextAPIError` (a subclass of
-    :class:`requests.HTTPError`) with ``.status_code`` (int) and ``.body``
-    (dict or str) attributes for inspection.
+    All API errors raise a subclass of :class:`CertiNextAPIError` (itself a
+    subclass of :class:`requests.HTTPError`). Typed subclasses are raised for
+    specific status codes: :class:`CertiNextNotFoundError` (404),
+    :class:`CertiNextConflictError` (409), and :class:`CertiNextRateLimitError`
+    (429). All carry ``.status_code`` (int) and ``.body`` (dict or str). When
+    the body is RFC 7807 JSON, ``.ems_code`` extracts the ``EMS-xxx`` code and
+    ``.field_errors`` surfaces the ``errors`` array.
 """
 
 from .accounts import AccountAccessor, AccountInfo, Group, Organization
 from .catalog import CatalogAccessor, CustomField, Product, ProductCategory
 from .client import CertiNextClient
 from .domains import VALID_DCV_METHODS, DcvInfo, DcvMethod, DcvStatus, Domain, DomainAccessor, DomainStatus
-from .exceptions import CertiNextAPIError
+from .exceptions import (
+    CertiNextAPIError,
+    CertiNextConflictError,
+    CertiNextNotFoundError,
+    CertiNextRateLimitError,
+)
 from .ledger import LedgerAccessor, LedgerRecord
 from .orders import CertificateStatus, OrderAccessor, OrderRecord
 from .session import CertiNextSession
@@ -106,6 +115,9 @@ __all__ = [
     "SANDBOX_TOKEN_URL",
     # Exceptions
     "CertiNextAPIError",
+    "CertiNextConflictError",
+    "CertiNextNotFoundError",
+    "CertiNextRateLimitError",
     # Core
     "CertiNextClient",
     "CertiNextSession",

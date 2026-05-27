@@ -17,7 +17,12 @@ from typing import Any, cast
 import requests
 
 from .auth import OAuth2ClientCredentials
-from .exceptions import CertiNextAPIError
+from .exceptions import (
+    CertiNextAPIError,
+    CertiNextConflictError,
+    CertiNextNotFoundError,
+    CertiNextRateLimitError,
+)
 
 
 class CertiNextClient:
@@ -57,16 +62,23 @@ class CertiNextClient:
         }
 
     def _raise_api_error(self, resp: requests.Response) -> None:
-        """Raise CertiNextAPIError if the response has a non-2xx status.
+        """Raise a typed CertiNextAPIError subclass if the response has a non-2xx status.
 
-        Preserves the API response body (parsed JSON or raw text) so callers
-        can inspect what the server actually returned.
+        Parses the RFC 7807 ``application/problem+json`` body and raises the
+        most specific exception type available:
+
+        - :class:`~certinext.exceptions.CertiNextNotFoundError` for 404
+        - :class:`~certinext.exceptions.CertiNextConflictError` for 409
+        - :class:`~certinext.exceptions.CertiNextRateLimitError` for 429
+          (with :attr:`~certinext.exceptions.CertiNextRateLimitError.retry_after`
+          from the ``Retry-After`` header)
+        - :class:`~certinext.exceptions.CertiNextAPIError` for all other errors
 
         Args:
             resp: The HTTP response to check.
 
         Raises:
-            CertiNextAPIError: On a non-2xx response. Provides ``.status_code`` and ``.body``.
+            CertiNextAPIError: On a non-2xx response.
         """
         try:
             resp.raise_for_status()
@@ -75,7 +87,22 @@ class CertiNextClient:
                 body: dict[str, Any] | str = resp.json()
             except Exception:
                 body = resp.text
-            raise CertiNextAPIError(resp.status_code, body, response=resp) from exc
+
+            status = resp.status_code
+            if status == 404:
+                raise CertiNextNotFoundError(status, body, response=resp) from exc
+            if status == 409:
+                raise CertiNextConflictError(status, body, response=resp) from exc
+            if status == 429:
+                retry_after: float | None = None
+                raw = resp.headers.get("Retry-After")
+                if raw is not None:
+                    try:
+                        retry_after = float(raw)
+                    except (ValueError, TypeError):
+                        pass
+                raise CertiNextRateLimitError(status, body, retry_after=retry_after, response=resp) from exc
+            raise CertiNextAPIError(status, body, response=resp) from exc
 
     def get(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any] | list[Any]:
         """Send a GET request and return the parsed JSON response.

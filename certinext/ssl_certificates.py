@@ -136,6 +136,21 @@ class DcvChallenge:
         """Return the raw API response dict for this challenge."""
         return self._data
 
+    def to_row(self) -> dict[str, str]:
+        """Return a flat ``dict[str, str]`` suitable for tabular display.
+
+        Returns:
+            Dict with keys ``domain``, ``method``, ``host``, ``token``.
+        """
+        def _s(val: Any) -> str:
+            return str(val) if val is not None else ""
+        return {
+            "domain": _s(self.domain),
+            "method": _s(self.method),
+            "host": _s(self.host),
+            "token": _s(self.token),
+        }
+
     def __repr__(self) -> str:
         """Return a concise developer representation."""
         return f"DcvChallenge(domain={self.domain!r}, method={self.method!r}, host={self.host!r})"
@@ -291,11 +306,41 @@ class SslOrder:
         """Order creation timestamp as an ISO 8601 string."""
         return self._data.get("createdAt")
 
+    @property
+    def all_domains(self) -> list[str]:
+        """All domains covered by this order: primary domain followed by additional domains.
+
+        Combines :attr:`domain` and :attr:`additional_domains` into a single list.
+        Returns an empty list for orders where neither field is set.
+        """
+        result: list[str] = []
+        if self.domain:
+            result.append(self.domain)
+        result.extend(self.additional_domains)
+        return result
+
     # --- helpers ---
 
     def as_dict(self) -> dict[str, Any]:
         """Return the raw API response dict for this order."""
         return self._data
+
+    def to_row(self) -> dict[str, str]:
+        """Return a flat ``dict[str, str]`` suitable for tabular display.
+
+        Returns:
+            Dict with keys ``order_id``, ``domain``, ``status``,
+            ``product_variant``, ``created_at``.
+        """
+        def _s(val: Any) -> str:
+            return str(val) if val is not None else ""
+        return {
+            "order_id": _s(self.order_id),
+            "domain": _s(self.domain),
+            "status": _s(self.status),
+            "product_variant": _s(self.product_variant),
+            "created_at": _s(self.created_at),
+        }
 
     def __repr__(self) -> str:
         """Return a concise developer representation."""
@@ -367,7 +412,8 @@ class SslOrder:
             csr: PEM-encoded Certificate Signing Request string.
 
         Returns:
-            Raw API response dict.
+            Raw API response dict (structure is opaque). Call :meth:`refresh`
+            and check :attr:`status` to confirm the order has advanced.
 
         Raises:
             CertiNextAPIError: On a non-2xx API response. Provides ``.status_code`` and ``.body``.
@@ -378,7 +424,8 @@ class SslOrder:
         """Accept the subscriber agreement for this order.
 
         Returns:
-            Raw API response dict.
+            Raw API response dict (structure is opaque). Call :meth:`refresh`
+            and check :attr:`status` to confirm the order has advanced.
 
         Raises:
             CertiNextAPIError: On a non-2xx API response. Provides ``.status_code`` and ``.body``.
@@ -508,13 +555,19 @@ class SslAccessor:
     """Accessor for the CertiNext SSL/TLS Certificates API.
 
     Mounted on a session as ``session.ssl``. Provides ten certificate creation
-    methods (one per product variant) and a :meth:`get` method for tracking
+    methods — one per product variant — and a :meth:`get` method for tracking
     existing orders. Returned :class:`SslOrder` instances expose the full
     certificate lifecycle as methods.
 
-    Product codes are resolved from the Catalog API (``GET /catalog/products``)
-    the first time any ``create_*`` method is called. The resolved codes are
-    cached per accessor instance so the catalog is queried at most once per
+    The ten creation methods are:
+
+    - :meth:`create_dv` / :meth:`create_dv_wildcard` / :meth:`create_dv_ucc` / :meth:`create_dv_wildcard_ucc`
+    - :meth:`create_ov` / :meth:`create_ov_wildcard` / :meth:`create_ov_ucc` / :meth:`create_ov_wildcard_ucc`
+    - :meth:`create_ev` / :meth:`create_ev_ucc`
+
+    **Product codes** are resolved lazily from the Catalog API
+    (``GET /catalog/products``) on the first ``create_*`` call and cached for
+    the lifetime of the accessor. The catalog is queried at most once per
     session.
 
     OV and EV methods require an ``organization_id`` from
@@ -529,6 +582,7 @@ class SslAccessor:
         order.verify_dcv()
         order.submit_csr(csr_pem)
         order.accept_agreement()
+        order.refresh()
         cert = order.download_certificate()
         print(cert.certificate_pem)
     """

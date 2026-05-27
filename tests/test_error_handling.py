@@ -14,7 +14,7 @@
 
 """Tests that verify graceful error handling for bad data and failed API calls."""
 
-from typing import cast
+from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -23,6 +23,12 @@ import requests
 from certinext.auth import OAuth2ClientCredentials
 from certinext.client import CertiNextClient
 from certinext.domains import VALID_DCV_METHODS, DcvMethod, Domain, DomainAccessor
+from certinext.exceptions import (
+    CertiNextAPIError,
+    CertiNextConflictError,
+    CertiNextNotFoundError,
+    CertiNextRateLimitError,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -503,3 +509,228 @@ class TestDcvMethodValidation:
     def test_valid_dcv_methods_constant_contains_expected_values(self):
         """VALID_DCV_METHODS contains DNS-TXT and HTTP-URL."""
         assert VALID_DCV_METHODS == {"DNS-TXT", "HTTP-URL"}
+
+
+# ---------------------------------------------------------------------------
+# Typed exception dispatch
+# ---------------------------------------------------------------------------
+
+def _make_rfc7807_response(status_code: int, body: dict, headers: dict | None = None) -> MagicMock:
+    """Return a mock response with an RFC 7807 JSON body."""
+    resp = MagicMock()
+    resp.status_code = status_code
+    resp.json.return_value = body
+    resp.text = str(body)
+    resp.headers = headers or {}
+    resp.raise_for_status.side_effect = requests.HTTPError(
+        f"{status_code} Error", response=resp
+    )
+    return resp
+
+
+class TestTypedExceptionDispatch:
+    """_raise_api_error dispatches typed subclasses for specific status codes."""
+
+    def _make_client(self) -> tuple[CertiNextClient, MagicMock]:
+        """Return a CertiNextClient with auth and session mocked."""
+        client = CertiNextClient(
+            base_url="https://us-api.certinext.io",
+            token_url="https://us-api.certinext.io/oauth/token",
+            client_id="test",
+            client_secret="secret",
+        )
+        client._auth = MagicMock()
+        client._auth.get_token.return_value = "test-token"
+        mock_session = MagicMock()
+        client._session = mock_session  # type: ignore[assignment]
+        return client, mock_session
+
+    def test_404_raises_not_found_error(self):
+        """A 404 response raises CertiNextNotFoundError."""
+        client, mock_session = self._make_client()
+        mock_session.get.return_value = _make_rfc7807_response(
+            404, {"title": "Not Found", "status": 404}
+        )
+        with pytest.raises(CertiNextNotFoundError):
+            client.get("/api/certinext/v2/domains/missing")
+
+    def test_404_is_also_certinext_api_error(self):
+        """CertiNextNotFoundError is a subclass of CertiNextAPIError and HTTPError."""
+        client, mock_session = self._make_client()
+        mock_session.get.return_value = _make_rfc7807_response(
+            404, {"title": "Not Found", "status": 404}
+        )
+        with pytest.raises(CertiNextAPIError):
+            client.get("/api/certinext/v2/domains/missing")
+
+    def test_409_raises_conflict_error(self):
+        """A 409 response raises CertiNextConflictError."""
+        client, mock_session = self._make_client()
+        mock_session.post.return_value = _make_rfc7807_response(
+            409, {
+                "title": "Domain already registered",
+                "status": 409,
+                "detail": "EMS-DOMAIN-101: Domain already registered",
+                "existingDomainId": "dom-abc-123",
+            }
+        )
+        with pytest.raises(CertiNextConflictError):
+            client.post("/api/certinext/v2/domains", json={"domainName": "dup.example.edu"})
+
+    def test_409_conflict_error_exposes_existing_domain_id(self):
+        """CertiNextConflictError.existing_domain_id returns the ID from the response body."""
+        client, mock_session = self._make_client()
+        mock_session.post.return_value = _make_rfc7807_response(
+            409, {
+                "title": "Domain already registered",
+                "status": 409,
+                "detail": "EMS-DOMAIN-101: Domain already registered",
+                "existingDomainId": "dom-abc-123",
+            }
+        )
+        with pytest.raises(CertiNextConflictError) as exc_info:
+            client.post("/api/certinext/v2/domains", json={"domainName": "dup.example.edu"})
+        assert exc_info.value.existing_domain_id == "dom-abc-123"
+
+    def test_409_conflict_error_existing_domain_id_none_when_absent(self):
+        """CertiNextConflictError.existing_domain_id is None when not in the response."""
+        client, mock_session = self._make_client()
+        mock_session.post.return_value = _make_rfc7807_response(
+            409, {"title": "Conflict", "status": 409, "detail": "EMS-DOMAIN-002: duplicate"}
+        )
+        with pytest.raises(CertiNextConflictError) as exc_info:
+            client.post("/api/certinext/v2/domains", json={"domainName": "dup.example.edu"})
+        assert exc_info.value.existing_domain_id is None
+
+    def test_429_raises_rate_limit_error(self):
+        """A 429 response raises CertiNextRateLimitError."""
+        client, mock_session = self._make_client()
+        mock_session.get.return_value = _make_rfc7807_response(
+            429, {"title": "Too Many Requests", "status": 429},
+            headers={"Retry-After": "30"},
+        )
+        with pytest.raises(CertiNextRateLimitError):
+            client.get("/api/certinext/v2/domains")
+
+    def test_429_rate_limit_error_parses_retry_after(self):
+        """CertiNextRateLimitError.retry_after is set from the Retry-After header."""
+        client, mock_session = self._make_client()
+        mock_session.get.return_value = _make_rfc7807_response(
+            429, {"title": "Too Many Requests", "status": 429},
+            headers={"Retry-After": "60"},
+        )
+        with pytest.raises(CertiNextRateLimitError) as exc_info:
+            client.get("/api/certinext/v2/domains")
+        assert exc_info.value.retry_after == 60.0
+
+    def test_429_rate_limit_error_retry_after_none_when_header_absent(self):
+        """CertiNextRateLimitError.retry_after is None when the Retry-After header is absent."""
+        client, mock_session = self._make_client()
+        mock_session.get.return_value = _make_rfc7807_response(
+            429, {"title": "Too Many Requests", "status": 429},
+        )
+        with pytest.raises(CertiNextRateLimitError) as exc_info:
+            client.get("/api/certinext/v2/domains")
+        assert exc_info.value.retry_after is None
+
+    def test_other_status_raises_base_certinext_api_error(self):
+        """Status codes other than 404/409/429 raise CertiNextAPIError directly."""
+        client, mock_session = self._make_client()
+        mock_session.get.return_value = _make_rfc7807_response(
+            422, {
+                "title": "Unprocessable Entity",
+                "status": 422,
+                "detail": "EMS-921: CSR malformed",
+            }
+        )
+        exc: CertiNextAPIError
+        with pytest.raises(CertiNextAPIError) as exc_info:
+            client.get("/api/certinext/v2/domains")
+        exc = exc_info.value
+        assert type(exc) is CertiNextAPIError
+        assert not isinstance(exc, (CertiNextNotFoundError, CertiNextConflictError, CertiNextRateLimitError))
+
+
+class TestCertiNextAPIErrorProperties:
+    """CertiNextAPIError exposes RFC 7807 fields via ems_code and field_errors."""
+
+    def test_str_extracts_detail_from_rfc7807_body(self):
+        """__str__() returns the detail field when the body is an RFC 7807 dict."""
+        err = CertiNextAPIError(422, {
+            "title": "Unprocessable Entity",
+            "detail": "EMS-921: CSR malformed",
+            "status": 422,
+        })
+        assert str(err) == "HTTP 422: EMS-921: CSR malformed"
+
+    def test_str_falls_back_to_title_when_detail_absent(self):
+        """__str__() uses title when detail is not in the body."""
+        err = CertiNextAPIError(422, {"title": "Bad Request", "status": 422})
+        assert str(err) == "HTTP 422: Bad Request"
+
+    def test_str_falls_back_to_full_body_when_neither_detail_nor_title(self):
+        """__str__() falls back to the full body dict when neither detail nor title is present."""
+        body: dict[str, Any] = {"status": 422}
+        err = CertiNextAPIError(422, body)
+        assert "422" in str(err)
+
+    def test_str_with_plain_text_body(self):
+        """__str__() includes the raw text when the body is a string."""
+        err = CertiNextAPIError(500, "Internal Server Error")
+        assert str(err) == "HTTP 500: Internal Server Error"
+
+    def test_ems_code_extracted_from_detail(self):
+        """ems_code extracts the EMS code from the detail field."""
+        err = CertiNextAPIError(422, {
+            "detail": "EMS-921: CSR malformed or missing required fields",
+        })
+        assert err.ems_code == "EMS-921"
+
+    def test_ems_code_extracted_from_domain_detail(self):
+        """ems_code handles compound EMS codes like EMS-DOMAIN-002."""
+        err = CertiNextAPIError(409, {
+            "detail": "EMS-DOMAIN-002: domain already exists",
+        })
+        assert err.ems_code == "EMS-DOMAIN-002"
+
+    def test_ems_code_falls_back_to_type_url(self):
+        """ems_code extracts the code from the type URL when detail has none."""
+        err = CertiNextAPIError(409, {
+            "type": "https://api.certinext.io/errors/EMS-DOMAIN-101",
+            "detail": "Domain already registered",
+        })
+        assert err.ems_code == "EMS-DOMAIN-101"
+
+    def test_ems_code_none_when_absent(self):
+        """ems_code returns None when no EMS code is in the body."""
+        err = CertiNextAPIError(404, {"title": "Not Found", "status": 404})
+        assert err.ems_code is None
+
+    def test_ems_code_none_when_body_is_string(self):
+        """ems_code returns None when the body is raw text."""
+        err = CertiNextAPIError(500, "Internal Server Error")
+        assert err.ems_code is None
+
+    def test_field_errors_returns_errors_array(self):
+        """field_errors returns the errors list from an RFC 7807 body."""
+        err = CertiNextAPIError(422, {
+            "status": 422,
+            "errors": [
+                {"field": "certificate.domain", "message": "must not be blank"},
+                {"field": "csr", "message": "invalid format"},
+            ],
+        })
+        assert err.field_errors == [
+            {"field": "certificate.domain", "message": "must not be blank"},
+            {"field": "csr", "message": "invalid format"},
+        ]
+
+    def test_field_errors_empty_when_no_errors_key(self):
+        """field_errors returns [] when the body has no errors key."""
+        err = CertiNextAPIError(422, {"status": 422, "detail": "something went wrong"})
+        assert err.field_errors == []
+
+    def test_field_errors_empty_when_body_is_string(self):
+        """field_errors returns [] when the body is raw text."""
+        err = CertiNextAPIError(500, "Internal Server Error")
+        assert err.field_errors == []

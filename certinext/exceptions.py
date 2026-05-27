@@ -14,6 +14,7 @@
 
 """CertiNext exception classes."""
 
+import re
 from typing import Any
 
 from requests.exceptions import HTTPError
@@ -25,6 +26,11 @@ class CertiNextAPIError(HTTPError):
     Subclasses :class:`requests.HTTPError` so existing code that catches
     ``HTTPError`` continues to work. Adds :attr:`status_code` and
     :attr:`body` so callers can inspect what the API actually returned.
+
+    The API returns RFC 7807 ``application/problem+json`` bodies. When the
+    response is parsed JSON, ``__str__`` extracts the ``detail`` field for a
+    human-readable message, and :attr:`ems_code` and :attr:`field_errors`
+    expose the structured diagnostic fields.
 
     Attributes:
         status_code: The HTTP status code (e.g. 422).
@@ -51,5 +57,95 @@ class CertiNextAPIError(HTTPError):
         super().__init__(*args, **kwargs)
 
     def __str__(self) -> str:
-        """Return a string showing the status code and response body."""
+        """Return a string with the status code and RFC 7807 detail if available."""
+        if isinstance(self.body, dict):
+            message = self.body.get("detail") or self.body.get("title") or str(self.body)
+            return f"HTTP {self.status_code}: {message}"
         return f"HTTP {self.status_code}: {self.body}"
+
+    @property
+    def ems_code(self) -> str | None:
+        """Return the EMS error code from the response body, or None.
+
+        Searches the RFC 7807 ``detail`` field first, then the ``type`` URL.
+        Matches codes of the form ``EMS-NNN`` or ``EMS-WORD-NNN``.
+        """
+        if not isinstance(self.body, dict):
+            return None
+        for field in ("detail", "type"):
+            value = self.body.get(field)
+            if isinstance(value, str):
+                m = re.search(r'\b(EMS-[A-Z0-9]+(?:-[A-Z0-9]+)*)', value)
+                if m:
+                    return m.group(1)
+        return None
+
+    @property
+    def field_errors(self) -> list[dict[str, str]]:
+        """Return field-level validation errors from the RFC 7807 ``errors`` array.
+
+        Returns an empty list when the body is not JSON or contains no ``errors`` key.
+        """
+        if not isinstance(self.body, dict):
+            return []
+        errors = self.body.get("errors", [])
+        return errors if isinstance(errors, list) else []
+
+
+class CertiNextNotFoundError(CertiNextAPIError):
+    """Raised when the API returns 404 Not Found.
+
+    The requested resource (domain, order, certificate, etc.) does not exist
+    or the caller's account does not have access to it.
+    """
+
+
+class CertiNextRateLimitError(CertiNextAPIError):
+    """Raised when the API returns 429 Too Many Requests.
+
+    The API includes a ``Retry-After`` response header when rate-limiting.
+
+    Attributes:
+        retry_after: Seconds to wait before retrying, taken from the
+            ``Retry-After`` response header. ``None`` if the header was absent
+            or could not be parsed as a number.
+    """
+
+    def __init__(
+        self,
+        status_code: int,
+        body: dict[str, Any] | str,
+        *args: Any,
+        retry_after: float | None = None,
+        **kwargs: Any,
+    ) -> None:
+        """
+        Args:
+            status_code: HTTP status code (429).
+            body: Parsed JSON or raw response text.
+            retry_after: Value of the ``Retry-After`` response header in seconds.
+            *args: Forwarded to :class:`CertiNextAPIError`.
+            **kwargs: Forwarded to :class:`CertiNextAPIError`.
+        """
+        self.retry_after = retry_after
+        super().__init__(status_code, body, *args, **kwargs)
+
+
+class CertiNextConflictError(CertiNextAPIError):
+    """Raised when the API returns 409 Conflict.
+
+    Occurs for duplicate resource creation, most commonly when registering a
+    domain that already exists (EMS-DOMAIN-002 or EMS-DOMAIN-101).
+
+    Attributes:
+        existing_domain_id: The ID of the pre-existing domain, if the API
+            included ``existingDomainId`` in the response body (EMS-DOMAIN-101).
+            ``None`` when not present.
+    """
+
+    @property
+    def existing_domain_id(self) -> str | None:
+        """Return the pre-existing domain's ID from the response body, if present."""
+        if isinstance(self.body, dict):
+            return self.body.get("existingDomainId")
+        return None
