@@ -134,20 +134,25 @@ sandbox endpoints and defaults `--profile` to `sandbox`.
 ### Integration tests
 
 The test suite includes integration tests that call the live sandbox API.
-They are skipped automatically when sandbox credentials are not present in the
-keyring, so they are safe to include in CI environments that lack a keyring.
+They are skipped automatically when credentials are not available, so they
+are safe to include in CI environments that lack a keyring.
 
-Set up sandbox credentials first (one-time):
+**Local development** — store credentials in the keyring once:
 
 ```bash
 certinext-setup-keyring --sandbox
-```
-
-Then run the integration suite:
-
-```bash
 pytest -m integration
 ```
+
+**GitLab CI** — set two CI/CD Variables in the project's Settings → CI/CD → Variables:
+
+| Variable | Description |
+|---|---|
+| `CERTINEXT_SANDBOX_CLIENT_ID` | Sandbox account number (client ID) |
+| `CERTINEXT_SANDBOX_CLIENT_SECRET` | Sandbox client secret |
+
+The pipeline includes a dedicated `integration-test` job that runs `pytest -m integration`
+automatically whenever these variables are defined.
 
 ---
 

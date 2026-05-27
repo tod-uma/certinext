@@ -28,6 +28,8 @@ Run the integration suite explicitly with::
     pytest -m integration
 """
 
+import os
+
 import pytest
 
 import certinext
@@ -48,10 +50,13 @@ def sandbox_session() -> certinext.CertiNextSession:
     is not found, all tests that depend on this fixture are skipped.
     """
     svc = keyring_service("certinext", "sandbox")
-    client_id = keyring_get(svc, "CERTINEXT_CLIENT_ID")
-    client_secret = keyring_get(svc, "CERTINEXT_CLIENT_SECRET")
+    client_id = keyring_get(svc, "CERTINEXT_CLIENT_ID") or os.environ.get("CERTINEXT_SANDBOX_CLIENT_ID")
+    client_secret = keyring_get(svc, "CERTINEXT_CLIENT_SECRET") or os.environ.get("CERTINEXT_SANDBOX_CLIENT_SECRET")
     if not client_id or not client_secret:
-        pytest.skip("sandbox credentials not in keyring — run: certinext-setup-keyring --sandbox")
+        pytest.skip(
+            "sandbox credentials not available — run: certinext-setup-keyring --sandbox "
+            "or set CERTINEXT_SANDBOX_CLIENT_ID / CERTINEXT_SANDBOX_CLIENT_SECRET"
+        )
     return certinext.session(
         base_url=certinext.SANDBOX_BASE_URL,
         token_url=certinext.SANDBOX_TOKEN_URL,
