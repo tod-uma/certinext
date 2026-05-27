@@ -26,7 +26,8 @@ workflow:
 
 stages:
   - lint
-  - test
+  - unit
+  - integration
   - security
   - build
   - release
@@ -53,8 +54,8 @@ typecheck:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH
 
-test:
-  stage: test
+unit-test:
+  stage: unit
   image: python:${PYTHON_VERSION}-slim
   parallel:
     matrix:
@@ -72,10 +73,11 @@ test:
     - if: $CI_COMMIT_BRANCH
 
 integration-test:
-  stage: test
+  stage: integration
   image: python:3.12-slim
   rules:
-    - if: '$CERTINEXT_SANDBOX_CLIENT_ID'
+    - if: '$CERTINEXT_SANDBOX_CLIENT_ID && $CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CERTINEXT_SANDBOX_CLIENT_ID && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
   script:
     - pip install -e .[dev]
     - pytest -m integration -v --junitxml=integration-report.xml
