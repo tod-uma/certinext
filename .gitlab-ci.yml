@@ -148,4 +148,5 @@ release_job:
     - echo "running release_job"
   release:
     tag_name: '$CI_COMMIT_TAG'
-    description: '$CI_COMMIT_TAG'
+    description: 'Release $CI_COMMIT_TAG'
+    generate_release_notes: true

@@ -29,6 +29,7 @@ Usage:
 
 import argparse
 import json
+import sys
 from collections import Counter
 
 from tabulate import tabulate
@@ -149,40 +150,44 @@ def _build_rows(
 
 def main() -> None:
     """Entry point for certinext-domain-cert-count."""
-    parser = argparse.ArgumentParser(
-        description="Show all registered domains and their certificate counts",
-    )
-    add_connection_args(parser)
-    parser.add_argument(
-        "--status", metavar="STATUS", default=None,
-        choices=["issued", "expired"],
-        help="Filter certificates by status: 'issued' (active) or 'expired'",
-    )
-    parser.add_argument(
-        "--condense", action="store_true", default=False,
-        help="Show only top-level domains; subdomain counts roll up into their apex",
-    )
-    parser.add_argument(
-        "--json", action="store_true", default=False,
-        help="Output raw JSON instead of tabular format",
-    )
-    args = parser.parse_args()
-    apply_sandbox(args)
-    sess = build_session(args)
+    try:
+        parser = argparse.ArgumentParser(
+            description="Show all registered domains and their certificate counts",
+        )
+        add_connection_args(parser)
+        parser.add_argument(
+            "--status", metavar="STATUS", default=None,
+            choices=["issued", "expired"],
+            help="Filter certificates by status: 'issued' (active) or 'expired'",
+        )
+        parser.add_argument(
+            "--condense", action="store_true", default=False,
+            help="Show only top-level domains; subdomain counts roll up into their apex",
+        )
+        parser.add_argument(
+            "--json", action="store_true", default=False,
+            help="Output raw JSON instead of tabular format",
+        )
+        args = parser.parse_args()
+        apply_sandbox(args)
+        sess = build_session(args)
 
-    domains = sess.domain.get_list()
-    orders = sess.orders.get_list(status=args.status)
-    rows = _build_rows(domains, orders, condense=args.condense)
+        domains = sess.domain.get_list()
+        orders = sess.orders.get_list(status=args.status)
+        rows = _build_rows(domains, orders, condense=args.condense)
 
-    if args.json:
-        print(json.dumps(rows, indent=2))
-    else:
-        if not rows:
-            print("(no results)")
-            return
-        status_label = f" ({args.status})" if args.status else ""
-        print(f"Certificate counts per domain{status_label}:\n")
-        print(tabulate(rows, headers="keys", tablefmt="simple"))
+        if args.json:
+            print(json.dumps(rows, indent=2))
+        else:
+            if not rows:
+                print("(no results)")
+                return
+            status_label = f" ({args.status})" if args.status else ""
+            print(f"Certificate counts per domain{status_label}:\n")
+            print(tabulate(rows, headers="keys", tablefmt="simple"))
+    except KeyboardInterrupt:
+        print("\nAborted.", file=sys.stderr)
+        raise SystemExit(130)
 
 
 if __name__ == "__main__":

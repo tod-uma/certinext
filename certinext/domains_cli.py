@@ -18,6 +18,7 @@
 import argparse
 import dataclasses
 import json
+import sys
 from typing import Any
 
 from tabulate import tabulate
@@ -164,23 +165,27 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
-    parser = build_parser()
-    args = parser.parse_args()
-    apply_sandbox(args)
-    sess = build_session(args)
+    try:
+        parser = build_parser()
+        args = parser.parse_args()
+        apply_sandbox(args)
+        sess = build_session(args)
 
-    handlers = {
-        "list": cmd_list,
-        "get": cmd_get,
-        "create": cmd_create,
-        "deactivate": cmd_deactivate,
-        "get-dcv": cmd_get_dcv,
-        "verify-dcv": cmd_verify_dcv,
-        "change-dcv-method": cmd_change_dcv_method,
-        "last-dcv-attempt": cmd_last_dcv_attempt,
-        "dcv-attempt-history": cmd_dcv_attempt_history,
-    }
-    handlers[args.command](args, sess)
+        handlers = {
+            "list": cmd_list,
+            "get": cmd_get,
+            "create": cmd_create,
+            "deactivate": cmd_deactivate,
+            "get-dcv": cmd_get_dcv,
+            "verify-dcv": cmd_verify_dcv,
+            "change-dcv-method": cmd_change_dcv_method,
+            "last-dcv-attempt": cmd_last_dcv_attempt,
+            "dcv-attempt-history": cmd_dcv_attempt_history,
+        }
+        handlers[args.command](args, sess)
+    except KeyboardInterrupt:
+        print("\nAborted.", file=sys.stderr)
+        raise SystemExit(130)
 
 
 if __name__ == "__main__":
