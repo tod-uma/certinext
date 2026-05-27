@@ -94,12 +94,43 @@ class CertiNextClient:
         self._raise_api_error(resp)
         return cast(dict[str, Any], resp.json())
 
-    def post(self, path: str, json: dict[str, Any] | None = None) -> dict[str, Any]:
+    def get_bytes(self, path: str, accept: str, params: dict[str, Any] | None = None) -> bytes:
+        """Send a GET request with a custom Accept header and return raw response bytes.
+
+        Used for endpoints that return binary or non-JSON content (e.g. DER
+        certificates or PEM text).
+
+        Args:
+            path: API path relative to ``base_url``.
+            accept: Value for the ``Accept`` request header (e.g.
+                ``"application/x-pem-file"`` or ``"application/pkix-cert"``).
+            params: Optional query-string parameters.
+
+        Returns:
+            Raw response body as bytes.
+
+        Raises:
+            CertiNextAPIError: On a non-2xx response. Provides ``.status_code`` and ``.body``.
+        """
+        headers = self._headers()
+        headers["Accept"] = accept
+        resp = self._session.get(f"{self.base_url}{path}", headers=headers, params=params)
+        self._raise_api_error(resp)
+        return resp.content
+
+    def post(
+        self,
+        path: str,
+        json: dict[str, Any] | None = None,
+        extra_headers: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
         """Send a POST request with an optional JSON body and return the parsed response.
 
         Args:
             path: API path relative to ``base_url``.
             json: Optional request body to serialize as JSON.
+            extra_headers: Optional additional HTTP headers to include (e.g.
+                ``{"X-Product-Code": "842"}`` for SSL certificate creation).
 
         Returns:
             Parsed JSON response as a dict.
@@ -107,16 +138,25 @@ class CertiNextClient:
         Raises:
             CertiNextAPIError: On a non-2xx response. Provides ``.status_code`` and ``.body``.
         """
-        resp = self._session.post(f"{self.base_url}{path}", headers=self._headers(), json=json)
+        headers = self._headers()
+        if extra_headers:
+            headers.update(extra_headers)
+        resp = self._session.post(f"{self.base_url}{path}", headers=headers, json=json)
         self._raise_api_error(resp)
         return cast(dict[str, Any], resp.json())
 
-    def put(self, path: str, json: dict[str, Any] | None = None) -> dict[str, Any]:
+    def put(
+        self,
+        path: str,
+        json: dict[str, Any] | None = None,
+        extra_headers: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
         """Send a PUT request with an optional JSON body and return the parsed response.
 
         Args:
             path: API path relative to ``base_url``.
             json: Optional request body to serialize as JSON.
+            extra_headers: Optional additional HTTP headers to include.
 
         Returns:
             Parsed JSON response as a dict.
@@ -124,7 +164,10 @@ class CertiNextClient:
         Raises:
             CertiNextAPIError: On a non-2xx response. Provides ``.status_code`` and ``.body``.
         """
-        resp = self._session.put(f"{self.base_url}{path}", headers=self._headers(), json=json)
+        headers = self._headers()
+        if extra_headers:
+            headers.update(extra_headers)
+        resp = self._session.put(f"{self.base_url}{path}", headers=headers, json=json)
         self._raise_api_error(resp)
         return cast(dict[str, Any], resp.json())
 

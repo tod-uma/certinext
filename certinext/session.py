@@ -12,9 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from .accounts import AccountAccessor
+from .catalog import CatalogAccessor
 from .client import CertiNextClient
 from .domains import DomainAccessor
+from .ledger import LedgerAccessor
 from .orders import OrderAccessor
+from .ssl_certificates import SslAccessor
 
 
 class CertiNextSession:
@@ -24,12 +28,18 @@ class CertiNextSession:
     Resource accessors are available as attributes:
 
         sess = certinext.session(client_id="...", client_secret="...")
-        domains = sess.domain.list()
+        domains = sess.domain.get_list()
         orders = sess.orders.get_list(status="issued")
+        orgs = sess.accounts.list_organizations()
+        order = sess.ssl.create_dv("example.com")
 
     Attributes:
+        accounts: Accessor for identity, groups, and organizations. See `AccountAccessor`.
+        catalog: Accessor for the Catalog API (products and custom fields). See `CatalogAccessor`.
         domain: Accessor for the Domains API. See `DomainAccessor`.
+        ledger: Accessor for the Ledger Report API. See `LedgerAccessor`.
         orders: Accessor for the Orders Report API. See `OrderAccessor`.
+        ssl: Accessor for the SSL/TLS Certificates API. See `SslAccessor`.
     """
 
     def __init__(
@@ -49,5 +59,9 @@ class CertiNextSession:
             scope: Optional OAuth scope string.
         """
         self._client = CertiNextClient(base_url, token_url, client_id, client_secret, scope)
+        self.accounts = AccountAccessor(self._client)
+        self.catalog = CatalogAccessor(self._client)
         self.domain = DomainAccessor(self._client)
+        self.ledger = LedgerAccessor(self._client)
         self.orders = OrderAccessor(self._client)
+        self.ssl = SslAccessor(self._client)
