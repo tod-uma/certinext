@@ -141,12 +141,8 @@ release_build:
 
 release_job:
   stage: release
-  image: registry.gitlab.com/gitlab-org/release-cli:latest
+  image: registry.gitlab.com/gitlab-org/cli:latest
   rules:
     - if: $CI_COMMIT_TAG
   script:
-    - echo "running release_job"
-  release:
-    tag_name: '$CI_COMMIT_TAG'
-    description: 'Release $CI_COMMIT_TAG'
-    generate_release_notes: true
+    - glab release create "$CI_COMMIT_TAG" --generate-notes
