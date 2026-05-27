@@ -28,55 +28,14 @@ Usage:
 """
 
 import argparse
-import getpass
 import json
-import os
 from collections import Counter
 
 from tabulate import tabulate
 
-import certinext
-from certinext._keyring import keyring_get, keyring_service
+from certinext._cli import add_connection_args, apply_sandbox, build_session
 from certinext.domains import Domain
 from certinext.orders import OrderRecord
-
-
-def _resolve(
-    arg_value: str | None,
-    env_var: str,
-    prompt: str,
-    secret: bool = False,
-    kr_service: str | None = None,
-    kr_key: str | None = None,
-) -> str:
-    """Resolve a credential from CLI arg, keyring, environment variable, or interactive prompt.
-
-    Checks in priority order: explicit argument → keyring → environment variable → prompt.
-    Secrets are read with getpass so they are not echoed to the terminal.
-
-    Args:
-        arg_value: Value from a CLI argument, or None if not provided.
-        env_var: Environment variable name to fall back to.
-        prompt: Text shown when prompting interactively.
-        secret: If True, use getpass so input is not echoed.
-        kr_service: Keyring service name to check before the env var.
-        kr_key: Keyring key (username) to look up under kr_service.
-
-    Returns:
-        The resolved credential string.
-    """
-    if arg_value:
-        return arg_value
-    if kr_service and kr_key:
-        kr_value = keyring_get(kr_service, kr_key)
-        if kr_value:
-            return kr_value
-    env_value = os.environ.get(env_var)
-    if env_value:
-        return env_value
-    if secret:
-        return getpass.getpass(f"{prompt}: ")
-    return input(f"{prompt}: ")
 
 
 def _match_domain(cn: str, registered: set[str]) -> str | None:
@@ -193,26 +152,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Show all registered domains and their certificate counts",
     )
-    parser.add_argument(
-        "--profile", metavar="NAME", default=None,
-        help="Credential profile for keyring lookup (env: CERTINEXT_PROFILE)",
-    )
-    parser.add_argument(
-        "--account-number", "--client-id", dest="account_number", metavar="ACCT",
-        help="CertiNext account number (env: CERTINEXT_CLIENT_ID)",
-    )
-    parser.add_argument(
-        "--client-secret", metavar="SECRET",
-        help="OAuth2 client secret (env: CERTINEXT_CLIENT_SECRET)",
-    )
-    parser.add_argument(
-        "--base-url", default="https://us-api.certinext.io", metavar="URL",
-        help="CertiNext base URL (default: https://us-api.certinext.io)",
-    )
-    parser.add_argument(
-        "--token-url", default="https://us-api.certinext.io/oauth/token", metavar="URL",
-        help="OAuth2 token endpoint URL",
-    )
+    add_connection_args(parser)
     parser.add_argument(
         "--status", metavar="STATUS", default=None,
         choices=["issued", "expired"],
@@ -227,25 +167,8 @@ def main() -> None:
         help="Output raw JSON instead of tabular format",
     )
     args = parser.parse_args()
-
-    profile = args.profile or os.environ.get("CERTINEXT_PROFILE")
-    svc = keyring_service("certinext", profile)
-
-    client_id = _resolve(
-        args.account_number, "CERTINEXT_CLIENT_ID", "CertiNext account number",
-        kr_service=svc, kr_key="CERTINEXT_CLIENT_ID",
-    )
-    client_secret = _resolve(
-        args.client_secret, "CERTINEXT_CLIENT_SECRET", "CertiNext client secret", secret=True,
-        kr_service=svc, kr_key="CERTINEXT_CLIENT_SECRET",
-    )
-
-    sess = certinext.session(
-        base_url=args.base_url,
-        token_url=args.token_url,
-        client_id=client_id,
-        client_secret=client_secret,
-    )
+    apply_sandbox(args)
+    sess = build_session(args)
 
     domains = sess.domain.get_list()
     orders = sess.orders.get_list(status=args.status)

@@ -48,10 +48,22 @@ from .exceptions import CertiNextAPIError
 from .orders import CertificateStatus, OrderAccessor, OrderRecord
 from .session import CertiNextSession
 
+BASE_URL: str = "https://us-api.certinext.io"
+"""Base URL for the CertiNext US production environment."""
+
+TOKEN_URL: str = "https://us-api.certinext.io/oauth/token"
+"""OAuth 2.0 token endpoint for the CertiNext US production environment."""
+
+SANDBOX_BASE_URL: str = "https://sandbox-us-api.certinext.io"
+"""Base URL for the CertiNext US sandbox environment."""
+
+SANDBOX_TOKEN_URL: str = "https://sandbox-us-api.certinext.io/oauth/token"
+"""OAuth 2.0 token endpoint for the CertiNext US sandbox environment."""
+
 
 def session(
-    base_url: str = "https://us-api.certinext.io",
-    token_url: str = "https://us-api.certinext.io/oauth/token",
+    base_url: str = BASE_URL,
+    token_url: str = TOKEN_URL,
     client_id: str = "",
     client_secret: str = "",
     scope: str = "",
@@ -77,6 +89,10 @@ def session(
 
 __all__ = [
     "session",
+    "BASE_URL",
+    "TOKEN_URL",
+    "SANDBOX_BASE_URL",
+    "SANDBOX_TOKEN_URL",
     "CertiNextAPIError",
     "CertiNextClient",
     "CertiNextSession",
