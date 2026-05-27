@@ -16,6 +16,7 @@
 
 import certinext
 from certinext.domains import DomainAccessor
+from certinext.orders import OrderAccessor
 from certinext.session import CertiNextSession
 
 
@@ -26,6 +27,11 @@ class TestCertiNextSession:
         """session.domain is a DomainAccessor instance."""
         sess = CertiNextSession(client_id="acct", client_secret="secret")
         assert isinstance(sess.domain, DomainAccessor)
+
+    def test_orders_accessor_is_mounted(self):
+        """session.orders is an OrderAccessor instance."""
+        sess = CertiNextSession(client_id="acct", client_secret="secret")
+        assert isinstance(sess.orders, OrderAccessor)
 
     def test_base_url_default(self):
         """The default base URL is https://us-api.certinext.io."""
@@ -63,6 +69,11 @@ class TestSessionFactory:
         """session().domain is a DomainAccessor."""
         sess = certinext.session(client_id="acct", client_secret="secret")
         assert isinstance(sess.domain, DomainAccessor)
+
+    def test_orders_accessor_available(self):
+        """session().orders is an OrderAccessor."""
+        sess = certinext.session(client_id="acct", client_secret="secret")
+        assert isinstance(sess.orders, OrderAccessor)
 
     def test_custom_urls_forwarded(self):
         """session() forwards custom base_url and token_url to the session."""

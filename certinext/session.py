@@ -14,6 +14,7 @@
 
 from .client import CertiNextClient
 from .domains import DomainAccessor
+from .orders import OrderAccessor
 
 
 class CertiNextSession:
@@ -24,9 +25,11 @@ class CertiNextSession:
 
         sess = certinext.session(client_id="...", client_secret="...")
         domains = sess.domain.list()
+        orders = sess.orders.get_list(status="issued")
 
     Attributes:
         domain: Accessor for the Domains API. See `DomainAccessor`.
+        orders: Accessor for the Orders Report API. See `OrderAccessor`.
     """
 
     def __init__(
@@ -47,3 +50,4 @@ class CertiNextSession:
         """
         self._client = CertiNextClient(base_url, token_url, client_id, client_secret, scope)
         self.domain = DomainAccessor(self._client)
+        self.orders = OrderAccessor(self._client)
