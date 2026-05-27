@@ -28,7 +28,8 @@ Typical usage::
 
 Known API limitations (vendor bugs, pending fix):
     - The ``search`` parameter to :meth:`~certinext.domains.DomainAccessor.get_list`
-      is ignored — all domains are returned regardless. Use ``pattern`` for
+      remains broken (re-tested 2026-05-27): FQDN searches (any value containing
+      ``"."``) return all domains; substring searches return 0. Use ``pattern`` for
       client-side filtering.
     - Passing both ``domain_status`` and ``dcv_status`` to
       :meth:`~certinext.domains.DomainAccessor.get_list` returns a 400 error.
@@ -44,12 +45,25 @@ Errors:
 from .client import CertiNextClient
 from .domains import VALID_DCV_METHODS, DcvInfo, DcvMethod, DcvStatus, Domain, DomainAccessor, DomainStatus
 from .exceptions import CertiNextAPIError
+from .orders import CertificateStatus, OrderAccessor, OrderRecord
 from .session import CertiNextSession
+
+BASE_URL: str = "https://us-api.certinext.io"
+"""Base URL for the CertiNext US production environment."""
+
+TOKEN_URL: str = "https://us-api.certinext.io/oauth/token"
+"""OAuth 2.0 token endpoint for the CertiNext US production environment."""
+
+SANDBOX_BASE_URL: str = "https://sandbox-us-api.certinext.io"
+"""Base URL for the CertiNext US sandbox environment."""
+
+SANDBOX_TOKEN_URL: str = "https://sandbox-us-api.certinext.io/oauth/token"
+"""OAuth 2.0 token endpoint for the CertiNext US sandbox environment."""
 
 
 def session(
-    base_url: str = "https://us-api.certinext.io",
-    token_url: str = "https://us-api.certinext.io/oauth/token",
+    base_url: str = BASE_URL,
+    token_url: str = TOKEN_URL,
     client_id: str = "",
     client_secret: str = "",
     scope: str = "",
@@ -75,6 +89,10 @@ def session(
 
 __all__ = [
     "session",
+    "BASE_URL",
+    "TOKEN_URL",
+    "SANDBOX_BASE_URL",
+    "SANDBOX_TOKEN_URL",
     "CertiNextAPIError",
     "CertiNextClient",
     "CertiNextSession",
@@ -85,4 +103,7 @@ __all__ = [
     "DcvStatus",
     "DomainStatus",
     "VALID_DCV_METHODS",
+    "CertificateStatus",
+    "OrderAccessor",
+    "OrderRecord",
 ]

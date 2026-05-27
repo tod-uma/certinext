@@ -9,12 +9,13 @@ The default profile uses the service name 'certinext'. Named profiles append
 the profile name: --profile prod uses 'certinext-prod'.
 
 Run once before using scripts or tools that connect to the CertiNext API.
-Switch profiles by setting DCV_PROFILE (or the equivalent env var for the
-consuming script) before running.
+Switch profiles by setting CERTINEXT_PROFILE (or passing --profile) when
+running the consuming script.
 
 Usage:
     certinext-setup-keyring                        # default profile (installed command)
-    certinext-setup-keyring --profile prod         # production profile
+    certinext-setup-keyring --profile prod         # named profile
+    certinext-setup-keyring --sandbox              # sandbox profile (shortcut for --profile sandbox)
 """
 import argparse
 import getpass
@@ -66,7 +67,13 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--profile', metavar='NAME', default=None,
                         help='Credential profile name (default: use the default profile)')
+    parser.add_argument('--sandbox', action='store_true', default=False,
+                        help='Store credentials for the sandbox profile (shortcut for --profile sandbox)')
     args = parser.parse_args()
+
+    if args.sandbox:
+        if args.profile is None:
+            args.profile = "sandbox"
 
     service = _service_name(args.profile)
     profile_label = f'profile {args.profile!r}' if args.profile else 'default profile'
@@ -98,7 +105,7 @@ def main() -> None:
     print(f"  CERTINEXT_CLIENT_SECRET = {'*' * len(client_secret)}")
     print()
     if args.profile:
-        print(f"Run scripts with 'DCV_PROFILE={args.profile}' to use these credentials.")
+        print(f"Run scripts with '--profile {args.profile}' or set CERTINEXT_PROFILE={args.profile}.")
     else:
         print("Credentials will be used automatically by any script that reads the certinext keyring service.")
 

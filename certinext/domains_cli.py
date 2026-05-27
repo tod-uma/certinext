@@ -17,82 +17,14 @@
 
 import argparse
 import dataclasses
-import getpass
 import json
-import os
 from typing import Any
 
 from tabulate import tabulate
 
 import certinext
-from certinext._keyring import keyring_get, keyring_service
+from certinext._cli import add_connection_args, apply_sandbox, build_session
 from certinext.domains import Domain
-
-
-def _resolve(
-    arg_value: str | None,
-    env_var: str,
-    prompt: str,
-    secret: bool = False,
-    kr_service: str | None = None,
-    kr_key: str | None = None,
-) -> str:
-    """Resolve a credential from CLI arg, keyring, environment variable, or interactive prompt.
-
-    Checks in priority order: explicit argument → keyring → environment variable → prompt.
-    Secrets are read with getpass so they are not echoed to the terminal.
-
-    Args:
-        arg_value: Value from a CLI argument, or None if not provided.
-        env_var: Environment variable name to fall back to.
-        prompt: Text shown when prompting interactively.
-        secret: If True, use getpass so input is not echoed.
-        kr_service: Keyring service name to check before the env var.
-        kr_key: Keyring key (username) to look up under kr_service.
-
-    Returns:
-        The resolved credential string.
-    """
-    if arg_value:
-        return arg_value
-    if kr_service and kr_key:
-        kr_value = keyring_get(kr_service, kr_key)
-        if kr_value:
-            return kr_value
-    env_value = os.environ.get(env_var)
-    if env_value:
-        return env_value
-    if secret:
-        return getpass.getpass(f"{prompt}: ")
-    return input(f"{prompt}: ")
-
-
-def _session(args: argparse.Namespace) -> certinext.CertiNextSession:
-    """Build a CertiNextSession, resolving credentials from keyring, env vars, or prompts.
-
-    Args:
-        args: Parsed CLI arguments.
-
-    Returns:
-        An authenticated CertiNextSession.
-    """
-    profile = getattr(args, 'profile', None) or os.environ.get("CERTINEXT_PROFILE")
-    svc = keyring_service("certinext", profile)
-    client_id = _resolve(
-        args.account_number, "CERTINEXT_CLIENT_ID", "CertiNext account number",
-        kr_service=svc, kr_key="CERTINEXT_CLIENT_ID",
-    )
-    client_secret = _resolve(
-        args.client_secret, "CERTINEXT_CLIENT_SECRET", "CertiNext client secret", secret=True,
-        kr_service=svc, kr_key="CERTINEXT_CLIENT_SECRET",
-    )
-    return certinext.session(
-        base_url=args.base_url,
-        token_url=args.token_url,
-        client_id=client_id,
-        client_secret=client_secret,
-        scope=args.scope,
-    )
 
 
 def _show_domain(domain: Domain, use_json: bool) -> None:
@@ -192,27 +124,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     conn = parser.add_argument_group("connection")
-    conn.add_argument(
-        "--profile", metavar="NAME", default=None,
-        help="Credential profile for keyring lookup (env: CERTINEXT_PROFILE; default: use the default profile)",
-    )
-    conn.add_argument(
-        "--base-url", default="https://us-api.certinext.io", metavar="URL",
-        help="CertiNext base URL (default: https://us-api.certinext.io)",
-    )
-    conn.add_argument(
-        "--token-url", default="https://us-api.certinext.io/oauth/token", metavar="URL",
-        help="OAuth2 token endpoint URL (default: https://us-api.certinext.io/oauth/token)",
-    )
-    conn.add_argument(
-        "--account-number", "--client-id", dest="account_number", default=None, metavar="ACCT",
-        help="CertiNext account number / OAuth2 client_id (env: CERTINEXT_CLIENT_ID)",
-    )
-    conn.add_argument(
-        "--client-secret", default=None, metavar="SECRET",
-        help="OAuth2 client secret (env: CERTINEXT_CLIENT_SECRET)",
-    )
-    conn.add_argument("--scope", default="", metavar="SCOPE", help="OAuth2 scope (optional)")
+    add_connection_args(conn, scope=True)
 
     sub = parser.add_subparsers(dest="command", required=True, metavar="<command>")
 
@@ -254,8 +166,8 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
-
-    sess = _session(args)
+    apply_sandbox(args)
+    sess = build_session(args)
 
     handlers = {
         "list": cmd_list,
