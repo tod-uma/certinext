@@ -28,7 +28,8 @@ Typical usage::
 
 Known API limitations (vendor bugs, pending fix):
     - The ``search`` parameter to :meth:`~certinext.domains.DomainAccessor.get_list`
-      is ignored — all domains are returned regardless. Use ``pattern`` for
+      remains broken (re-tested 2026-05-27): FQDN searches (any value containing
+      ``"."``) return all domains; substring searches return 0. Use ``pattern`` for
       client-side filtering.
     - Passing both ``domain_status`` and ``dcv_status`` to
       :meth:`~certinext.domains.DomainAccessor.get_list` returns a 400 error.
@@ -44,6 +45,7 @@ Errors:
 from .client import CertiNextClient
 from .domains import VALID_DCV_METHODS, DcvInfo, DcvMethod, DcvStatus, Domain, DomainAccessor, DomainStatus
 from .exceptions import CertiNextAPIError
+from .orders import CertificateStatus, OrderAccessor, OrderRecord
 from .session import CertiNextSession
 
 
@@ -85,4 +87,7 @@ __all__ = [
     "DcvStatus",
     "DomainStatus",
     "VALID_DCV_METHODS",
+    "CertificateStatus",
+    "OrderAccessor",
+    "OrderRecord",
 ]

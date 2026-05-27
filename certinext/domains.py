@@ -335,10 +335,12 @@ class DomainAccessor:
             limit: Page size (API default 50; keep ≤200 for performance).
             search: Full FQDN for exact match (``maine.edu``) or a substring
                 for LIKE matching (``maine``). Maps to the API ``search`` param.
-                **Warning:** the API ``search`` parameter is a confirmed vendor
-                bug (reported 2026-05-20); all domains are returned regardless
-                of the value passed. Use ``pattern`` for reliable client-side
-                filtering until CertiNext notifies the fix is deployed.
+                **Warning:** the API ``search`` parameter remains broken after
+                the vendor's claimed fix (re-tested 2026-05-27 with confirmed-
+                correct usage per API docs). FQDN searches (any value containing
+                ``"."``) still return all domains; substring searches (no ``"."``)
+                now return 0 results. Use ``pattern`` for reliable client-side
+                filtering.
             domain_status: Comma-separated status filter, e.g.
                 ``"ACTIVE,INACTIVE"``. Values: ACTIVE, INACTIVE, EXPIRED,
                 REVOKED.
