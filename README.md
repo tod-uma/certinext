@@ -110,6 +110,45 @@ All scripts resolve credentials in this priority order:
 
 </details>
 
+### Sandbox environment
+
+A sandbox environment is available at `https://sandbox-us-api.certinext.io` for
+testing API calls without affecting production data.  Store sandbox credentials
+once with:
+
+```bash
+certinext-setup-keyring --sandbox
+```
+
+Then pass `--sandbox` to any CLI command to target the sandbox:
+
+```bash
+certinext-domains --sandbox list
+certinext-pending-dcv --sandbox
+certinext-domain-cert-count --sandbox
+```
+
+`--sandbox` is a shortcut that sets `--base-url` and `--token-url` to the
+sandbox endpoints and defaults `--profile` to `sandbox`.
+
+### Integration tests
+
+The test suite includes integration tests that call the live sandbox API.
+They are skipped automatically when sandbox credentials are not present in the
+keyring, so they are safe to include in CI environments that lack a keyring.
+
+Set up sandbox credentials first (one-time):
+
+```bash
+certinext-setup-keyring --sandbox
+```
+
+Then run the integration suite:
+
+```bash
+pytest -m integration
+```
+
 ---
 
 ## CLI commands
@@ -125,6 +164,9 @@ certinext-setup-keyring
 
 # Store credentials for a named profile
 certinext-setup-keyring --profile prod
+
+# Store credentials for the sandbox environment
+certinext-setup-keyring --sandbox
 ```
 
 The script prompts for your account number and client secret, shows any
@@ -142,6 +184,7 @@ keychain (see [Credentials](#credentials) above).
 
 ```
 --profile NAME          Credential profile for keyring lookup (env: CERTINEXT_PROFILE)
+--sandbox               Use the sandbox API and sandbox keyring profile
 --account-number ACCT   CertiNext account number / client_id (env: CERTINEXT_CLIENT_ID)
 --client-secret SECRET  OAuth2 client secret (env: CERTINEXT_CLIENT_SECRET)
 --base-url URL          API base URL (default: https://us-api.certinext.io)
@@ -252,6 +295,7 @@ any domain.
 
 ```
 --profile NAME          Credential profile for keyring lookup (env: CERTINEXT_PROFILE)
+--sandbox               Use the sandbox API and sandbox keyring profile
 --account-number ACCT   CertiNext account number (env: CERTINEXT_CLIENT_ID)
 --client-secret SECRET  OAuth2 client secret (env: CERTINEXT_CLIENT_SECRET)
 --base-url URL          API base URL (default: https://us-api.certinext.io)
@@ -291,6 +335,7 @@ when that domain is registered, rather than the less-specific `example.org`.
 
 ```
 --profile NAME           Credential profile for keyring lookup (env: CERTINEXT_PROFILE)
+--sandbox                Use the sandbox API and sandbox keyring profile
 --account-number ACCT    CertiNext account number (env: CERTINEXT_CLIENT_ID)
 --client-secret SECRET   OAuth2 client secret (env: CERTINEXT_CLIENT_SECRET)
 --base-url URL           API base URL (default: https://us-api.certinext.io)
@@ -626,7 +671,8 @@ Run the script repeatedly — each run advances every pending domain as far as i
 
 ```
 certinext/
-    __init__.py               # session() factory, top-level exports
+    __init__.py               # session() factory, top-level exports, URL constants
+    _cli.py                   # shared CLI utilities (add_connection_args, build_session)
     _keyring.py               # shared keyring helpers (keyring_service, keyring_get)
     auth.py                   # OAuth 2.0 client credentials token management
     client.py                 # HTTP session wrapper (get/post/put/delete)
@@ -637,6 +683,8 @@ certinext/
     pending_dcv.py            # certinext-pending-dcv CLI entry point
     session.py                # CertiNextSession (session.domain, session.orders)
     setup_keyring.py          # certinext-setup-keyring CLI entry point
+tests/
+    test_integration.py       # integration tests against the sandbox API (pytest -m integration)
 examples/
     dns_txt_dcv.py            # DNS-TXT DCV automation example (see Examples above)
 ```
