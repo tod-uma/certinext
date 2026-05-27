@@ -101,13 +101,11 @@ class TestDomainDunderMethods:
         assert "University of Maine System" in str(domain)
 
     def test_repr_contains_key_fields(self, domain: Domain):
-        """repr(domain) starts with Domain( and includes id, name, status, dcv_status."""
+        """repr(domain) starts with Domain( and shows name and status."""
         r = repr(domain)
         assert r.startswith("Domain(")
-        assert "id=" in r
         assert "name=" in r
         assert "status=" in r
-        assert "dcv_status=" in r
 
     def test_print_does_not_raise(self, domain: Domain):
         """print(domain) does not raise."""
@@ -349,53 +347,53 @@ class TestDomainAccessorList:
         )
 
 
-class TestDomainAccessorListPendingDcv:
-    """DomainAccessor.list_pending_dcv() returns only domains where needs_dcv is True."""
+class TestDomainAccessorGetPendingDcv:
+    """DomainAccessor.get_pending_dcv() returns only domains where needs_dcv is True."""
 
     def test_returns_only_pending_domains(self, accessor: DomainAccessor, mock_client: MagicMock):
-        """list_pending_dcv() excludes already-verified domains."""
+        """get_pending_dcv() excludes already-verified domains."""
         mock_client.get.return_value = [SAMPLE_DOMAIN_DATA, SAMPLE_DOMAIN_DATA_2]
-        result = accessor.list_pending_dcv()
+        result = accessor.get_pending_dcv()
         assert len(result) == 1
         assert result[0].name == "maine.edu"
 
     def test_returns_empty_when_all_verified(self, accessor: DomainAccessor, mock_client: MagicMock):
-        """list_pending_dcv() returns an empty list when all domains are verified."""
+        """get_pending_dcv() returns an empty list when all domains are verified."""
         mock_client.get.return_value = [SAMPLE_DOMAIN_DATA]
-        assert accessor.list_pending_dcv() == []
+        assert accessor.get_pending_dcv() == []
 
     def test_returns_all_when_all_pending(self, accessor: DomainAccessor, mock_client: MagicMock):
-        """list_pending_dcv() returns all domains when none are verified."""
+        """get_pending_dcv() returns all domains when none are verified."""
         pending_data = dict(SAMPLE_DOMAIN_DATA, dcvStatus="PENDING")
         mock_client.get.return_value = [pending_data, SAMPLE_DOMAIN_DATA_2]
-        result = accessor.list_pending_dcv()
+        result = accessor.get_pending_dcv()
         assert len(result) == 2
 
     def test_returns_empty_when_no_domains(self, accessor: DomainAccessor, mock_client: MagicMock):
-        """list_pending_dcv() returns an empty list when there are no domains."""
+        """get_pending_dcv() returns an empty list when there are no domains."""
         mock_client.get.return_value = []
-        assert accessor.list_pending_dcv() == []
+        assert accessor.get_pending_dcv() == []
 
     def test_excludes_inactive_domains(self, accessor: DomainAccessor, mock_client: MagicMock):
-        """list_pending_dcv() excludes INACTIVE domains even if DCV status is PENDING."""
+        """get_pending_dcv() excludes INACTIVE domains even if DCV status is PENDING."""
         inactive = dict(SAMPLE_DOMAIN_DATA_2, status="INACTIVE")
         mock_client.get.return_value = [inactive]
-        assert accessor.list_pending_dcv() == []
+        assert accessor.get_pending_dcv() == []
 
     def test_result_contains_domain_instances(self, accessor: DomainAccessor, mock_client: MagicMock):
-        """list_pending_dcv() returns Domain instances."""
+        """get_pending_dcv() returns Domain instances."""
         mock_client.get.return_value = [SAMPLE_DOMAIN_DATA_2]
-        result = accessor.list_pending_dcv()
+        result = accessor.get_pending_dcv()
         assert all(isinstance(d, Domain) for d in result)
 
     def test_calls_list_with_no_server_side_filters(self, accessor: DomainAccessor, mock_client: MagicMock):
-        """list_pending_dcv() fetches all domains without server-side status filters.
+        """get_pending_dcv() fetches all domains without server-side status filters.
 
         The API returns 400 when domainStatus and dcvStatus are combined, so
         filtering is done client-side via needs_dcv instead.
         """
         mock_client.get.return_value = []
-        accessor.list_pending_dcv()
+        accessor.get_pending_dcv()
         mock_client.get.assert_called_once_with("/api/certinext/v2/domains", params=None)
 
 

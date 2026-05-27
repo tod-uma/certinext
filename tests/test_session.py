@@ -15,23 +15,47 @@
 """Tests for certinext.session.CertiNextSession and the certinext.session() factory."""
 
 import certinext
+from certinext.accounts import AccountAccessor
+from certinext.catalog import CatalogAccessor
 from certinext.domains import DomainAccessor
+from certinext.ledger import LedgerAccessor
 from certinext.orders import OrderAccessor
 from certinext.session import CertiNextSession
+from certinext.ssl_certificates import SslAccessor
 
 
 class TestCertiNextSession:
     """CertiNextSession initialises correctly and mounts accessors."""
+
+    def test_accounts_accessor_is_mounted(self):
+        """session.accounts is an AccountAccessor instance."""
+        sess = CertiNextSession(client_id="acct", client_secret="secret")
+        assert isinstance(sess.accounts, AccountAccessor)
+
+    def test_catalog_accessor_is_mounted(self):
+        """session.catalog is a CatalogAccessor instance."""
+        sess = CertiNextSession(client_id="acct", client_secret="secret")
+        assert isinstance(sess.catalog, CatalogAccessor)
 
     def test_domain_accessor_is_mounted(self):
         """session.domain is a DomainAccessor instance."""
         sess = CertiNextSession(client_id="acct", client_secret="secret")
         assert isinstance(sess.domain, DomainAccessor)
 
+    def test_ledger_accessor_is_mounted(self):
+        """session.ledger is a LedgerAccessor instance."""
+        sess = CertiNextSession(client_id="acct", client_secret="secret")
+        assert isinstance(sess.ledger, LedgerAccessor)
+
     def test_orders_accessor_is_mounted(self):
         """session.orders is an OrderAccessor instance."""
         sess = CertiNextSession(client_id="acct", client_secret="secret")
         assert isinstance(sess.orders, OrderAccessor)
+
+    def test_ssl_accessor_is_mounted(self):
+        """session.ssl is an SslAccessor instance."""
+        sess = CertiNextSession(client_id="acct", client_secret="secret")
+        assert isinstance(sess.ssl, SslAccessor)
 
     def test_base_url_default(self):
         """The default base URL is https://us-api.certinext.io."""

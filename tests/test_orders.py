@@ -12,14 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tests for certinext.orders (OrderRecord, OrderAccessor) and domain_cert_count._build_rows."""
+"""Tests for certinext.orders (OrderRecord, OrderAccessor) and domain_cert_count_cli._build_rows."""
 
 from unittest.mock import MagicMock
 
 import pytest
 
 from certinext.client import CertiNextClient
-from certinext.domain_cert_count import _apex_domain, _build_rows, _match_domain
+from certinext.domain_cert_count_cli import _apex_domain, _build_rows, _match_domain
 from certinext.domains import Domain
 from certinext.orders import OrderAccessor, OrderRecord
 

@@ -34,9 +34,13 @@ import pytest
 
 import certinext
 from certinext._keyring import keyring_get, keyring_service
-from certinext.domain_cert_count import _build_rows
+from certinext.accounts import AccountInfo, Group, Organization
+from certinext.catalog import ProductCategory
+from certinext.domain_cert_count_cli import _build_rows
 from certinext.domains import Domain
+from certinext.ledger import LedgerRecord
 from certinext.orders import OrderRecord
+from certinext.ssl_certificates import SslOrder
 
 # ---------------------------------------------------------------------------
 # Session-scoped fixtures — authenticate and fetch once per pytest run
@@ -131,9 +135,9 @@ class TestSandboxDomains:
         fetched = sandbox_session.domain.get(target.name)
         assert fetched.name == target.name
 
-    def test_list_pending_dcv_all_need_dcv(self, sandbox_session: certinext.CertiNextSession) -> None:
-        """list_pending_dcv() returns only domains whose needs_dcv is True."""
-        pending = sandbox_session.domain.list_pending_dcv()
+    def test_get_pending_dcv_all_need_dcv(self, sandbox_session: certinext.CertiNextSession) -> None:
+        """get_pending_dcv() returns only domains whose needs_dcv is True."""
+        pending = sandbox_session.domain.get_pending_dcv()
         assert all(d.needs_dcv for d in pending)
 
     def test_to_row_returns_string_values(self, sandbox_domains: list[Domain]) -> None:
@@ -231,3 +235,237 @@ class TestSandboxDomainCertCount:
         for name in apex_names:
             parents = [p for p in registered_names if name != p and name.endswith(f".{p}")]
             assert not parents, f"{name!r} has registered parent {parents[0]!r} — should not appear in condensed output"
+
+
+# ---------------------------------------------------------------------------
+# Accounts API
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(scope="session")
+def sandbox_account_info(sandbox_session: certinext.CertiNextSession) -> AccountInfo:
+    """Fetch current account info once for the session."""
+    return sandbox_session.accounts.me()
+
+
+@pytest.fixture(scope="session")
+def sandbox_groups(sandbox_session: certinext.CertiNextSession) -> list[Group]:
+    """Fetch sandbox billing groups once for the session."""
+    return sandbox_session.accounts.list_groups()
+
+
+@pytest.fixture(scope="session")
+def sandbox_organizations(sandbox_session: certinext.CertiNextSession) -> list[Organization]:
+    """Fetch sandbox organizations once for the session."""
+    return sandbox_session.accounts.list_organizations()
+
+
+@pytest.mark.integration
+class TestSandboxAccounts:
+    """Integration tests for the Accounts API against the sandbox."""
+
+    def test_me_returns_account_info(self, sandbox_account_info: AccountInfo) -> None:
+        """me() returns an AccountInfo instance."""
+        assert isinstance(sandbox_account_info, AccountInfo)
+
+    def test_account_has_number(self, sandbox_account_info: AccountInfo) -> None:
+        """The sandbox account has a non-None account_number."""
+        assert sandbox_account_info.account_number is not None
+
+    def test_account_has_name(self, sandbox_account_info: AccountInfo) -> None:
+        """The sandbox account has a non-None account_name."""
+        assert sandbox_account_info.account_name is not None
+
+    def test_list_groups_returns_list(self, sandbox_groups: list[Group]) -> None:
+        """list_groups() returns a list (may be empty)."""
+        assert isinstance(sandbox_groups, list)
+
+    def test_groups_are_group_objects(self, sandbox_groups: list[Group]) -> None:
+        """Every item returned by list_groups() is a Group instance."""
+        assert all(isinstance(g, Group) for g in sandbox_groups)
+
+    def test_list_organizations_returns_list(self, sandbox_organizations: list[Organization]) -> None:
+        """list_organizations() returns a list (may be empty)."""
+        assert isinstance(sandbox_organizations, list)
+
+    def test_organizations_are_organization_objects(self, sandbox_organizations: list[Organization]) -> None:
+        """Every item returned by list_organizations() is an Organization instance."""
+        assert all(isinstance(o, Organization) for o in sandbox_organizations)
+
+    def test_get_organization_matches_listed(
+        self,
+        sandbox_session: certinext.CertiNextSession,
+        sandbox_organizations: list[Organization],
+    ) -> None:
+        """get_organization() returns an org whose number matches the listed record."""
+        if not sandbox_organizations:
+            pytest.skip("no organizations in sandbox account")
+        first = sandbox_organizations[0]
+        if first.organization_number is None:
+            pytest.skip("first organization has no number")
+        fetched = sandbox_session.accounts.get_organization(first.organization_number)
+        assert isinstance(fetched, Organization)
+        assert fetched.organization_number == first.organization_number
+
+
+# ---------------------------------------------------------------------------
+# Catalog API
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(scope="session")
+def sandbox_catalog(sandbox_session: certinext.CertiNextSession) -> list[ProductCategory]:
+    """Fetch the product catalog once for the session."""
+    return sandbox_session.catalog.list_products()
+
+
+@pytest.mark.integration
+class TestSandboxCatalog:
+    """Integration tests for the Catalog API against the sandbox."""
+
+    def test_list_products_returns_non_empty(self, sandbox_catalog: list[ProductCategory]) -> None:
+        """list_products() returns at least one product category."""
+        assert len(sandbox_catalog) > 0
+
+    def test_products_have_codes_and_names(self, sandbox_catalog: list[ProductCategory]) -> None:
+        """Every product has a product_code and product_name."""
+        for category in sandbox_catalog:
+            for product in category.products:
+                assert product.product_code is not None, f"product missing code: {product!r}"
+                assert product.product_name is not None, f"product missing name: {product!r}"
+
+    def test_dv_product_present(self, sandbox_catalog: list[ProductCategory]) -> None:
+        """The catalog includes at least one DV SSL product."""
+        from certinext.ssl_certificates import _matches_variant
+        products = [p for cat in sandbox_catalog for p in cat.products]
+        dv = [p for p in products if p.product_name and _matches_variant(p.product_name, "DV", False, False)]
+        assert len(dv) > 0, "expected at least one DV SSL product in catalog"
+
+    def test_get_custom_fields_returns_list(
+        self,
+        sandbox_session: certinext.CertiNextSession,
+        sandbox_catalog: list[ProductCategory],
+    ) -> None:
+        """get_custom_fields() returns a list for the first available product."""
+        first_product = next(
+            (p for cat in sandbox_catalog for p in cat.products if p.product_code),
+            None,
+        )
+        if first_product is None or first_product.product_code is None:
+            pytest.skip("no products with codes in catalog")
+        fields = sandbox_session.catalog.get_custom_fields(first_product.product_code)
+        assert isinstance(fields, list)
+
+
+# ---------------------------------------------------------------------------
+# Ledger API
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(scope="session")
+def sandbox_ledger(sandbox_session: certinext.CertiNextSession) -> list[LedgerRecord]:
+    """Fetch all sandbox ledger records once for the session."""
+    return sandbox_session.ledger.get_list()
+
+
+@pytest.mark.integration
+class TestSandboxLedger:
+    """Integration tests for the Ledger API against the sandbox."""
+
+    def test_get_page_returns_list(self, sandbox_session: certinext.CertiNextSession) -> None:
+        """get_page(page=1) returns a list without raising."""
+        page = sandbox_session.ledger.get_page(page=1)
+        assert isinstance(page, list)
+
+    def test_get_list_returns_list(self, sandbox_ledger: list[LedgerRecord]) -> None:
+        """get_list() returns a list of LedgerRecord objects (may be empty)."""
+        assert isinstance(sandbox_ledger, list)
+        assert all(isinstance(r, LedgerRecord) for r in sandbox_ledger)
+
+    def test_ledger_record_properties_accessible(self, sandbox_ledger: list[LedgerRecord]) -> None:
+        """Accessing all LedgerRecord properties on live data does not raise."""
+        for r in sandbox_ledger:
+            _ = r.transaction_date
+            _ = r.description
+            _ = r.order_number
+            _ = r.transaction_type
+            _ = r.debit
+            _ = r.credit
+            _ = r.balance
+
+    def test_to_row_returns_string_values(self, sandbox_ledger: list[LedgerRecord]) -> None:
+        """to_row() returns a dict with all-string values on live ledger data."""
+        for r in sandbox_ledger:
+            row = r.to_row()
+            assert all(isinstance(v, str) for v in row.values())
+
+
+# ---------------------------------------------------------------------------
+# SSL Certificates API
+# ---------------------------------------------------------------------------
+
+@pytest.mark.integration
+class TestSandboxSsl:
+    """Integration tests for the SSL Certificates API against the sandbox.
+
+    All tests are read-only — no certificates are ordered. Existing orders
+    from the sandbox Orders Report are used as test data for ``ssl.get()``.
+    """
+
+    def test_ssl_dv_product_resolvable(self, sandbox_session: certinext.CertiNextSession) -> None:
+        """The catalog contains at least one DV SSL product that SslAccessor can resolve."""
+        from certinext.ssl_certificates import _matches_variant
+        categories = sandbox_session.catalog.list_products()
+        products = [p for cat in categories for p in cat.products]
+        dv = [p for p in products if p.product_name and _matches_variant(p.product_name, "DV", False, False)]
+        assert len(dv) > 0, "no DV SSL product found in catalog"
+
+    def test_get_ssl_order_by_order_number(
+        self,
+        sandbox_session: certinext.CertiNextSession,
+        sandbox_orders: list[OrderRecord],
+    ) -> None:
+        """ssl.get() returns an SslOrder when called with an order_number from the orders report."""
+        if not sandbox_orders:
+            pytest.skip("no orders in sandbox")
+        first = sandbox_orders[0]
+        if first.order_number is None:
+            pytest.skip("first order has no order_number")
+        order = sandbox_session.ssl.get(first.order_number)
+        assert isinstance(order, SslOrder)
+
+    def test_ssl_order_properties_accessible(
+        self,
+        sandbox_session: certinext.CertiNextSession,
+        sandbox_orders: list[OrderRecord],
+    ) -> None:
+        """Accessing all SslOrder properties on a live order does not raise."""
+        if not sandbox_orders:
+            pytest.skip("no orders in sandbox")
+        first = sandbox_orders[0]
+        if first.order_number is None:
+            pytest.skip("first order has no order_number")
+        order = sandbox_session.ssl.get(first.order_number)
+        _ = order.order_id
+        _ = order.request_id
+        _ = order.status
+        _ = order.domain
+        _ = order.additional_domains
+        _ = order.product_variant
+        _ = order.created_at
+
+    def test_ssl_order_status_is_known_value(
+        self,
+        sandbox_session: certinext.CertiNextSession,
+        sandbox_orders: list[OrderRecord],
+    ) -> None:
+        """SslOrder.status is one of the documented SslOrderStatus values."""
+        if not sandbox_orders:
+            pytest.skip("no orders in sandbox")
+        first = sandbox_orders[0]
+        if first.order_number is None:
+            pytest.skip("first order has no order_number")
+        order = sandbox_session.ssl.get(first.order_number)
+        valid = {
+            "pending-dcv", "pending-organization-verification", "pending-csr",
+            "pending-documents", "pending-agreement", "pending-approval",
+            "issued", "revoked", "cancelled", "rejected", "expired", "unknown",
+        }
+        assert order.status is None or order.status in valid, f"unexpected status {order.status!r}"

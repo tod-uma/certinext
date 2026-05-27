@@ -17,7 +17,7 @@
 
 Connects to the CertiNext API and prints every active domain whose DCV status
 is not yet VERIFIED. Credentials are resolved in priority order: command-line
-argument → environment variable → interactive prompt.
+argument → OS keychain → environment variable → interactive prompt.
 
 Usage:
     certinext-pending-dcv                                    # (installed command)
@@ -27,6 +27,7 @@ Usage:
 
 import argparse
 import json
+import sys
 
 from tabulate import tabulate
 
@@ -46,27 +47,31 @@ def _show_domains(domains: list[Domain], use_json: bool) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="List all active domains that have not completed DCV verification",
-    )
-    add_connection_args(parser)
-    # Optional client-side regex filter applied after the API response.
-    parser.add_argument(
-        "--pattern", metavar="REGEX",
-        help="Filter domains by regex pattern (re.fullmatch, case-insensitive)",
-    )
-    parser.add_argument(
-        "--json", action="store_true", default=False,
-        help="Output raw JSON instead of tabular format",
-    )
-    args = parser.parse_args()
-    apply_sandbox(args)
-    sess = build_session(args)
+    try:
+        parser = argparse.ArgumentParser(
+            description="List all active domains that have not completed DCV verification",
+        )
+        add_connection_args(parser)
+        # Optional client-side regex filter applied after the API response.
+        parser.add_argument(
+            "--pattern", metavar="REGEX",
+            help="Filter domains by regex pattern (re.fullmatch, case-insensitive)",
+        )
+        parser.add_argument(
+            "--json", action="store_true", default=False,
+            help="Output raw JSON instead of tabular format",
+        )
+        args = parser.parse_args()
+        apply_sandbox(args)
+        sess = build_session(args)
 
-    # list_pending_dcv() uses server-side filters (ACTIVE + non-VERIFIED DCV status)
-    # to minimise data transferred, then applies the optional client-side pattern.
-    domains = sess.domain.list_pending_dcv(pattern=args.pattern)
-    _show_domains(domains, args.json)
+        # get_pending_dcv() uses server-side filters (ACTIVE + non-VERIFIED DCV status)
+        # to minimise data transferred, then applies the optional client-side pattern.
+        domains = sess.domain.get_pending_dcv(pattern=args.pattern)
+        _show_domains(domains, args.json)
+    except KeyboardInterrupt:
+        print("\nAborted.", file=sys.stderr)
+        raise SystemExit(130)
 
 
 if __name__ == "__main__":

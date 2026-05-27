@@ -13,7 +13,10 @@ Python library and CLI scripts for managing your [CertiNext](https://us.certinex
 - [Credentials](#credentials)
 - [CLI commands](#cli-commands)
   - [certinext-setup-keyring](#certinext-setup-keyring)
+  - [certinext-accounts](#certinext-accounts)
   - [certinext-domains](#certinext-domains)
+  - [certinext-ledger](#certinext-ledger)
+  - [certinext-list-certificates](#certinext-list-certificates)
   - [certinext-pending-dcv](#certinext-pending-dcv)
   - [certinext-domain-cert-count](#certinext-domain-cert-count)
 - [Python library](#python-library)
@@ -123,7 +126,10 @@ certinext-setup-keyring --sandbox
 Then pass `--sandbox` to any CLI command to target the sandbox:
 
 ```bash
+certinext-accounts --sandbox
 certinext-domains --sandbox list
+certinext-ledger --sandbox
+certinext-list-certificates --sandbox
 certinext-pending-dcv --sandbox
 certinext-domain-cert-count --sandbox
 ```
@@ -177,6 +183,23 @@ certinext-setup-keyring --sandbox
 The script prompts for your account number and client secret, shows any
 currently stored value as a default so you can keep it by pressing Enter, and
 masks the secret with asterisks on confirmation.
+
+### certinext-accounts
+
+`certinext-accounts` shows the current account identity, billing groups, and
+pre-vetted organizations.
+
+```bash
+certinext-accounts
+certinext-accounts --sandbox
+certinext-accounts --json
+```
+
+| Argument | Description |
+|---|---|
+| `--json` | Output raw JSON instead of tabular format |
+
+---
 
 ### certinext-domains
 
@@ -289,6 +312,52 @@ Add `--json` before the subcommand to get raw JSON instead of the default tabula
 ```bash
 certinext-domains --json list | jq '.[] | .domainName'
 ```
+
+### certinext-ledger
+
+`certinext-ledger` shows the account transaction history (all debits, credits,
+and running balance) with automatic pagination.
+
+#### Arguments
+
+```
+--last N   Show only the N most recent transactions
+--json     Output raw JSON instead of tabular format
+```
+
+#### Examples
+
+```bash
+certinext-ledger
+certinext-ledger --last 20
+certinext-ledger --sandbox --json
+```
+
+---
+
+### certinext-list-certificates
+
+`certinext-list-certificates` lists all SSL/TLS certificate orders from the
+orders report. Use `--status` to filter by lifecycle status.
+
+#### Arguments
+
+```
+--status STATUS   Filter by certificate status (issued, expired, pending-dcv, etc.)
+--json            Output raw JSON instead of tabular format
+```
+
+#### Examples
+
+```bash
+certinext-list-certificates
+certinext-list-certificates --status issued
+certinext-list-certificates --status expired
+certinext-list-certificates --status pending-dcv
+certinext-list-certificates --sandbox --json
+```
+
+---
 
 ### certinext-pending-dcv
 
@@ -454,7 +523,7 @@ domains = sess.domain.get_list(domain_status="ACTIVE", pattern=r".*\.maine\.edu"
 
 #### List domains needing DCV
 
-`list_pending_dcv()` returns active domains that have not yet completed DCV
+`get_pending_dcv()` returns active domains that have not yet completed DCV
 verification. It fetches all domains and filters client-side using
 `domain.needs_dcv`.
 
@@ -464,10 +533,10 @@ verification. It fetches all domains and filters client-side using
 > deployed.
 
 ```python
-pending = sess.domain.list_pending_dcv()
+pending = sess.domain.get_pending_dcv()
 
 # Narrow to a subset by name
-pending = sess.domain.list_pending_dcv(pattern=r".*\.maine\.edu")
+pending = sess.domain.get_pending_dcv(pattern=r".*\.maine\.edu")
 ```
 
 #### Get a domain
@@ -565,8 +634,8 @@ sess = certinext.session(
 )
 
 # Due to a vendor API bug, server-side status filtering is currently disabled.
-# list_pending_dcv() fetches all domains and filters client-side for needs_dcv.
-for domain in sess.domain.list_pending_dcv():
+# get_pending_dcv() fetches all domains and filters client-side for needs_dcv.
+for domain in sess.domain.get_pending_dcv():
     print(f"Verifying {domain.name} ...")
     domain.verify()
 ```
@@ -625,6 +694,162 @@ repr(o)       # OrderRecord(order_number='ORD-001', common_name='example.org', .
 
 ---
 
+### Working with accounts
+
+`sess.accounts` exposes the authenticated account identity, billing groups, and
+pre-vetted organizations.
+
+```python
+me = sess.accounts.me()
+print(me.account_number, me.account_name, me.account_type)
+
+groups = sess.accounts.list_groups()
+for g in groups:
+    print(g.group_number, g.group_name)
+
+orgs = sess.accounts.list_organizations()
+for o in orgs:
+    print(o.organization_number, o.organization_name, o.locality)
+
+# Fetch a single organization by its number
+org = sess.accounts.get_organization("8921215")
+```
+
+### Working with the catalog
+
+`sess.catalog` lists available certificate products and their custom fields.
+
+```python
+categories = sess.catalog.list_products()
+for cat in categories:
+    for product in cat.products:
+        print(product.product_code, product.product_name, product.price)
+
+# Custom fields required for a specific product
+fields = sess.catalog.get_custom_fields("842")
+for f in fields:
+    print(f.field_name, f.required)
+```
+
+### Working with the ledger
+
+`sess.ledger` provides access to the account transaction history.
+
+```python
+records = sess.ledger.get_list()
+for r in records:
+    print(r.transaction_date, r.description, r.debit, r.credit, r.balance)
+
+# Single page
+page = sess.ledger.get_page(page=1, size=50)
+```
+
+`get_list()` paginates automatically. `LedgerRecord.to_row()` returns a flat
+`dict[str, str]` suitable for `tabulate`.
+
+### Working with SSL/TLS certificates
+
+`sess.ssl` covers the full certificate lifecycle. Product codes are resolved
+automatically from the catalog — you never hardcode a product code.
+
+#### Create a certificate
+
+```python
+# DV single-domain
+order = sess.ssl.create_dv("example.com", validity=365)
+
+# DV wildcard
+order = sess.ssl.create_dv_wildcard("example.com", validity=365)
+
+# OV single-domain (requires organization_id from sess.accounts.list_organizations())
+order = sess.ssl.create_ov("example.com", organization_id="8921215", validity=365)
+
+# EV single-domain
+order = sess.ssl.create_ev("example.com", organization_id="8921215", validity=365)
+
+# UCC (multi-domain) — pass a list for DV, OV, or EV
+order = sess.ssl.create_dv_ucc(["example.com", "www.example.com"], validity=365)
+```
+
+#### DV lifecycle
+
+Each mutation call returns an opaque response dict; call `order.refresh()` afterwards to see the updated `order.status`.
+
+```python
+# 1. Get challenges
+for challenge in order.get_dcv():
+    print(challenge.domain, challenge.method, challenge.host, challenge.token)
+
+# 2. (Publish the DNS TXT or HTTP file challenge externally)
+
+# 3. Trigger verification (publish the challenge first, then call this)
+order.verify_dcv()
+order.refresh()
+print(order.status)  # "pending-csr" once DCV passes
+
+# 4. Submit CSR
+order.submit_csr(csr_pem)
+order.refresh()
+
+# 5. Accept agreement
+order.accept_agreement()
+order.refresh()
+print(order.status)  # "pending-approval" or "issued"
+
+# 6. Download once issued
+cert = order.download_certificate()        # JSON — cert + chain PEM strings
+pem  = order.download_certificate_pem()   # raw PEM text
+der  = order.download_certificate_der()   # raw DER bytes
+```
+
+**Complete end-to-end DV example:**
+
+```python
+import certinext, time
+
+sess = certinext.session(client_id="YOUR_ACCOUNT", client_secret="YOUR_SECRET")
+
+order = sess.ssl.create_dv("example.com", validity=365)
+print(f"Order {order.order_id} created, status={order.status}")
+
+for ch in order.get_dcv():
+    print(f"  {ch.domain}: add TXT at {ch.host!r}  value={ch.token!r}")
+
+input("Press Enter once DNS TXT records are published…")
+
+order.verify_dcv()
+order.submit_csr(open("csr.pem").read())
+order.accept_agreement()
+
+while True:
+    order.refresh()
+    if order.status == "issued":
+        break
+    print(f"  status={order.status}, waiting…")
+    time.sleep(30)
+
+open("cert.pem", "w").write(order.download_certificate_pem())
+print("Certificate written to cert.pem")
+```
+
+#### Retrieve an existing order
+
+```python
+order = sess.ssl.get("ORDER-ID")
+print(order.status, order.domain, order.created_at)
+order.refresh()   # re-fetch current state from the API
+```
+
+#### Other lifecycle operations
+
+```python
+order.cancel()
+order.revoke(reason="keyCompromise")
+order.reissue("rekey", csr=new_csr_pem)
+```
+
+---
+
 ## Examples
 
 ### DNS-TXT DCV automation
@@ -676,22 +901,30 @@ Run the script repeatedly — each run advances every pending domain as far as i
 
 ```
 certinext/
-    __init__.py               # session() factory, top-level exports, URL constants
-    _cli.py                   # shared CLI utilities (add_connection_args, build_session)
-    _keyring.py               # shared keyring helpers (keyring_service, keyring_get)
-    auth.py                   # OAuth 2.0 client credentials token management
-    client.py                 # HTTP session wrapper (get/post/put/delete)
-    domain_cert_count.py      # certinext-domain-cert-count CLI entry point
-    domains.py                # Domain class and DomainAccessor
-    domains_cli.py            # certinext-domains CLI entry point
-    orders.py                 # OrderRecord and OrderAccessor
-    pending_dcv.py            # certinext-pending-dcv CLI entry point
-    session.py                # CertiNextSession (session.domain, session.orders)
-    setup_keyring.py          # certinext-setup-keyring CLI entry point
+    __init__.py                   # session() factory, top-level exports, URL constants
+    _cli.py                       # shared CLI utilities (add_connection_args, build_session)
+    _keyring.py                   # shared keyring helpers (keyring_service, keyring_get)
+    accounts.py                   # AccountInfo, Group, Organization, AccountAccessor
+    accounts_cli.py               # certinext-accounts CLI entry point
+    auth.py                       # OAuth 2.0 client credentials token management
+    catalog.py                    # Product, ProductCategory, CustomField, CatalogAccessor
+    client.py                     # HTTP session wrapper (get/post/put/delete/get_bytes)
+    domain_cert_count_cli.py      # certinext-domain-cert-count CLI entry point
+    domains.py                    # Domain class and DomainAccessor
+    domains_cli.py                # certinext-domains CLI entry point
+    exceptions.py                 # CertiNextAPIError
+    ledger.py                     # LedgerRecord and LedgerAccessor
+    ledger_cli.py                 # certinext-ledger CLI entry point
+    list_certificates_cli.py      # certinext-list-certificates CLI entry point
+    orders.py                     # OrderRecord and OrderAccessor
+    pending_dcv_cli.py            # certinext-pending-dcv CLI entry point
+    session.py                    # CertiNextSession (accounts, catalog, domain, ledger, orders, ssl)
+    setup_keyring_cli.py          # certinext-setup-keyring CLI entry point
+    ssl_certificates.py           # SslOrder, DcvChallenge, CertificateDownload, SslAccessor
 tests/
-    test_integration.py       # integration tests against the sandbox API (pytest -m integration)
+    test_integration.py           # integration tests against the sandbox API (pytest -m integration)
 examples/
-    dns_txt_dcv.py            # DNS-TXT DCV automation example (see Examples above)
+    dns_txt_dcv.py                # DNS-TXT DCV automation example (see Examples above)
 ```
 
 </details>
