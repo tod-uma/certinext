@@ -17,7 +17,7 @@
 
 Connects to the CertiNext API and prints every active domain whose DCV status
 is not yet VERIFIED. Credentials are resolved in priority order: command-line
-argument → environment variable → interactive prompt.
+argument → OS keychain → environment variable → interactive prompt.
 
 Usage:
     certinext-pending-dcv                                    # (installed command)
