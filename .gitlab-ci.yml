@@ -34,28 +34,34 @@ stages:
 
 lint:
   stage: lint
+  needs: []
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH
   image: python:3.12-slim
   script:
     - pip install -e .[dev]
     - ruff check .
     - mypy certinext
-  rules:
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - if: $CI_COMMIT_BRANCH
 
 typecheck:
   stage: lint
+  needs: []
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH
   image: python:3.12-slim
   script:
     - apt-get update -qq && apt-get install -y --no-install-recommends libatomic1
     - pip install -e .[dev]
     - pyright
-  rules:
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - if: $CI_COMMIT_BRANCH
 
 unit-test:
   stage: unit
+  needs: [lint, typecheck]
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH
   image: python:${PYTHON_VERSION}-slim
   parallel:
     matrix:
@@ -68,16 +74,14 @@ unit-test:
     reports:
       junit: report.xml
     expire_in: 1 week
-  rules:
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - if: $CI_COMMIT_BRANCH
 
 integration-test:
   stage: integration
-  image: python:3.12-slim
+  needs: [lint, typecheck, unit-test]
   rules:
     - if: '$CERTINEXT_SANDBOX_CLIENT_ID && $CI_PIPELINE_SOURCE == "merge_request_event"'
     - if: '$CERTINEXT_SANDBOX_CLIENT_ID && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+  image: python:3.12-slim
   script:
     - pip install -e .[dev]
     - pytest -m integration -v --junitxml=integration-report.xml
@@ -89,16 +93,22 @@ integration-test:
 
 sast:
   stage: security
+  needs: []
   variables:
     GIT_DEPTH: 0
 
 semgrep-sast:
+  stage: security
+  needs: []
+  allow_failure: false
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH
 
 secret_detection:
   stage: security
+  needs: []
+  allow_failure: false
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH
@@ -107,20 +117,22 @@ secret_detection:
 
 build-test:
   stage: build
-  image: python:3.12-slim
+  needs: [lint, typecheck, unit-test, semgrep-sast, secret_detection]
   rules:
     - if: $CI_COMMIT_TAG
       when: never
     - if: $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH
+  image: python:3.12-slim
   script:
     - pip install build twine
     - python -m build
 
 publish-main:
   stage: release
-  image: python:3.12-slim
+  needs: [lint, typecheck, unit-test, semgrep-sast, secret_detection]
   rules:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  image: python:3.12-slim
   script:
     - pip install build twine
     - BASE_VERSION=$(python -c "import re; print(re.search(r'(?m)^version\s*=\s*\"([^\"]+)\"', open('pyproject.toml').read()).group(1))")
@@ -131,9 +143,10 @@ publish-main:
 
 release_build:
   stage: release
-  image: python:3.12-slim
+  needs: []
   rules:
     - if: $CI_COMMIT_TAG
+  image: python:3.12-slim
   script:
     - pip install build twine
     - python -m build
@@ -141,14 +154,16 @@ release_build:
 
 release_job:
   stage: release
-  image: alpine:latest
+  needs: [release_build]
   rules:
     - if: $CI_COMMIT_TAG
+  image: alpine:latest
   script:
-    - apk add --no-cache curl
+    - apk add --no-cache curl git jq
+    - TAG_DESC=$(git tag -l --format='%(contents)' "$CI_COMMIT_TAG" | jq -Rs .)
     - |
       curl --fail --request POST \
         --header "JOB-TOKEN: $CI_JOB_TOKEN" \
         --header "Content-Type: application/json" \
-        --data "{\"name\":\"$CI_COMMIT_TAG\",\"tag_name\":\"$CI_COMMIT_TAG\"}" \
+        --data "{\"name\":\"$CI_COMMIT_TAG\",\"tag_name\":\"$CI_COMMIT_TAG\",\"description\":$TAG_DESC}" \
         "$CI_API_V4_URL/projects/$CI_PROJECT_ID/releases"
