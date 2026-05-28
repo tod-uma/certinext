@@ -87,6 +87,7 @@ def session(
     client_id: str = "",
     client_secret: str = "",
     scope: str = "",
+    sandbox: bool = False,
 ) -> CertiNextSession:
     """Create and return a new `CertiNextSession`.
 
@@ -100,11 +101,13 @@ def session(
         client_secret: OAuth client secret generated in the CertiNext portal
             under Integrations → APIs → OAuth mode.
         scope: Optional OAuth scope string. Leave empty if not required.
+        sandbox: Pass ``True`` when connecting to the sandbox environment so
+            callers can read ``session.sandbox`` without re-inspecting the URL.
 
     Returns:
         A configured `CertiNextSession` ready to make API calls.
     """
-    return CertiNextSession(base_url, token_url, client_id, client_secret, scope)
+    return CertiNextSession(base_url, token_url, client_id, client_secret, scope, sandbox)
 
 
 __all__ = [

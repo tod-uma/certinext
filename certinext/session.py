@@ -34,6 +34,7 @@ class CertiNextSession:
         order = sess.ssl.create_dv("example.com")
 
     Attributes:
+        sandbox: True when connected to the sandbox API; False for production.
         accounts: Accessor for identity, groups, and organizations. See `AccountAccessor`.
         catalog: Accessor for the Catalog API (products and custom fields). See `CatalogAccessor`.
         domain: Accessor for the Domains API. See `DomainAccessor`.
@@ -49,6 +50,7 @@ class CertiNextSession:
         client_id: str = "",
         client_secret: str = "",
         scope: str = "",
+        sandbox: bool = False,
     ) -> None:
         """
         Args:
@@ -57,7 +59,11 @@ class CertiNextSession:
             client_id: Your CertiNext account number (used as the OAuth client ID).
             client_secret: OAuth client secret generated in the CertiNext portal.
             scope: Optional OAuth scope string.
+            sandbox: Whether this session is connected to the sandbox API. Callers
+                can read this attribute to adjust behaviour (e.g. mark audit records
+                as sandbox entries) without re-inspecting the base URL.
         """
+        self.sandbox = sandbox
         self._client = CertiNextClient(base_url, token_url, client_id, client_secret, scope)
         self.accounts = AccountAccessor(self._client)
         self.catalog = CatalogAccessor(self._client)
