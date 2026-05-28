@@ -129,7 +129,13 @@ build-test:
 
 publish-main:
   stage: release
-  needs: [lint, typecheck, unit-test, semgrep-sast, secret_detection]
+  needs:
+    - lint
+    - typecheck
+    - unit-test
+    - semgrep-sast
+    - secret_detection
+    - {job: integration-test, optional: true}
   rules:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
   image: python:3.12-slim
