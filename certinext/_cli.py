@@ -138,4 +138,5 @@ def build_session(args: argparse.Namespace) -> certinext.CertiNextSession:
         client_id=client_id,
         client_secret=client_secret,
         scope=getattr(args, "scope", ""),
+        sandbox=getattr(args, "sandbox", False),
     )
