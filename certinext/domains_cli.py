@@ -97,7 +97,10 @@ def cmd_get_dcv(args: argparse.Namespace, sess: certinext.CertiNextSession) -> N
 
 
 def cmd_verify_dcv(args: argparse.Namespace, sess: certinext.CertiNextSession) -> None:
-    _show_data(sess.domain.get(args.id).verify(), args.json)
+    result = sess.domain.get(args.id).verify()
+    print(result)
+    if args.json:
+        _show_data(result.raw, args.json)
 
 
 def cmd_change_dcv_method(args: argparse.Namespace, sess: certinext.CertiNextSession) -> None:
