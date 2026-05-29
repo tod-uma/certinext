@@ -36,24 +36,35 @@ from tabulate import tabulate
 from certinext._cli import add_connection_args, apply_sandbox, build_session
 
 
+def build_parser() -> argparse.ArgumentParser:
+    """Return the argument parser for certinext-list-certificates.
+
+    Returns:
+        A configured ArgumentParser instance.
+    """
+    parser = argparse.ArgumentParser(
+        description="List SSL/TLS certificate orders",
+    )
+    parser.add_argument(
+        "--status", metavar="STATUS", default=None,
+        help=(
+            "Filter by certificate status "
+            "(e.g. issued, expired, pending-dcv, pending-csr, revoked, cancelled)"
+        ),
+    )
+    parser.add_argument(
+        "--json", action="store_true", default=False,
+        help="Output raw JSON instead of tabular format",
+    )
+    conn = parser.add_argument_group("connection")
+    add_connection_args(conn)
+    return parser
+
+
 def main() -> None:
     """Entry point for certinext-list-certificates."""
     try:
-        parser = argparse.ArgumentParser(
-            description="List SSL/TLS certificate orders",
-        )
-        add_connection_args(parser)
-        parser.add_argument(
-            "--status", metavar="STATUS", default=None,
-            help=(
-                "Filter by certificate status "
-                "(e.g. issued, expired, pending-dcv, pending-csr, revoked, cancelled)"
-            ),
-        )
-        parser.add_argument(
-            "--json", action="store_true", default=False,
-            help="Output raw JSON instead of tabular format",
-        )
+        parser = build_parser()
         args = parser.parse_args()
         apply_sandbox(args)
         sess = build_session(args)

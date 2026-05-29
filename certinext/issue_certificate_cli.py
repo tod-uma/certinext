@@ -55,56 +55,64 @@ def build_parser() -> argparse.ArgumentParser:
             "Domain and SANs are extracted from the CSR automatically."
         ),
     )
-    add_connection_args(parser)
     parser.add_argument(
         "-v", "--verbose", action="count", default=0,
         help="Increase verbosity (-vvv for debug logging)",
     )
-    parser.add_argument(
+
+    conn = parser.add_argument_group("connection")
+    add_connection_args(conn)
+
+    cert = parser.add_argument_group("certificate")
+    cert.add_argument(
         "csr_file", nargs="?", metavar="CSR_FILE", default=argparse.SUPPRESS,
         help="PEM-encoded CSR file (default: stdin; not required with --order-id)",
     )
-    parser.add_argument(
+    cert.add_argument(
         "--csr", metavar="FILE", default=None, dest="csr_file",
         help="PEM-encoded CSR file (alternative to positional argument)",
     )
-    parser.add_argument(
+    cert.add_argument(
         "--domain", metavar="FQDN", default=None,
         help="Override the primary domain (default: extracted from CSR CN)",
     )
-    parser.add_argument(
+    cert.add_argument(
         "--san", action="append", dest="sans", metavar="FQDN", default=None,
         help="Override SANs (default: extracted from CSR SAN extension; repeatable)",
     )
-    parser.add_argument(
+    cert.add_argument(
         "--validity", type=int, default=1, metavar="YEARS", choices=[1, 2, 3],
         help="Certificate validity in years (1, 2, or 3; default: 1)",
     )
-    parser.add_argument(
+    cert.add_argument(
         "--type", dest="cert_type", choices=["dv", "ov", "ev"], default="dv",
         help="Certificate validation type (default: dv)",
     )
-    parser.add_argument(
+    cert.add_argument(
         "--org-id", metavar="ID", default=None,
         help="Organization ID, required for OV and EV certificates",
     )
-    add_requestor_args(parser)
-    parser.add_argument(
+    cert.add_argument(
         "--auto-secure-www", action="store_true", default=False,
         help=(
             "Request automatic www-redirect coverage from the CA "
             "(default: false; the API default is true if omitted)"
         ),
     )
-    parser.add_argument(
+
+    req = parser.add_argument_group("requestor")
+    add_requestor_args(req)
+
+    ctl = parser.add_argument_group("output")
+    ctl.add_argument(
         "--output", "-o", metavar="FILE", default=None,
         help="Write certificate PEM to FILE instead of stdout",
     )
-    parser.add_argument(
+    ctl.add_argument(
         "--wait", type=int, default=300, metavar="SECONDS",
         help="Seconds to wait for issuance before giving up (0 = submit and exit; default: 300)",
     )
-    parser.add_argument(
+    ctl.add_argument(
         "--order-id", metavar="ID", default=None,
         help="Resume polling an existing order rather than creating a new one",
     )
