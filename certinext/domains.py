@@ -56,6 +56,45 @@ class DcvInfo:
     host: str
 
 
+class DcvVerifyResult:
+    """Summary of a DCV verification trigger returned by :meth:`Domain.verify`.
+
+    Wraps the raw multi-perspective diagnostic response and exposes only the
+    fields that matter for logging and decision-making. The raw response data
+    is available via :attr:`raw` when deeper inspection is needed.
+
+    Attributes:
+        overall_status: Top-level outcome — typically ``"VERIFIED"`` or
+            ``"PENDING"``.
+        agreed: ``True`` when all queried perspectives reached consensus.
+        perspectives_queried: Number of geographic perspectives that checked
+            the challenge record.
+    """
+
+    def __init__(self, raw: dict[str, Any]) -> None:
+        """
+        Args:
+            raw: The raw API response dict from the verify endpoint.
+        """
+        self.raw = raw
+        consensus: dict[str, Any] = (raw.get("diagnostics") or {}).get("consensus") or {}
+        self.overall_status: str = str(raw.get("overallStatus") or raw.get("status") or "unknown")
+        self.agreed: bool = bool(consensus.get("agreed", False))
+        self.perspectives_queried: int = int(consensus.get("totalPerspectivesQueried", 0))
+
+    def __str__(self) -> str:
+        """Return a short human-readable summary of the verification result."""
+        return (
+            f"overall_status={self.overall_status} "
+            f"agreed={self.agreed} "
+            f"perspectives={self.perspectives_queried}"
+        )
+
+    def __repr__(self) -> str:
+        """Return a developer-friendly representation."""
+        return f"DcvVerifyResult({self!s})"
+
+
 class Domain:
     """Represents a single CertiNext domain resource.
 
@@ -231,18 +270,19 @@ class Domain:
         host = raw.get("dnsHost") or raw.get("host") or ""
         return DcvInfo(method=method, token=token, host=host)
 
-    def verify(self) -> dict[str, Any]:
+    def verify(self) -> DcvVerifyResult:
         """Trigger DCV verification for this domain.
 
         Returns:
-            Raw API response dict. The structure is opaque; call
+            A :class:`DcvVerifyResult` summarising the outcome. Call
             :meth:`refresh` and check :attr:`dcv_status` to confirm the
-            outcome rather than inspecting the response body directly.
+            final status once the CA has processed the result.
 
         Raises:
             CertiNextAPIError: On a non-2xx API response. Provides ``.status_code`` and ``.body``.
         """
-        return self._client.post(f"{_BASE}/{self.id}/dcv/verify")
+        raw: Any = self._client.post(f"{_BASE}/{self.id}/dcv/verify")
+        return DcvVerifyResult(raw if isinstance(raw, dict) else {})
 
     def change_dcv_method(self, method: DcvMethod) -> dict[str, Any]:
         """Change the DCV method for this domain.

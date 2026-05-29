@@ -354,7 +354,7 @@ def process_domain(
 
     try:
         result = domain.verify()
-        log.info("%s: verify response: %s", name, result)
+        log.info("%s: DCV verify: %s", name, result)
     except CertiNextAPIError as exc:
         log.warning("%s: DCV verification returned HTTP %s: %s", name, exc.status_code, exc.body)
 

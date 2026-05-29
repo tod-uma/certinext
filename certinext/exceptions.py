@@ -57,9 +57,23 @@ class CertiNextAPIError(HTTPError):
         super().__init__(*args, **kwargs)
 
     def __str__(self) -> str:
-        """Return a string with the status code and RFC 7807 detail if available."""
+        """Return a string with the status code and the most useful error message available.
+
+        Checks RFC 7807 fields (``detail``, ``title``) first, then Spring Boot
+        fields (``error``, ``message``). Appends ``path`` when present so
+        404/405 responses identify the missing endpoint.
+        """
         if isinstance(self.body, dict):
-            message = self.body.get("detail") or self.body.get("title") or str(self.body)
+            message = (
+                self.body.get("detail")
+                or self.body.get("title")
+                or self.body.get("message")
+                or self.body.get("error")
+                or str(self.body)
+            )
+            path = self.body.get("path")
+            if path:
+                message = f"{message} ({path})"
             return f"HTTP {self.status_code}: {message}"
         return f"HTTP {self.status_code}: {self.body}"
 

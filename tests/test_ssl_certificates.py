@@ -18,17 +18,15 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from certinext.catalog import ProductCategory
 from certinext.client import CertiNextClient
 from certinext.ssl_certificates import (
     CertificateDownload,
     DcvChallenge,
     SslAccessor,
     SslOrder,
-    _matches_variant,
 )
 
-_SSL_BASE = "/api/certinext/v2/ssl"
+_SSL_BASE = "/api/certinext/v2/ssl-certificates"
 
 
 def _make_client() -> tuple[CertiNextClient, MagicMock]:
@@ -61,27 +59,6 @@ def _ok_bytes_response(content: bytes) -> MagicMock:
     return resp
 
 
-# Catalog fixture used to pre-populate SslAccessor._catalog_cache in tests
-_CATALOG_FIXTURE: list[ProductCategory] = [
-    ProductCategory({
-        "categoryName": "SSL/TLS Certificates",
-        "categoryID": "3",
-        "currencyType": "USD",
-        "products": [
-            {"productCode": "842", "productName": "DV SSL Certificate"},
-            {"productCode": "843", "productName": "DV Wildcard SSL Certificate"},
-            {"productCode": "844", "productName": "DV UCC Certificate"},
-            {"productCode": "845", "productName": "DV Wildcard UCC Certificate"},
-            {"productCode": "846", "productName": "OV SSL Certificate"},
-            {"productCode": "847", "productName": "OV Wildcard SSL Certificate"},
-            {"productCode": "848", "productName": "OV UCC Certificate"},
-            {"productCode": "849", "productName": "OV Wildcard UCC Certificate"},
-            {"productCode": "850", "productName": "EV SSL Certificate"},
-            {"productCode": "851", "productName": "EV UCC Certificate"},
-        ],
-    })
-]
-
 _ORDER_DATA = {
     "orderId": "ORDER-001",
     "requestId": "REQ-001",
@@ -91,63 +68,6 @@ _ORDER_DATA = {
     "additionalDomains": ["www.example.com"],
     "createdAt": "2026-05-27T12:00:00Z",
 }
-
-
-# ---------------------------------------------------------------------------
-# _matches_variant
-# ---------------------------------------------------------------------------
-
-class TestMatchesVariant:
-    """_matches_variant correctly identifies SSL product variants by name."""
-
-    def test_dv_ssl_matches_dv_not_wildcard_not_ucc(self):
-        """'DV SSL Certificate' matches DV non-wildcard non-UCC."""
-        assert _matches_variant("DV SSL Certificate", "DV", wildcard=False, ucc=False)
-
-    def test_dv_wildcard_matches_wildcard(self):
-        """'DV Wildcard SSL Certificate' matches DV wildcard non-UCC."""
-        assert _matches_variant("DV Wildcard SSL Certificate", "DV", wildcard=True, ucc=False)
-
-    def test_dv_ucc_matches_ucc(self):
-        """'DV UCC Certificate' matches DV non-wildcard UCC."""
-        assert _matches_variant("DV UCC Certificate", "DV", wildcard=False, ucc=True)
-
-    def test_dv_wildcard_ucc_matches_both(self):
-        """'DV Wildcard UCC Certificate' matches DV wildcard UCC."""
-        assert _matches_variant("DV Wildcard UCC Certificate", "DV", wildcard=True, ucc=True)
-
-    def test_ov_ssl_matches_ov(self):
-        """'OV SSL Certificate' matches OV non-wildcard non-UCC."""
-        assert _matches_variant("OV SSL Certificate", "OV", wildcard=False, ucc=False)
-
-    def test_ev_ssl_matches_ev(self):
-        """'EV SSL Certificate' matches EV non-wildcard non-UCC."""
-        assert _matches_variant("EV SSL Certificate", "EV", wildcard=False, ucc=False)
-
-    def test_ev_ucc_matches_ev_ucc(self):
-        """'EV UCC Certificate' matches EV non-wildcard UCC."""
-        assert _matches_variant("EV UCC Certificate", "EV", wildcard=False, ucc=True)
-
-    def test_dv_wildcard_does_not_match_dv_ssl(self):
-        """'DV Wildcard SSL Certificate' does NOT match DV non-wildcard."""
-        assert not _matches_variant("DV Wildcard SSL Certificate", "DV", wildcard=False, ucc=False)
-
-    def test_dv_ssl_does_not_match_wildcard(self):
-        """'DV SSL Certificate' does NOT match DV wildcard."""
-        assert not _matches_variant("DV SSL Certificate", "DV", wildcard=True, ucc=False)
-
-    def test_dv_ucc_does_not_match_wildcard_ucc(self):
-        """'DV UCC Certificate' does NOT match DV wildcard UCC."""
-        assert not _matches_variant("DV UCC Certificate", "DV", wildcard=True, ucc=True)
-
-    def test_ov_does_not_match_dv_query(self):
-        """'OV SSL Certificate' does NOT match DV."""
-        assert not _matches_variant("OV SSL Certificate", "DV", wildcard=False, ucc=False)
-
-    def test_case_insensitive_matching(self):
-        """Matching is case-insensitive (product names come from the API as mixed case)."""
-        assert _matches_variant("dv ssl certificate", "DV", wildcard=False, ucc=False)
-        assert _matches_variant("DV WILDCARD SSL CERTIFICATE", "dv", wildcard=True, ucc=False)
 
 
 # ---------------------------------------------------------------------------
@@ -387,7 +307,7 @@ class TestSslOrderLifecycleMethods:
         return order, mock_session
 
     def test_refresh_calls_get_on_order_id(self):
-        """refresh() GETs /ssl/{orderId}."""
+        """refresh() GETs /ssl-certificates/{orderId}."""
         order, mock_session = self._make_order()
         mock_session.get.return_value = _ok_response({"orderId": "ORDER-001", "status": "issued"})
         order.refresh()
@@ -403,7 +323,7 @@ class TestSslOrderLifecycleMethods:
         assert result is order
 
     def test_get_dcv_calls_dcv_endpoint(self):
-        """get_dcv() GETs /ssl/{orderId}/dcv."""
+        """get_dcv() GETs /ssl-certificates/{orderId}/dcv."""
         order, mock_session = self._make_order()
         mock_session.get.return_value = _ok_response({"challenges": []})
         order.get_dcv()
@@ -433,7 +353,7 @@ class TestSslOrderLifecycleMethods:
         assert len(challenges) == 1
 
     def test_verify_dcv_posts_to_dcv_verify(self):
-        """verify_dcv() POSTs to /ssl/{orderId}/dcv/verify."""
+        """verify_dcv() POSTs to /ssl-certificates/{orderId}/dcv/verify."""
         order, mock_session = self._make_order()
         mock_session.post.return_value = _ok_response({"status": "ok"})
         order.verify_dcv()
@@ -441,7 +361,7 @@ class TestSslOrderLifecycleMethods:
         assert url.endswith(f"{_SSL_BASE}/ORDER-001/dcv/verify")
 
     def test_submit_csr_puts_to_csr_endpoint(self):
-        """submit_csr() PUTs to /ssl/{orderId}/csr with the CSR body."""
+        """submit_csr() PUTs to /ssl-certificates/{orderId}/csr with the CSR body."""
         order, mock_session = self._make_order()
         mock_session.put.return_value = _ok_response({})
         order.submit_csr("-----BEGIN CERTIFICATE REQUEST-----\n...")
@@ -451,15 +371,20 @@ class TestSslOrderLifecycleMethods:
         assert "-----BEGIN CERTIFICATE REQUEST-----" in kwargs["json"]["csr"]
 
     def test_accept_agreement_posts_to_agreement_endpoint(self):
-        """accept_agreement() POSTs to /ssl/{orderId}/agreement."""
+        """accept_agreement() POSTs to /ssl-certificates/{orderId}/agreement with signer info."""
         order, mock_session = self._make_order()
         mock_session.post.return_value = _ok_response({})
-        order.accept_agreement()
+        order.accept_agreement("John Doe", "Portland, ME")
         url = mock_session.post.call_args[0][0]
         assert url.endswith(f"{_SSL_BASE}/ORDER-001/agreement")
+        _, kwargs = mock_session.post.call_args
+        agreement = kwargs["json"]["agreement"]
+        assert agreement["signerName"] == "John Doe"
+        assert agreement["signerPlace"] == "Portland, ME"
+        assert agreement["accepted"] is True
 
     def test_download_certificate_gets_certificate_endpoint(self):
-        """download_certificate() GETs /ssl/{orderId}/certificate."""
+        """download_certificate() GETs /ssl-certificates/{orderId}/certificate."""
         order, mock_session = self._make_order()
         mock_session.get.return_value = _ok_response({
             "orderId": "ORDER-001", "certificatePem": "-----BEGIN CERTIFICATE-----\n..."
@@ -489,7 +414,7 @@ class TestSslOrderLifecycleMethods:
         assert isinstance(result, bytes)
 
     def test_cancel_posts_to_cancel_endpoint(self):
-        """cancel() POSTs to /ssl/{orderId}/cancel."""
+        """cancel() POSTs to /ssl-certificates/{orderId}/cancel."""
         order, mock_session = self._make_order()
         mock_session.post.return_value = _ok_response({})
         order.cancel()
@@ -497,7 +422,7 @@ class TestSslOrderLifecycleMethods:
         assert url.endswith(f"{_SSL_BASE}/ORDER-001/cancel")
 
     def test_reject_posts_to_reject_endpoint(self):
-        """reject() POSTs to /ssl/{orderId}/reject."""
+        """reject() POSTs to /ssl-certificates/{orderId}/reject."""
         order, mock_session = self._make_order()
         mock_session.post.return_value = _ok_response({})
         order.reject()
@@ -505,7 +430,7 @@ class TestSslOrderLifecycleMethods:
         assert url.endswith(f"{_SSL_BASE}/ORDER-001/reject")
 
     def test_revoke_posts_to_revoke_endpoint(self):
-        """revoke() POSTs to /ssl/{orderId}/revoke."""
+        """revoke() POSTs to /ssl-certificates/{orderId}/revoke."""
         order, mock_session = self._make_order()
         mock_session.post.return_value = _ok_response({})
         order.revoke()
@@ -571,112 +496,53 @@ class TestSslOrderReissue:
 
 
 # ---------------------------------------------------------------------------
-# SslAccessor — product code resolution
+# SslAccessor — _build_body
 # ---------------------------------------------------------------------------
 
-class TestSslAccessorProductCodeResolution:
-    """SslAccessor._get_product_code resolves codes from the catalog."""
+class TestSslAccessorBuildBody:
+    """SslAccessor._build_body produces the correct nested request structure."""
 
-    def _make_accessor(self) -> SslAccessor:
-        client, _ = _make_client()
-        accessor = SslAccessor(client)
-        accessor._catalog_cache = _CATALOG_FIXTURE
-        return accessor
+    def test_dv_body_structure(self):
+        """DV body has productVariant, certificate.domain, subscription.validityYears, requestor."""
+        body = SslAccessor._build_body(
+            "dv", "example.com", 1,
+            "John Doe", "john@example.com", "+12075551234", "IT Admin",
+        )
+        assert body["productVariant"] == "dv"
+        assert body["certificate"]["domain"] == "example.com"
+        assert body["subscription"]["validityYears"] == 1
+        assert body["requestor"]["name"] == "John Doe"
+        assert body["requestor"]["email"] == "john@example.com"
+        assert body["requestor"]["phone"] == "+12075551234"
+        assert body["requestor"]["designation"] == "IT Admin"
+        assert "organization" not in body
 
-    def test_resolves_dv_ssl(self):
-        """_get_product_code('DV', wildcard=False, ucc=False) → 842."""
-        accessor = self._make_accessor()
-        assert accessor._get_product_code("DV", wildcard=False, ucc=False) == "842"
+    def test_additional_domains_in_certificate(self):
+        """additional_domains appear inside the certificate sub-object."""
+        body = SslAccessor._build_body(
+            "dv", "example.com", 1, "", "", "", "",
+            additional_domains=["www.example.com"],
+        )
+        assert body["certificate"]["additionalDomains"] == ["www.example.com"]
 
-    def test_resolves_dv_wildcard(self):
-        """_get_product_code('DV', wildcard=True, ucc=False) → 843."""
-        accessor = self._make_accessor()
-        assert accessor._get_product_code("DV", wildcard=True, ucc=False) == "843"
+    def test_organization_included_for_ov(self):
+        """OV body includes organization.organizationNumber and preVetted=True."""
+        body = SslAccessor._build_body(
+            "ov", "example.com", 1, "", "", "", "",
+            organization_id="ORG-001",
+        )
+        assert body["organization"]["organizationNumber"] == "ORG-001"
+        assert body["organization"]["preVetted"] is True
 
-    def test_resolves_dv_ucc(self):
-        """_get_product_code('DV', wildcard=False, ucc=True) → 844."""
-        accessor = self._make_accessor()
-        assert accessor._get_product_code("DV", wildcard=False, ucc=True) == "844"
+    def test_no_additional_domains_when_none(self):
+        """'additionalDomains' key absent when additional_domains is None."""
+        body = SslAccessor._build_body("dv", "example.com", 1, "", "", "", "")
+        assert "additionalDomains" not in body["certificate"]
 
-    def test_resolves_dv_wildcard_ucc(self):
-        """_get_product_code('DV', wildcard=True, ucc=True) → 845."""
-        accessor = self._make_accessor()
-        assert accessor._get_product_code("DV", wildcard=True, ucc=True) == "845"
-
-    def test_resolves_ov_ssl(self):
-        """_get_product_code('OV', wildcard=False, ucc=False) → 846."""
-        accessor = self._make_accessor()
-        assert accessor._get_product_code("OV", wildcard=False, ucc=False) == "846"
-
-    def test_resolves_ov_wildcard(self):
-        """_get_product_code('OV', wildcard=True, ucc=False) → 847."""
-        accessor = self._make_accessor()
-        assert accessor._get_product_code("OV", wildcard=True, ucc=False) == "847"
-
-    def test_resolves_ov_ucc(self):
-        """_get_product_code('OV', wildcard=False, ucc=True) → 848."""
-        accessor = self._make_accessor()
-        assert accessor._get_product_code("OV", wildcard=False, ucc=True) == "848"
-
-    def test_resolves_ov_wildcard_ucc(self):
-        """_get_product_code('OV', wildcard=True, ucc=True) → 849."""
-        accessor = self._make_accessor()
-        assert accessor._get_product_code("OV", wildcard=True, ucc=True) == "849"
-
-    def test_resolves_ev_ssl(self):
-        """_get_product_code('EV', wildcard=False, ucc=False) → 850."""
-        accessor = self._make_accessor()
-        assert accessor._get_product_code("EV", wildcard=False, ucc=False) == "850"
-
-    def test_resolves_ev_ucc(self):
-        """_get_product_code('EV', wildcard=False, ucc=True) → 851."""
-        accessor = self._make_accessor()
-        assert accessor._get_product_code("EV", wildcard=False, ucc=True) == "851"
-
-    def test_raises_lookup_error_when_product_missing(self):
-        """_get_product_code raises LookupError when no matching product exists."""
-        client, _ = _make_client()
-        accessor = SslAccessor(client)
-        accessor._catalog_cache = []  # empty catalog
-        with pytest.raises(LookupError, match="No.*product found in catalog"):
-            accessor._get_product_code("DV", wildcard=False, ucc=False)
-
-    def test_lookup_error_message_lists_available_products(self):
-        """The LookupError message includes available product names."""
-        client, _ = _make_client()
-        accessor = SslAccessor(client)
-        accessor._catalog_cache = [
-            ProductCategory({
-                "products": [{"productCode": "850", "productName": "EV SSL Certificate"}]
-            })
-        ]
-        with pytest.raises(LookupError, match="EV SSL Certificate"):
-            accessor._get_product_code("DV", wildcard=False, ucc=False)
-
-
-class TestSslAccessorCatalogCaching:
-    """SslAccessor._load_catalog caches the result after the first call."""
-
-    def test_catalog_loaded_lazily_on_first_create(self):
-        """Catalog is not fetched until a create_* method is called."""
-        client, mock_session = _make_client()
-        accessor = SslAccessor(client)
-        assert accessor._catalog_cache is None
-
-    def test_catalog_cached_after_load(self):
-        """_load_catalog() stores the result in _catalog_cache."""
-        client, mock_session = _make_client()
-        mock_session.get.return_value = _ok_response({
-            "products": [{"categoryName": "SSL", "products": [
-                {"productCode": "842", "productName": "DV SSL Certificate"}
-            ]}]
-        })
-        accessor = SslAccessor(client)
-        accessor._load_catalog()
-        assert accessor._catalog_cache is not None
-        # Second call must not make another HTTP request
-        accessor._load_catalog()
-        assert mock_session.get.call_count == 1
+    def test_validity_years_passed_through(self):
+        """validity_years is placed in subscription.validityYears."""
+        body = SslAccessor._build_body("dv", "example.com", 3, "", "", "", "")
+        assert body["subscription"]["validityYears"] == 3
 
 
 # ---------------------------------------------------------------------------
@@ -684,100 +550,100 @@ class TestSslAccessorCatalogCaching:
 # ---------------------------------------------------------------------------
 
 class TestSslAccessorCreateMethods:
-    """SslAccessor create_* methods post to the correct endpoints with product codes."""
+    """SslAccessor create_* methods POST to /ssl-certificates with productVariant."""
 
     def _make_accessor(self) -> tuple[SslAccessor, MagicMock]:
         client, mock_session = _make_client()
         accessor = SslAccessor(client)
-        accessor._catalog_cache = _CATALOG_FIXTURE
         return accessor, mock_session
 
-    def _assert_create(self, mock_session: MagicMock, path_suffix: str, product_code: str) -> None:
+    def _assert_create(self, mock_session: MagicMock, product_variant: str) -> None:
         url = mock_session.post.call_args[0][0]
-        assert url.endswith(path_suffix), f"Expected URL ending with {path_suffix!r}, got {url!r}"
+        assert url.endswith(_SSL_BASE), f"Expected URL ending with {_SSL_BASE!r}, got {url!r}"
         _, kwargs = mock_session.post.call_args
-        assert kwargs["headers"].get("X-Product-Code") == product_code
+        assert kwargs["json"]["productVariant"] == product_variant
 
-    def test_create_dv_posts_to_dv_with_code_842(self):
-        """create_dv() POSTs to /ssl/dv with X-Product-Code: 842."""
+    def test_create_dv_posts_to_ssl_certificates(self):
+        """create_dv() POSTs to /ssl-certificates with productVariant='dv'."""
         accessor, mock_session = self._make_accessor()
         mock_session.post.return_value = _ok_response(_ORDER_DATA)
         accessor.create_dv("example.com")
-        self._assert_create(mock_session, f"{_SSL_BASE}/dv", "842")
+        self._assert_create(mock_session, "dv")
 
-    def test_create_dv_includes_domain_in_body(self):
-        """create_dv() includes the domain in the request body."""
+    def test_create_dv_includes_domain_in_certificate_body(self):
+        """create_dv() puts domain inside the nested certificate object."""
         accessor, mock_session = self._make_accessor()
         mock_session.post.return_value = _ok_response(_ORDER_DATA)
-        accessor.create_dv("example.com", validity=730)
+        accessor.create_dv("example.com", validity_years=2)
         _, kwargs = mock_session.post.call_args
-        assert kwargs["json"]["domain"] == "example.com"
-        assert kwargs["json"]["validity"] == 730
+        assert kwargs["json"]["certificate"]["domain"] == "example.com"
+        assert kwargs["json"]["subscription"]["validityYears"] == 2
 
-    def test_create_dv_wildcard_posts_to_dv_wildcard_with_code_843(self):
-        """create_dv_wildcard() POSTs to /ssl/dv/wildcard with X-Product-Code: 843."""
+    def test_create_dv_wildcard_uses_dv_wildcard_variant(self):
+        """create_dv_wildcard() uses productVariant='dv-wildcard'."""
         accessor, mock_session = self._make_accessor()
         mock_session.post.return_value = _ok_response(_ORDER_DATA)
         accessor.create_dv_wildcard("*.example.com")
-        self._assert_create(mock_session, f"{_SSL_BASE}/dv/wildcard", "843")
+        self._assert_create(mock_session, "dv-wildcard")
 
-    def test_create_dv_ucc_posts_to_dv_ucc_with_code_844(self):
-        """create_dv_ucc() POSTs to /ssl/dv/ucc with X-Product-Code: 844."""
+    def test_create_dv_ucc_uses_dv_ucc_variant(self):
+        """create_dv_ucc() uses productVariant='dv-ucc'."""
         accessor, mock_session = self._make_accessor()
         mock_session.post.return_value = _ok_response(_ORDER_DATA)
         accessor.create_dv_ucc(["example.com", "www.example.com"])
-        self._assert_create(mock_session, f"{_SSL_BASE}/dv/ucc", "844")
+        self._assert_create(mock_session, "dv-ucc")
 
-    def test_create_dv_wildcard_ucc_posts_with_code_845(self):
-        """create_dv_wildcard_ucc() uses code 845."""
+    def test_create_dv_wildcard_ucc_uses_dv_wildcard_ucc_variant(self):
+        """create_dv_wildcard_ucc() uses productVariant='dv-wildcard-ucc'."""
         accessor, mock_session = self._make_accessor()
         mock_session.post.return_value = _ok_response(_ORDER_DATA)
         accessor.create_dv_wildcard_ucc(["*.example.com"])
-        self._assert_create(mock_session, f"{_SSL_BASE}/dv/wildcard-ucc", "845")
+        self._assert_create(mock_session, "dv-wildcard-ucc")
 
-    def test_create_ov_posts_with_code_846_and_org_id(self):
-        """create_ov() uses code 846 and includes organizationId in the body."""
+    def test_create_ov_uses_ov_variant_and_includes_org(self):
+        """create_ov() uses productVariant='ov' and includes organization in body."""
         accessor, mock_session = self._make_accessor()
         mock_session.post.return_value = _ok_response(_ORDER_DATA)
         accessor.create_ov("example.com", organization_id="ORG-001")
-        self._assert_create(mock_session, f"{_SSL_BASE}/ov", "846")
+        self._assert_create(mock_session, "ov")
         _, kwargs = mock_session.post.call_args
-        assert kwargs["json"]["organizationId"] == "ORG-001"
+        assert kwargs["json"]["organization"]["organizationNumber"] == "ORG-001"
+        assert kwargs["json"]["organization"]["preVetted"] is True
 
-    def test_create_ov_wildcard_posts_with_code_847(self):
-        """create_ov_wildcard() uses code 847."""
+    def test_create_ov_wildcard_uses_ov_wildcard_variant(self):
+        """create_ov_wildcard() uses productVariant='ov-wildcard'."""
         accessor, mock_session = self._make_accessor()
         mock_session.post.return_value = _ok_response(_ORDER_DATA)
         accessor.create_ov_wildcard("*.example.com", organization_id="ORG-001")
-        self._assert_create(mock_session, f"{_SSL_BASE}/ov/wildcard", "847")
+        self._assert_create(mock_session, "ov-wildcard")
 
-    def test_create_ov_ucc_posts_with_code_848(self):
-        """create_ov_ucc() uses code 848."""
+    def test_create_ov_ucc_uses_ov_ucc_variant(self):
+        """create_ov_ucc() uses productVariant='ov-ucc'."""
         accessor, mock_session = self._make_accessor()
         mock_session.post.return_value = _ok_response(_ORDER_DATA)
         accessor.create_ov_ucc(["example.com"], organization_id="ORG-001")
-        self._assert_create(mock_session, f"{_SSL_BASE}/ov/ucc", "848")
+        self._assert_create(mock_session, "ov-ucc")
 
-    def test_create_ov_wildcard_ucc_posts_with_code_849(self):
-        """create_ov_wildcard_ucc() uses code 849."""
+    def test_create_ov_wildcard_ucc_uses_ov_wildcard_ucc_variant(self):
+        """create_ov_wildcard_ucc() uses productVariant='ov-wildcard-ucc'."""
         accessor, mock_session = self._make_accessor()
         mock_session.post.return_value = _ok_response(_ORDER_DATA)
         accessor.create_ov_wildcard_ucc(["*.example.com"], organization_id="ORG-001")
-        self._assert_create(mock_session, f"{_SSL_BASE}/ov/wildcard-ucc", "849")
+        self._assert_create(mock_session, "ov-wildcard-ucc")
 
-    def test_create_ev_posts_with_code_850(self):
-        """create_ev() uses code 850."""
+    def test_create_ev_uses_ev_variant(self):
+        """create_ev() uses productVariant='ev'."""
         accessor, mock_session = self._make_accessor()
         mock_session.post.return_value = _ok_response(_ORDER_DATA)
         accessor.create_ev("example.com", organization_id="ORG-001")
-        self._assert_create(mock_session, f"{_SSL_BASE}/ev", "850")
+        self._assert_create(mock_session, "ev")
 
-    def test_create_ev_ucc_posts_with_code_851(self):
-        """create_ev_ucc() uses code 851."""
+    def test_create_ev_ucc_uses_ev_ucc_variant(self):
+        """create_ev_ucc() uses productVariant='ev-ucc'."""
         accessor, mock_session = self._make_accessor()
         mock_session.post.return_value = _ok_response(_ORDER_DATA)
         accessor.create_ev_ucc(["example.com"], organization_id="ORG-001")
-        self._assert_create(mock_session, f"{_SSL_BASE}/ev/ucc", "851")
+        self._assert_create(mock_session, "ev-ucc")
 
     def test_create_dv_returns_ssl_order(self):
         """create_dv() returns an SslOrder instance."""
@@ -787,22 +653,64 @@ class TestSslAccessorCreateMethods:
         assert isinstance(order, SslOrder)
         assert order.order_id == "ORDER-001"
 
-    def test_create_dv_optional_csr_included_in_body(self):
-        """create_dv() includes csr in the body when provided."""
+    def test_create_dv_includes_requestor_in_body(self):
+        """create_dv() includes all requestor fields in the body."""
         accessor, mock_session = self._make_accessor()
         mock_session.post.return_value = _ok_response(_ORDER_DATA)
-        accessor.create_dv("example.com", csr="-----BEGIN CERTIFICATE REQUEST-----\n...")
+        accessor.create_dv(
+            "example.com",
+            requestor_name="John Doe",
+            requestor_email="john@example.com",
+            requestor_phone="+12075551234",
+            requestor_designation="IT Admin",
+        )
         _, kwargs = mock_session.post.call_args
-        assert "-----BEGIN CERTIFICATE REQUEST-----" in kwargs["json"]["csr"]
+        req = kwargs["json"]["requestor"]
+        assert req["name"] == "John Doe"
+        assert req["email"] == "john@example.com"
+        assert req["phone"] == "+12075551234"
+        assert req["designation"] == "IT Admin"
 
-    def test_create_ucc_uses_domains_not_domain(self):
-        """create_dv_ucc() sends 'domains' (plural) in the body, not 'domain'."""
+    def test_create_dv_includes_additional_domains_in_certificate(self):
+        """create_dv() includes additionalDomains inside the certificate object."""
         accessor, mock_session = self._make_accessor()
         mock_session.post.return_value = _ok_response(_ORDER_DATA)
-        accessor.create_dv_ucc(["a.com", "b.com"])
+        accessor.create_dv("example.com", additional_domains=["www.example.com"])
         _, kwargs = mock_session.post.call_args
-        assert kwargs["json"]["domains"] == ["a.com", "b.com"]
-        assert "domain" not in kwargs["json"]
+        assert kwargs["json"]["certificate"]["additionalDomains"] == ["www.example.com"]
+
+    def test_create_dv_ucc_splits_domains_into_domain_and_additional(self):
+        """create_dv_ucc() puts the first domain as 'domain', rest as 'additionalDomains'."""
+        accessor, mock_session = self._make_accessor()
+        mock_session.post.return_value = _ok_response(_ORDER_DATA)
+        accessor.create_dv_ucc(["a.com", "b.com", "c.com"])
+        _, kwargs = mock_session.post.call_args
+        cert = kwargs["json"]["certificate"]
+        assert cert["domain"] == "a.com"
+        assert cert["additionalDomains"] == ["b.com", "c.com"]
+
+    def test_create_dv_ucc_empty_domains_raises(self):
+        """create_dv_ucc() raises ValueError when domains list is empty."""
+        accessor, _ = self._make_accessor()
+        with pytest.raises(ValueError, match="domains must not be empty"):
+            accessor.create_dv_ucc([])
+
+    def test_dv_body_has_no_organization_key(self):
+        """create_dv() body does not include an 'organization' key."""
+        accessor, mock_session = self._make_accessor()
+        mock_session.post.return_value = _ok_response(_ORDER_DATA)
+        accessor.create_dv("example.com")
+        _, kwargs = mock_session.post.call_args
+        assert "organization" not in kwargs["json"]
+
+    def test_no_x_product_code_header(self):
+        """create_dv() does not send an X-Product-Code header."""
+        accessor, mock_session = self._make_accessor()
+        mock_session.post.return_value = _ok_response(_ORDER_DATA)
+        accessor.create_dv("example.com")
+        _, kwargs = mock_session.post.call_args
+        headers = kwargs.get("headers", {})
+        assert "X-Product-Code" not in headers
 
 
 # ---------------------------------------------------------------------------
@@ -813,7 +721,7 @@ class TestSslAccessorGet:
     """SslAccessor.get() fetches an existing order by ID."""
 
     def test_get_calls_ssl_order_endpoint(self):
-        """get() GETs /ssl/{orderId}."""
+        """get() GETs /ssl-certificates/{orderId}."""
         client, mock_session = _make_client()
         mock_session.get.return_value = _ok_response(_ORDER_DATA)
         accessor = SslAccessor(client)

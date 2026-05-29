@@ -170,7 +170,7 @@ class CertiNextClient:
             headers.update(extra_headers)
         resp = self._session.post(f"{self.base_url}{path}", headers=headers, json=json)
         self._raise_api_error(resp)
-        return cast(dict[str, Any], resp.json())
+        return cast(dict[str, Any], resp.json() if resp.content else {})
 
     def put(
         self,
@@ -196,7 +196,7 @@ class CertiNextClient:
             headers.update(extra_headers)
         resp = self._session.put(f"{self.base_url}{path}", headers=headers, json=json)
         self._raise_api_error(resp)
-        return cast(dict[str, Any], resp.json())
+        return cast(dict[str, Any], resp.json() if resp.content else {})
 
     def patch(self, path: str, json: dict[str, Any] | None = None) -> dict[str, Any]:
         """Send a PATCH request with an optional JSON body and return the parsed response.
@@ -213,7 +213,7 @@ class CertiNextClient:
         """
         resp = self._session.patch(f"{self.base_url}{path}", headers=self._headers(), json=json)
         self._raise_api_error(resp)
-        return cast(dict[str, Any], resp.json())
+        return cast(dict[str, Any], resp.json() if resp.content else {})
 
     def delete(self, path: str) -> dict[str, Any] | None:
         """Send a DELETE request and return the parsed response body if present.
