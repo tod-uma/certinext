@@ -22,11 +22,17 @@ Usage::
 
 import argparse
 import logging
-import os
 import sys
 import time
 
-from certinext._cli import _setup_logging, add_connection_args, apply_sandbox, build_session
+from certinext._cli import (
+    _setup_logging,
+    add_connection_args,
+    add_requestor_args,
+    apply_sandbox,
+    build_session,
+    fatal_api_error,
+)
 from certinext.exceptions import CertiNextAPIError
 from certinext.session import CertiNextSession
 from certinext.ssl_certificates import SslOrder
@@ -82,34 +88,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--org-id", metavar="ID", default=None,
         help="Organization ID, required for OV and EV certificates",
     )
-    _rname = os.environ.get("CERTINEXT_REQUESTOR_NAME", "")
-    _remail = os.environ.get("CERTINEXT_REQUESTOR_EMAIL", "")
-    _rphone = os.environ.get("CERTINEXT_REQUESTOR_PHONE", "")
-    parser.add_argument(
-        "--requestor-name", metavar="NAME",
-        default=_rname or None, required=not _rname,
-        help="Full name of the certificate requestor (env: CERTINEXT_REQUESTOR_NAME)",
-    )
-    parser.add_argument(
-        "--requestor-email", metavar="EMAIL",
-        default=_remail or None, required=not _remail,
-        help="Email address of the requestor (env: CERTINEXT_REQUESTOR_EMAIL)",
-    )
-    parser.add_argument(
-        "--requestor-phone", metavar="PHONE",
-        default=_rphone or None, required=not _rphone,
-        help="Phone in E.164 format, e.g. +12075551234 (env: CERTINEXT_REQUESTOR_PHONE)",
-    )
-    parser.add_argument(
-        "--requestor-designation", metavar="TITLE",
-        default=os.environ.get("CERTINEXT_REQUESTOR_DESIGNATION", ""),
-        help="Job title or designation of the requestor (env: CERTINEXT_REQUESTOR_DESIGNATION)",
-    )
-    parser.add_argument(
-        "--signer-place", metavar="PLACE",
-        default=os.environ.get("CERTINEXT_SIGNER_PLACE", ""),
-        help="City/location for the subscriber agreement signature (env: CERTINEXT_SIGNER_PLACE)",
-    )
+    add_requestor_args(parser)
     parser.add_argument(
         "--auto-secure-www", action="store_true", default=False,
         help=(
@@ -159,55 +138,28 @@ def _read_csr(path: str | None) -> str:
 def _parse_csr(pem: str) -> tuple[str, list[str]]:
     """Extract the CN and DNS SANs from a PEM-encoded CSR.
 
+    Thin wrapper around :func:`certinext.csr.parse_csr` that converts
+    :exc:`ImportError` and :exc:`ValueError` to ``SystemExit(1)``.
+
     Args:
         pem: PEM-encoded certificate signing request string.
 
     Returns:
         A tuple of ``(cn, sans)`` where ``cn`` is the Common Name from the
         subject and ``sans`` is a list of DNS SANs from the SAN extension,
-        excluding the CN (since CertiNext takes the primary domain separately).
+        excluding the CN.
 
     Raises:
         SystemExit: If ``cryptography`` is not installed, the CSR cannot be
             parsed, or no CN is found in the subject.
     """
-    try:
-        from cryptography import x509
-        from cryptography.x509.oid import ExtensionOID, NameOID
-    except ImportError:
-        log.error(
-            "The 'cryptography' package is required to parse CSRs. "
-            "Install it with: pip install certinext[csr]"
-        )
-        raise SystemExit(1)
+    from certinext.csr import parse_csr
 
     try:
-        csr = x509.load_pem_x509_csr(pem.encode())
-    except Exception as exc:
-        log.error("Failed to parse CSR: %s", exc)
+        return parse_csr(pem)
+    except (ImportError, ValueError) as exc:
+        log.error("%s", exc)
         raise SystemExit(1) from exc
-
-    cn_attrs = csr.subject.get_attributes_for_oid(NameOID.COMMON_NAME)
-    if not cn_attrs:
-        log.error("CSR subject has no Common Name — use --domain to specify the primary domain")
-        raise SystemExit(1)
-    cn = str(cn_attrs[0].value)
-
-    try:
-        san_ext = csr.extensions.get_extension_for_oid(ExtensionOID.SUBJECT_ALTERNATIVE_NAME)
-        san_value = san_ext.value
-        if isinstance(san_value, x509.SubjectAlternativeName):
-            dns_names = [
-                name
-                for name in san_value.get_values_for_type(x509.DNSName)
-                if name != cn
-            ]
-        else:
-            dns_names = []
-    except x509.ExtensionNotFound:
-        dns_names = []
-
-    return cn, dns_names
 
 
 def _create_order(sess: CertiNextSession, args: argparse.Namespace) -> SslOrder:
@@ -265,11 +217,7 @@ def _create_order(sess: CertiNextSession, args: argparse.Namespace) -> SslOrder:
                 **requestor_kwargs,
             )
     except CertiNextAPIError as exc:
-        log.error("Error creating order: %s", exc)
-        for field_err in exc.field_errors:
-            log.error("  Field error: %s", field_err)
-        log.debug("  Full response body: %s", exc.body)
-        raise SystemExit(1) from exc
+        fatal_api_error(exc, "Error creating order")
 
 
 def _submit_csr(order: SslOrder, csr: str, *, force: bool = False) -> bool:
@@ -308,11 +256,7 @@ def _submit_csr(order: SslOrder, csr: str, *, force: bool = False) -> bool:
         return True
     except CertiNextAPIError as exc:
         if needed:
-            log.error("Error submitting CSR for order %s: %s", order.order_id, exc)
-            for field_err in exc.field_errors:
-                log.error("  Field error: %s", field_err)
-            log.debug("  Full response body: %s", exc.body)
-            raise SystemExit(1) from exc
+            fatal_api_error(exc, f"Error submitting CSR for order {order.order_id}")
         log.debug(
             "CSR submission returned HTTP %s for order %s in status %r — "
             "order may not require a CSR at this stage",
@@ -398,11 +342,7 @@ def _advance_order(
             order.submit_csr(csr)
             order.refresh()
         except CertiNextAPIError as exc:
-            log.error("CSR submission failed for order %s: %s", order.order_id, exc)
-            for field_err in exc.field_errors:
-                log.error("  Field error: %s", field_err)
-            log.debug("  Full response body: %s", exc.body)
-            raise SystemExit(1) from exc
+            fatal_api_error(exc, f"CSR submission failed for order {order.order_id}")
 
 
 def main() -> None:

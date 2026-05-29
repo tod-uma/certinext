@@ -10,10 +10,11 @@ import getpass
 import logging
 import os
 import sys
-from typing import Any
+from typing import Any, NoReturn
 
 import certinext
 from certinext._keyring import keyring_get, keyring_service
+from certinext.exceptions import CertiNextAPIError
 
 log = logging.getLogger(__name__)
 
@@ -168,3 +169,79 @@ def build_session(args: argparse.Namespace) -> certinext.CertiNextSession:
         scope=getattr(args, "scope", ""),
         sandbox=getattr(args, "sandbox", False),
     )
+
+
+def add_requestor_args(target: Any) -> None:
+    """Add standard certificate requestor arguments to a parser or argument group.
+
+    Registers ``--requestor-name``, ``--requestor-email``, ``--requestor-phone``,
+    ``--requestor-designation``, and ``--signer-place``. All are read from the
+    corresponding ``CERTINEXT_REQUESTOR_*`` environment variables when not
+    supplied on the command line.
+
+    Args:
+        target: An :class:`argparse.ArgumentParser` or argument group that
+            accepts ``add_argument`` calls.
+    """
+    _rname = os.environ.get("CERTINEXT_REQUESTOR_NAME", "")
+    _remail = os.environ.get("CERTINEXT_REQUESTOR_EMAIL", "")
+    _rphone = os.environ.get("CERTINEXT_REQUESTOR_PHONE", "")
+    target.add_argument(
+        "--requestor-name", metavar="NAME",
+        default=_rname or None, required=not _rname,
+        help="Full name of the certificate requestor (env: CERTINEXT_REQUESTOR_NAME)",
+    )
+    target.add_argument(
+        "--requestor-email", metavar="EMAIL",
+        default=_remail or None, required=not _remail,
+        help="Email address of the requestor (env: CERTINEXT_REQUESTOR_EMAIL)",
+    )
+    target.add_argument(
+        "--requestor-phone", metavar="PHONE",
+        default=_rphone or None, required=not _rphone,
+        help="Phone in E.164 format, e.g. +12075551234 (env: CERTINEXT_REQUESTOR_PHONE)",
+    )
+    target.add_argument(
+        "--requestor-designation", metavar="TITLE",
+        default=os.environ.get("CERTINEXT_REQUESTOR_DESIGNATION", ""),
+        help="Job title or designation of the requestor (env: CERTINEXT_REQUESTOR_DESIGNATION)",
+    )
+    target.add_argument(
+        "--signer-place", metavar="PLACE",
+        default=os.environ.get("CERTINEXT_SIGNER_PLACE", ""),
+        help="City/location for the subscriber agreement signature (env: CERTINEXT_SIGNER_PLACE)",
+    )
+
+
+def add_json_output_arg(target: Any) -> None:
+    """Add a ``--json`` flag to a parser or argument group.
+
+    When set, the CLI writes its output as machine-readable JSON instead of
+    human-readable text.
+
+    Args:
+        target: An :class:`argparse.ArgumentParser` or argument group that
+            accepts ``add_argument`` calls.
+    """
+    target.add_argument(
+        "--json", dest="output_json", action="store_true", default=False,
+        help="Write output as JSON instead of human-readable text",
+    )
+
+
+def fatal_api_error(exc: CertiNextAPIError, message: str) -> NoReturn:
+    """Log a CertiNext API error at ERROR level and exit with code 1.
+
+    Logs ``message: exc`` at ERROR level, each field validation error at ERROR
+    level, and the full response body at DEBUG level.
+
+    Args:
+        exc: The :class:`~certinext.exceptions.CertiNextAPIError` that was caught.
+        message: Short description of the failed operation, e.g.
+            ``"Error creating order"``.
+    """
+    log.error("%s: %s", message, exc)
+    for field_err in exc.field_errors:
+        log.error("  Field error: %s", field_err)
+    log.debug("  Full response body: %s", exc.body)
+    raise SystemExit(1) from exc
