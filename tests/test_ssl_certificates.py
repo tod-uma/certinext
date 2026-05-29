@@ -353,12 +353,14 @@ class TestSslOrderLifecycleMethods:
         assert len(challenges) == 1
 
     def test_verify_dcv_posts_to_dcv_verify(self):
-        """verify_dcv() POSTs to /ssl-certificates/{orderId}/dcv/verify."""
+        """verify_dcv() POSTs to /ssl-certificates/{orderId}/dcv/verify with domain and method."""
         order, mock_session = self._make_order()
         mock_session.post.return_value = _ok_response({"status": "ok"})
-        order.verify_dcv()
+        order.verify_dcv("example.com", "DNS-TXT")
         url = mock_session.post.call_args[0][0]
         assert url.endswith(f"{_SSL_BASE}/ORDER-001/dcv/verify")
+        body = mock_session.post.call_args[1]["json"]
+        assert body == {"domain": "example.com", "method": "DNS-TXT"}
 
     def test_submit_csr_puts_to_csr_endpoint(self):
         """submit_csr() PUTs to /ssl-certificates/{orderId}/csr with the CSR body."""
