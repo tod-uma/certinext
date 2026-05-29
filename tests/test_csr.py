@@ -28,31 +28,32 @@ if importlib.util.find_spec("cryptography") is None:
         stacklevel=1,
     )
 
-# Minimal self-signed CSR with CN, emailAddress, L, ST, O fields.
-# Subject: C=US, ST=Maine, L=Orono, O=University of Maine System,
-#          CN=test.maine.edu, emailAddress=admin@maine.edu
-_SAMPLE_CSR = """\
------BEGIN CERTIFICATE REQUEST-----
-MIIBpzCCAQ4CAQAwaDELMAkGA1UEBhMCVVMxDjAMBgNVBAgMBU1haW5lMQ4wDAYD
-VQQHDAVPcm9ubzEiMCAGA1UECgwZVW5pdmVyc2l0eSBvZiBNYWluZSBTeXN0ZW0x
-FzAVBgNVBAMMDnRlc3QubWFpbmUuZWR1MB4wDgYJKoZIhvcNAQkBFgFhMFwwDQYJ
-KoZIhvcNAQEBBQADSwAwSAJBAMXOaXFKfTWVJnCk9H7qBBR/Q5rYMYMIgXoBpnxK
-DWJFBxxVEBPMYjfNxIPb8LNBX5JR6GfAX8p4sC36kCzGRosCAwEAAaAAMA0GCSqG
-SIb3DQEBCwUAA0EAb7hhVWdFT7dSLi5MXxT7fqzqr7e1Km7v5n1mPsLjm56b5Ot
-e8G4kK6lX2bMX2a8bXqJLzJNl5N2YDFhsG8TXA==
------END CERTIFICATE REQUEST-----
-"""
 
-# Minimal CSR with only CN (no email, locality, state, org).
-_BARE_CSR = """\
------BEGIN CERTIFICATE REQUEST-----
-MIHOMEECAQAwDjEMMAoGA1UEAwwDZm9vMFwwDQYJKoZIhvcNAQEBBQADSwAwSAJB
-AMXOaXFKfTWVJnCk9H7qBBR/Q5rYMYMIgXoBpnxKDWJFBxxVEBPMYjfNxIPb8LNB
-X5JR6GfAX8p4sC36kCzGRosCAwEAAaAAMA0GCSqGSIb3DQEBCwUAA0EAGj4j2U6d
-bG1JT/i0wLIc7cxYzBTrL6y0d4RkEdP2bz8y8YsY47JFIJ1nJB7K1P3pD8N7Gkg
-WFEiIHvQQ/xc4w==
------END CERTIFICATE REQUEST-----
-"""
+def _make_csr(cn: str = "foo", extra_attrs: list | None = None) -> str:
+    """Generate a real PEM-encoded CSR using the cryptography library.
+
+    Args:
+        cn: Common Name for the subject.
+        extra_attrs: Additional NameAttribute objects to include in the subject.
+
+    Returns:
+        PEM-encoded CSR string.
+    """
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.x509.oid import NameOID
+
+    key = ec.generate_private_key(ec.SECP256R1())
+    attrs = [x509.NameAttribute(NameOID.COMMON_NAME, cn)]
+    if extra_attrs:
+        attrs.extend(extra_attrs)
+    csr = (
+        x509.CertificateSigningRequestBuilder()
+        .subject_name(x509.Name(attrs))
+        .sign(key, hashes.SHA256())
+    )
+    return csr.public_bytes(serialization.Encoding.PEM).decode()
 
 
 class TestCsrInfo:
@@ -108,36 +109,67 @@ class TestParseCsr:
 
     def test_raises_when_no_cn(self):
         """parse_csr raises ValueError when the CSR subject has no CN."""
-        # Build a CSR with no CN — we use a known-bad DER snippet
         with pytest.raises((ValueError, Exception)):
-            parse_csr("-----BEGIN CERTIFICATE REQUEST-----\nYQ==\n-----END CERTIFICATE REQUEST-----\n")
+            parse_csr(
+                "-----BEGIN CERTIFICATE REQUEST-----\nYQ==\n"
+                "-----END CERTIFICATE REQUEST-----\n"
+            )
 
     def test_returns_csrinfo(self):
         """parse_csr returns a CsrInfo instance."""
-        info = parse_csr(_BARE_CSR)
+        info = parse_csr(_make_csr())
         assert isinstance(info, CsrInfo)
 
     def test_extracts_common_name(self):
         """parse_csr populates common_name from the CN OID."""
-        info = parse_csr(_BARE_CSR)
-        assert info.common_name == "foo"
+        info = parse_csr(_make_csr(cn="test.maine.edu"))
+        assert info.common_name == "test.maine.edu"
 
     def test_sans_empty_when_no_san_extension(self):
         """parse_csr returns an empty sans list when no SAN extension is present."""
-        info = parse_csr(_BARE_CSR)
+        info = parse_csr(_make_csr())
         assert info.sans == []
 
     def test_email_none_when_absent(self):
         """parse_csr sets email to None when emailAddress is not in the subject."""
-        info = parse_csr(_BARE_CSR)
+        info = parse_csr(_make_csr())
         assert info.email is None
 
     def test_locality_none_when_absent(self):
         """parse_csr sets locality to None when L is not in the subject."""
-        info = parse_csr(_BARE_CSR)
+        info = parse_csr(_make_csr())
         assert info.locality is None
 
     def test_state_none_when_absent(self):
         """parse_csr sets state to None when ST is not in the subject."""
-        info = parse_csr(_BARE_CSR)
+        info = parse_csr(_make_csr())
         assert info.state is None
+
+    def test_extracts_email(self):
+        """parse_csr extracts emailAddress from the subject."""
+        from cryptography import x509
+        from cryptography.x509.oid import NameOID
+
+        pem = _make_csr(
+            cn="test.maine.edu",
+            extra_attrs=[x509.NameAttribute(NameOID.EMAIL_ADDRESS, "admin@maine.edu")],
+        )
+        info = parse_csr(pem)
+        assert info.email == "admin@maine.edu"
+
+    def test_extracts_locality_and_state(self):
+        """parse_csr extracts L and ST and signer_place combines them."""
+        from cryptography import x509
+        from cryptography.x509.oid import NameOID
+
+        pem = _make_csr(
+            cn="test.maine.edu",
+            extra_attrs=[
+                x509.NameAttribute(NameOID.LOCALITY_NAME, "Orono"),
+                x509.NameAttribute(NameOID.STATE_OR_PROVINCE_NAME, "Maine"),
+            ],
+        )
+        info = parse_csr(pem)
+        assert info.locality == "Orono"
+        assert info.state == "Maine"
+        assert info.signer_place == "Orono, Maine"
