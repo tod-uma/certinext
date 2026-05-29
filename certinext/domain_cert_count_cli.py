@@ -148,26 +148,37 @@ def _build_rows(
     return rows
 
 
+def build_parser() -> argparse.ArgumentParser:
+    """Return the argument parser for certinext-domain-cert-count.
+
+    Returns:
+        A configured ArgumentParser instance.
+    """
+    parser = argparse.ArgumentParser(
+        description="Show all registered domains and their certificate counts",
+    )
+    parser.add_argument(
+        "--status", metavar="STATUS", default=None,
+        choices=["issued", "expired"],
+        help="Filter certificates by status: 'issued' (active) or 'expired'",
+    )
+    parser.add_argument(
+        "--condense", action="store_true", default=False,
+        help="Show only top-level domains; subdomain counts roll up into their apex",
+    )
+    parser.add_argument(
+        "--json", action="store_true", default=False,
+        help="Output raw JSON instead of tabular format",
+    )
+    conn = parser.add_argument_group("connection")
+    add_connection_args(conn)
+    return parser
+
+
 def main() -> None:
     """Entry point for certinext-domain-cert-count."""
     try:
-        parser = argparse.ArgumentParser(
-            description="Show all registered domains and their certificate counts",
-        )
-        add_connection_args(parser)
-        parser.add_argument(
-            "--status", metavar="STATUS", default=None,
-            choices=["issued", "expired"],
-            help="Filter certificates by status: 'issued' (active) or 'expired'",
-        )
-        parser.add_argument(
-            "--condense", action="store_true", default=False,
-            help="Show only top-level domains; subdomain counts roll up into their apex",
-        )
-        parser.add_argument(
-            "--json", action="store_true", default=False,
-            help="Output raw JSON instead of tabular format",
-        )
+        parser = build_parser()
         args = parser.parse_args()
         apply_sandbox(args)
         sess = build_session(args)

@@ -33,17 +33,28 @@ from tabulate import tabulate
 from certinext._cli import add_connection_args, apply_sandbox, build_session
 
 
+def build_parser() -> argparse.ArgumentParser:
+    """Return the argument parser for certinext-accounts.
+
+    Returns:
+        A configured ArgumentParser instance.
+    """
+    parser = argparse.ArgumentParser(
+        description="Show account info, groups, and organizations",
+    )
+    parser.add_argument(
+        "--json", action="store_true", default=False,
+        help="Output raw JSON instead of tabular format",
+    )
+    conn = parser.add_argument_group("connection")
+    add_connection_args(conn)
+    return parser
+
+
 def main() -> None:
     """Entry point for certinext-accounts."""
     try:
-        parser = argparse.ArgumentParser(
-            description="Show account info, groups, and organizations",
-        )
-        add_connection_args(parser)
-        parser.add_argument(
-            "--json", action="store_true", default=False,
-            help="Output raw JSON instead of tabular format",
-        )
+        parser = build_parser()
         args = parser.parse_args()
         apply_sandbox(args)
         sess = build_session(args)

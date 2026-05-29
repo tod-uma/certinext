@@ -46,21 +46,32 @@ def _show_domains(domains: list[Domain], use_json: bool) -> None:
         print(tabulate([d.to_row() for d in domains], headers="keys", tablefmt="simple"))
 
 
+def build_parser() -> argparse.ArgumentParser:
+    """Return the argument parser for certinext-pending-dcv.
+
+    Returns:
+        A configured ArgumentParser instance.
+    """
+    parser = argparse.ArgumentParser(
+        description="List all active domains that have not completed DCV verification",
+    )
+    parser.add_argument(
+        "--pattern", metavar="REGEX",
+        help="Filter domains by regex pattern (re.fullmatch, case-insensitive)",
+    )
+    parser.add_argument(
+        "--json", action="store_true", default=False,
+        help="Output raw JSON instead of tabular format",
+    )
+    conn = parser.add_argument_group("connection")
+    add_connection_args(conn)
+    return parser
+
+
 def main() -> None:
+    """Entry point for certinext-pending-dcv."""
     try:
-        parser = argparse.ArgumentParser(
-            description="List all active domains that have not completed DCV verification",
-        )
-        add_connection_args(parser)
-        # Optional client-side regex filter applied after the API response.
-        parser.add_argument(
-            "--pattern", metavar="REGEX",
-            help="Filter domains by regex pattern (re.fullmatch, case-insensitive)",
-        )
-        parser.add_argument(
-            "--json", action="store_true", default=False,
-            help="Output raw JSON instead of tabular format",
-        )
+        parser = build_parser()
         args = parser.parse_args()
         apply_sandbox(args)
         sess = build_session(args)
