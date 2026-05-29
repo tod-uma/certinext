@@ -7,11 +7,15 @@ plumbing.
 
 import argparse
 import getpass
+import logging
 import os
+import sys
 from typing import Any
 
 import certinext
 from certinext._keyring import keyring_get, keyring_service
+
+log = logging.getLogger(__name__)
 
 
 def _resolve(
@@ -108,6 +112,26 @@ def apply_sandbox(args: argparse.Namespace) -> None:
             args.profile = "sandbox"
 
 
+def _setup_logging(verbose: int) -> None:
+    """Configure logging level and format based on verbosity count.
+
+    Sets the root logger to INFO (verbose 0–2) or DEBUG (verbose 3+).
+    Suppresses noisy third-party loggers below verbose 4.
+
+    Args:
+        verbose: Verbosity count from -v flags (0=INFO, 3+=DEBUG, 4+=third-party DEBUG).
+    """
+    logging.basicConfig(
+        level=logging.DEBUG if verbose >= 3 else logging.INFO,
+        format="%(message)s" if sys.stderr.isatty() else "%(asctime)s %(levelname)-8s %(message)s",
+    )
+    if verbose < 4:
+        logging.getLogger("urllib3").setLevel(logging.WARNING)
+        logging.getLogger("keyring").setLevel(logging.WARNING)
+        logging.getLogger("jaraco").setLevel(logging.WARNING)
+        logging.getLogger("win32ctypes").setLevel(logging.WARNING)
+
+
 def build_session(args: argparse.Namespace) -> certinext.CertiNextSession:
     """Resolve credentials and return a configured :class:`~certinext.CertiNextSession`.
 
@@ -131,6 +155,10 @@ def build_session(args: argparse.Namespace) -> certinext.CertiNextSession:
     client_secret = _resolve(
         args.client_secret, "CERTINEXT_CLIENT_SECRET", "CertiNext client secret", secret=True,
         kr_service=svc, kr_key="CERTINEXT_CLIENT_SECRET",
+    )
+    log.info(
+        "Connecting to %s as account %s (profile: %s)",
+        args.base_url, client_id, profile or "default",
     )
     return certinext.session(
         base_url=args.base_url,

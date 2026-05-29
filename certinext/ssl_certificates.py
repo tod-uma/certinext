@@ -19,22 +19,39 @@ and wildcard-UCC), order tracking, DCV challenges, CSR submission, agreement
 acceptance, certificate download, cancellation, rejection, revocation, and
 reissue.
 
-Product codes are resolved at runtime from
-:meth:`certinext.catalog.CatalogAccessor.list_products` and cached per
-:class:`SslAccessor` instance, so they always reflect the current account's
-enabled products rather than hardcoded values.
+All certificate creation uses the single ``POST /api/certinext/v2/ssl-certificates``
+endpoint with the ``productVariant`` field in the request body. Certificate
+validity is specified in years (1, 2, or 3). A PEM-encoded CSR is submitted as
+a separate ``PUT /ssl-certificates/{orderId}/csr`` call after order creation.
+
+.. note:: **DCV not required in this environment**
+
+    University of Maine System domains are pre-validated in CertiNext (both
+    production and sandbox), so per-certificate DCV challenges are never
+    required. Orders will not enter ``pending-dcv`` status in normal
+    operation. The :meth:`SslOrder.get_dcv` and :meth:`SslOrder.verify_dcv`
+    methods are implemented for completeness but have not been exercised
+    against the UMS CertiNext account.
+
+.. note::
+
+    The subscriber-agreement field is named ``agreement`` in the JSON request
+    body (both for order creation and the ``/agreement`` endpoint). However,
+    the API's validation error messages refer to it as ``agreementDetails``
+    (e.g. *"'agreementDetails' block cannot be empty"*). These names refer to
+    the same field — do not rename ``agreement`` to ``agreementDetails`` in
+    the request body.
 """
 
-import re
-from typing import TYPE_CHECKING, Any, Literal
+import logging
+from typing import Any, Literal
 
 from .client import CertiNextClient
 from .exceptions import CertiNextAPIError  # noqa: F401 — referenced in Raises docstrings
 
-if TYPE_CHECKING:
-    from .catalog import ProductCategory
+log = logging.getLogger(__name__)
 
-_SSL_BASE = "/api/certinext/v2/ssl"
+_SSL_BASE = "/api/certinext/v2/ssl-certificates"
 
 SslOrderStatus = Literal[
     "pending-dcv",
@@ -54,29 +71,6 @@ SslOrderStatus = Literal[
 
 ReissueMode = Literal["rekey", "update-sans"]
 """Valid reissue modes accepted by :meth:`SslOrder.reissue`."""
-
-
-def _matches_variant(product_name: str, validation_type: str, wildcard: bool, ucc: bool) -> bool:
-    """Return True if a catalog product name matches the requested SSL variant.
-
-    Matches by splitting the product name on word boundaries and checking that:
-    - the validation type (DV, OV, EV) is present as a whole word
-    - the presence/absence of "WILDCARD" and "UCC" tokens matches the flags
-
-    Args:
-        product_name: Product name string from the catalog (e.g. "DV SSL Certificate").
-        validation_type: Uppercase validation type: ``"DV"``, ``"OV"``, or ``"EV"``.
-        wildcard: Whether the product should include "Wildcard" in its name.
-        ucc: Whether the product should include "UCC" in its name.
-
-    Returns:
-        ``True`` if the product name matches all variant criteria.
-    """
-    tokens = set(re.split(r"\W+", product_name.upper()))
-    has_type = validation_type.upper() in tokens
-    has_wildcard = "WILDCARD" in tokens
-    has_ucc = "UCC" in tokens
-    return has_type and has_wildcard == wildcard and has_ucc == ucc
 
 
 class DcvChallenge:
@@ -248,13 +242,20 @@ class SslOrder:
 
     Typical DV flow::
 
-        order = sess.ssl.create_dv("example.com", validity=365)
+        order = sess.ssl.create_dv(
+            "example.com",
+            validity_years=1,
+            requestor_name="John Doe",
+            requestor_email="john@example.com",
+            requestor_phone="+12075551234",
+            requestor_designation="IT Administrator",
+        )
+        order.submit_csr(csr_pem)
         for challenge in order.get_dcv():
             print(f"Add TXT record: {challenge.host}  {challenge.token}")
         # ... publish DNS challenge ...
         order.verify_dcv()
-        order.submit_csr(csr_pem)
-        order.accept_agreement()
+        order.accept_agreement(signer_name="John Doe", signer_place="Portland, ME")
         cert = order.download_certificate()
         print(cert.certificate_pem)
     """
@@ -305,6 +306,40 @@ class SslOrder:
     def created_at(self) -> str | None:
         """Order creation timestamp as an ISO 8601 string."""
         return self._data.get("createdAt")
+
+    @property
+    def csr_submitted(self) -> bool:
+        """Whether a CSR has been submitted for this order.
+
+        ``True`` once :meth:`submit_csr` has been called successfully.
+        The order cannot progress to issuance until this is ``True``.
+        """
+        return bool(self._data.get("csrSubmitted", False))
+
+    @property
+    def order_state(self) -> str | None:
+        """Human-readable order status from the legacy pipeline.
+
+        Examples: ``"Order Accepted"``, ``"Approved by System"``.
+        This is a complement to the typed :attr:`status` field; both can be
+        logged together to understand where an order is in the CA's internal
+        workflow.
+        """
+        return self._data.get("orderState")
+
+    @property
+    def certificate_state(self) -> str | None:
+        """Human-readable certificate/request status from the legacy pipeline.
+
+        Examples: ``"Pending for Approver"``, ``"Certificate Generated"``,
+        ``"Certificate Downloaded"``. A certificate is ready to download when
+        this reads ``"Certificate Generated"`` (or similar). If this field is
+        not ``"Certificate Generated"`` while :attr:`status` is ``"issued"``,
+        the CA has approved the order but has not yet signed the certificate —
+        typically because the CSR was not submitted through the normal
+        ``pending-csr`` stage.
+        """
+        return self._data.get("certificateState")
 
     @property
     def all_domains(self) -> list[str]:
@@ -369,6 +404,11 @@ class SslOrder:
     def get_dcv(self) -> list[DcvChallenge]:
         """Return the DCV challenges for all domains in this order.
 
+        .. note::
+            UMS domains are pre-validated in CertiNext; orders will not enter
+            ``pending-dcv`` status and this method is not called in normal
+            UMS issuance flows. It has not been tested against the UMS account.
+
         Returns:
             List of :class:`DcvChallenge` objects, one per domain requiring
             validation. Publish each challenge, then call :meth:`verify_dcv`.
@@ -397,6 +437,11 @@ class SslOrder:
         Call after publishing all DCV challenges returned by :meth:`get_dcv`.
         Call :meth:`refresh` and check :attr:`status` to confirm the outcome.
 
+        .. note::
+            UMS domains are pre-validated in CertiNext; this method is not
+            called in normal UMS issuance flows and has not been tested
+            against the UMS account.
+
         Returns:
             Raw API response dict.
 
@@ -408,29 +453,41 @@ class SslOrder:
     def submit_csr(self, csr: str) -> dict[str, Any]:
         """Submit a Certificate Signing Request for this order.
 
+        Must be called after order creation when the order status is
+        ``"pending-csr"``. Call :meth:`refresh` after submitting to confirm
+        the order has advanced.
+
         Args:
             csr: PEM-encoded Certificate Signing Request string.
 
         Returns:
-            Raw API response dict (structure is opaque). Call :meth:`refresh`
-            and check :attr:`status` to confirm the order has advanced.
+            Raw API response dict (structure is opaque).
 
         Raises:
             CertiNextAPIError: On a non-2xx API response. Provides ``.status_code`` and ``.body``.
         """
         return self._client.put(f"{_SSL_BASE}/{self.order_id}/csr", json={"csr": csr})
 
-    def accept_agreement(self) -> dict[str, Any]:
+    def accept_agreement(self, signer_name: str, signer_place: str) -> dict[str, Any]:
         """Accept the subscriber agreement for this order.
 
+        Call when the order status is ``"pending-agreement"``. Call
+        :meth:`refresh` after accepting to confirm the order has advanced.
+
+        Args:
+            signer_name: Full name of the person accepting the agreement.
+            signer_place: City or location of the signer (e.g. ``"Portland, ME"``).
+
         Returns:
-            Raw API response dict (structure is opaque). Call :meth:`refresh`
-            and check :attr:`status` to confirm the order has advanced.
+            Raw API response dict (structure is opaque).
 
         Raises:
             CertiNextAPIError: On a non-2xx API response. Provides ``.status_code`` and ``.body``.
         """
-        return self._client.post(f"{_SSL_BASE}/{self.order_id}/agreement")
+        return self._client.post(
+            f"{_SSL_BASE}/{self.order_id}/agreement",
+            json={"agreement": {"signerName": signer_name, "signerPlace": signer_place, "accepted": True}},
+        )
 
     def download_certificate(self) -> CertificateDownload:
         """Download the issued certificate in JSON format.
@@ -565,10 +622,10 @@ class SslAccessor:
     - :meth:`create_ov` / :meth:`create_ov_wildcard` / :meth:`create_ov_ucc` / :meth:`create_ov_wildcard_ucc`
     - :meth:`create_ev` / :meth:`create_ev_ucc`
 
-    **Product codes** are resolved lazily from the Catalog API
-    (``GET /catalog/products``) on the first ``create_*`` call and cached for
-    the lifetime of the accessor. The catalog is queried at most once per
-    session.
+    All creation methods post to ``POST /api/certinext/v2/ssl-certificates``
+    with the appropriate ``productVariant`` in the request body. Validity is
+    specified in years (1, 2, or 3). The CSR must be submitted separately via
+    :meth:`SslOrder.submit_csr` after the order is created.
 
     OV and EV methods require an ``organization_id`` from
     :meth:`certinext.accounts.AccountAccessor.list_organizations`.
@@ -576,12 +633,19 @@ class SslAccessor:
     Example::
 
         sess = certinext.session(client_id="...", client_secret="...")
-        order = sess.ssl.create_dv("example.com", validity=365)
+        order = sess.ssl.create_dv(
+            "example.com",
+            validity_years=1,
+            requestor_name="John Doe",
+            requestor_email="john@example.com",
+            requestor_phone="+12075551234",
+            requestor_designation="IT Administrator",
+        )
+        order.submit_csr(csr_pem)
         for challenge in order.get_dcv():
             print(f"Add TXT record: {challenge.host}  {challenge.token}")
         order.verify_dcv()
-        order.submit_csr(csr_pem)
-        order.accept_agreement()
+        order.accept_agreement(signer_name="John Doe", signer_place="Portland, ME")
         order.refresh()
         cert = order.download_certificate()
         print(cert.certificate_pem)
@@ -593,114 +657,88 @@ class SslAccessor:
             client: The underlying HTTP client used for all API calls.
         """
         self._client = client
-        self._catalog_cache: list["ProductCategory"] | None = None
 
-    # --- product code resolution ---
+    # --- internal helpers ---
 
-    def _load_catalog(self) -> list["ProductCategory"]:
-        """Fetch and cache product categories from the Catalog API.
-
-        Returns:
-            Cached list of :class:`~certinext.catalog.ProductCategory` objects.
-        """
-        if self._catalog_cache is None:
-            from .catalog import CatalogAccessor
-            self._catalog_cache = CatalogAccessor(self._client).list_products()
-        return self._catalog_cache
-
-    def _get_product_code(self, validation_type: str, wildcard: bool, ucc: bool) -> str:
-        """Resolve the product code for an SSL variant from the catalog.
-
-        Queries the catalog (once per session, cached) and returns the first
-        product code whose name matches the requested validation type and
-        variant flags via :func:`_matches_variant`.
+    def _create(self, body: dict[str, Any]) -> SslOrder:
+        """POST to the ssl-certificates endpoint and return an SslOrder.
 
         Args:
-            validation_type: Uppercase validation tier: ``"DV"``, ``"OV"``, or ``"EV"``.
-            wildcard: Whether the desired product is a wildcard certificate.
-            ucc: Whether the desired product is a UCC (multi-domain) certificate.
-
-        Returns:
-            Product code string (e.g. ``"842"``).
-
-        Raises:
-            LookupError: If no matching product is found in the catalog. The error
-                message lists the available product names.
-        """
-        categories = self._load_catalog()
-        for cat in categories:
-            for product in cat.products:
-                if product.product_code and product.product_name:
-                    if _matches_variant(product.product_name, validation_type, wildcard, ucc):
-                        return product.product_code
-        available = [p.product_name for cat in categories for p in cat.products if p.product_name]
-        variant_desc = (
-            f"{validation_type}"
-            f"{' Wildcard' if wildcard else ''}"
-            f"{' UCC' if ucc else ''}"
-        ).strip()
-        raise LookupError(
-            f"No {variant_desc!r} product found in catalog. "
-            f"Available products: {available}"
-        )
-
-    # --- internal create helper ---
-
-    def _create(self, product_code: str, path: str, body: dict[str, Any]) -> SslOrder:
-        """POST a create request with the X-Product-Code header.
-
-        Args:
-            product_code: Numeric product code string for ``X-Product-Code``.
-            path: Sub-path under ``/api/certinext/v2/ssl`` (e.g. ``/dv``).
-            body: JSON request body.
+            body: JSON request body including ``productVariant`` and all required fields.
 
         Returns:
             :class:`SslOrder` wrapping the API response.
         """
-        data = self._client.post(
-            f"{_SSL_BASE}{path}",
-            json=body,
-            extra_headers={"X-Product-Code": product_code},
-        )
+        log.debug("POST %s body: %s", _SSL_BASE, body)
+        data = self._client.post(_SSL_BASE, json=body)
         return SslOrder(self._client, data)
 
     @staticmethod
-    def _single_domain_body(
+    def _build_body(
+        product_variant: str,
         domain: str,
-        validity: int,
-        additional_domains: list[str] | None,
-        csr: str | None,
-        auto_renew: bool,
-        custom_fields: dict[str, Any] | None,
-        **extra: Any,
+        validity_years: int,
+        requestor_name: str,
+        requestor_email: str,
+        requestor_phone: str,
+        requestor_designation: str,
+        additional_domains: list[str] | None = None,
+        organization_id: str | None = None,
+        signer_name: str = "",
+        signer_place: str = "",
+        auto_secure_www: bool = False,
     ) -> dict[str, Any]:
-        """Build the JSON body for single-domain certificate creation requests."""
-        body: dict[str, Any] = {"domain": domain, "validity": validity, "autoRenew": auto_renew}
-        if additional_domains is not None:
-            body["additionalDomains"] = additional_domains
-        if csr is not None:
-            body["csr"] = csr
-        if custom_fields is not None:
-            body["customFields"] = custom_fields
-        body.update(extra)
-        return body
+        """Build the JSON body for a certificate creation request.
 
-    @staticmethod
-    def _multi_domain_body(
-        domains: list[str],
-        validity: int,
-        csr: str | None,
-        auto_renew: bool,
-        custom_fields: dict[str, Any] | None,
-        **extra: Any,
-    ) -> dict[str, Any]:
-        """Build the JSON body for multi-domain (UCC) certificate creation requests."""
-        body: dict[str, Any] = {"domains": domains, "validity": validity, "autoRenew": auto_renew}
-        if csr is not None:
-            body["csr"] = csr
-        if custom_fields is not None:
-            body["customFields"] = custom_fields
-        body.update(extra)
+        Args:
+            product_variant: Product variant string (e.g. ``"dv"``, ``"ov-wildcard"``).
+            domain: Primary FQDN for the certificate.
+            validity_years: Certificate validity period in years (1, 2, or 3).
+            requestor_name: Full name of the person requesting the certificate.
+            requestor_email: Email address of the requestor.
+            requestor_phone: Phone number in E.164 format (e.g. ``"+12075551234"``).
+            requestor_designation: Job title or designation of the requestor.
+            additional_domains: Optional SANs beyond the primary domain.
+            organization_id: Organization number for OV/EV orders; ``None`` for DV.
+            signer_name: Full name of the person accepting the subscriber agreement.
+                Defaults to ``requestor_name`` when empty.
+            signer_place: City or location of the signer (e.g. ``"Portland, ME"``).
+            auto_secure_www: Whether to request automatic www-redirect coverage.
+                Defaults to ``False``; omitting this field from the request
+                causes the API to default to ``True``, so it is always sent
+                explicitly.
+
+        Returns:
+            Dict ready to be serialised as the JSON request body. The
+            subscriber-agreement block is keyed as ``"agreement"`` per the API
+            docs; ignore API error messages that call it ``"agreementDetails"``
+            — that is a vendor-side naming inconsistency.
+        """
+        cert: dict[str, Any] = {"domain": domain, "autoSecureWww": auto_secure_www}
+        if additional_domains:
+            cert["additionalDomains"] = additional_domains
+
+        body: dict[str, Any] = {
+            "productVariant": product_variant,
+            "certificate": cert,
+            "subscription": {"validityYears": validity_years},
+            "requestor": {
+                "name": requestor_name,
+                "email": requestor_email,
+                "phone": requestor_phone,
+                "designation": requestor_designation,
+            },
+            "agreement": {
+                "signerName": signer_name or requestor_name,
+                "signerPlace": signer_place,
+                "accepted": True,
+            },
+        }
+        if organization_id is not None:
+            body["organization"] = {
+                "organizationNumber": organization_id,
+                "preVetted": True,
+            }
         return body
 
     # --- create methods ---
@@ -708,371 +746,463 @@ class SslAccessor:
     def create_dv(
         self,
         domain: str,
-        validity: int = 365,
+        validity_years: int = 1,
         additional_domains: list[str] | None = None,
-        csr: str | None = None,
-        auto_renew: bool = False,
-        custom_fields: dict[str, Any] | None = None,
+        requestor_name: str = "",
+        requestor_email: str = "",
+        requestor_phone: str = "",
+        requestor_designation: str = "",
+        signer_name: str = "",
+        signer_place: str = "",
+        auto_secure_www: bool = False,
     ) -> SslOrder:
         """Create a DV (Domain Validated) single-domain certificate order.
 
-        No organization validation required. Product code resolved from catalog.
+        The CSR must be submitted separately via :meth:`SslOrder.submit_csr`
+        after the order is created.
 
         Args:
             domain: Primary FQDN (e.g. ``"example.com"``).
-            validity: Certificate validity in days (default: 365).
+            validity_years: Certificate validity in years (1, 2, or 3; default: 1).
             additional_domains: Optional list of additional SAN domains.
-            csr: Optional PEM-encoded CSR. If omitted, submit later via
-                :meth:`SslOrder.submit_csr`.
-            auto_renew: Enable automatic renewal (default: ``False``).
-            custom_fields: Optional dict of product-specific custom field values.
+            requestor_name: Full name of the certificate requestor.
+            requestor_email: Email address of the requestor.
+            requestor_phone: Phone number in E.164 format (e.g. ``"+12075551234"``).
+            requestor_designation: Job title or designation of the requestor.
+            signer_name: Name of the subscriber agreement signer (defaults to requestor_name).
+            signer_place: City or location of the signer (e.g. ``"Portland, ME"``).
+            auto_secure_www: Request automatic www-redirect coverage (default: ``False``).
 
         Returns:
-            :class:`SslOrder` with status ``"pending-dcv"`` (or a later stage if
-            the domain is already validated).
+            :class:`SslOrder` with status ``"pending-csr"`` or a later stage.
 
         Raises:
-            LookupError: If the DV SSL product is not found in the catalog.
             CertiNextAPIError: On a non-2xx API response. Provides ``.status_code`` and ``.body``.
         """
-        code = self._get_product_code("DV", wildcard=False, ucc=False)
-        return self._create(
-            code, "/dv",
-            self._single_domain_body(domain, validity, additional_domains, csr, auto_renew, custom_fields),
-        )
+        return self._create(self._build_body(
+            "dv", domain, validity_years,
+            requestor_name, requestor_email, requestor_phone, requestor_designation,
+            additional_domains=additional_domains,
+            signer_name=signer_name, signer_place=signer_place,
+            auto_secure_www=auto_secure_www,
+        ))
 
     def create_dv_wildcard(
         self,
         domain: str,
-        validity: int = 365,
-        csr: str | None = None,
-        auto_renew: bool = False,
-        custom_fields: dict[str, Any] | None = None,
+        validity_years: int = 1,
+        requestor_name: str = "",
+        requestor_email: str = "",
+        requestor_phone: str = "",
+        requestor_designation: str = "",
+        signer_name: str = "",
+        signer_place: str = "",
+        auto_secure_www: bool = False,
     ) -> SslOrder:
         """Create a DV wildcard certificate order.
 
-        ``domain`` must start with ``*.``. Product code resolved from catalog.
+        ``domain`` must start with ``*.``.
 
         Args:
             domain: Wildcard FQDN (e.g. ``"*.example.com"``).
-            validity: Certificate validity in days (default: 365).
-            csr: Optional PEM-encoded CSR.
-            auto_renew: Enable automatic renewal (default: ``False``).
-            custom_fields: Optional dict of product-specific custom field values.
+            validity_years: Certificate validity in years (1, 2, or 3; default: 1).
+            requestor_name: Full name of the certificate requestor.
+            requestor_email: Email address of the requestor.
+            requestor_phone: Phone number in E.164 format.
+            requestor_designation: Job title or designation of the requestor.
+            signer_name: Name of the subscriber agreement signer (defaults to requestor_name).
+            signer_place: City or location of the signer.
+            auto_secure_www: Request automatic www-redirect coverage (default: ``False``).
 
         Returns:
             :class:`SslOrder` for the wildcard certificate.
 
         Raises:
-            LookupError: If the DV Wildcard product is not found in the catalog.
             CertiNextAPIError: On a non-2xx API response. Provides ``.status_code`` and ``.body``.
         """
-        code = self._get_product_code("DV", wildcard=True, ucc=False)
-        return self._create(
-            code, "/dv/wildcard",
-            self._single_domain_body(domain, validity, None, csr, auto_renew, custom_fields),
-        )
+        return self._create(self._build_body(
+            "dv-wildcard", domain, validity_years,
+            requestor_name, requestor_email, requestor_phone, requestor_designation,
+            signer_name=signer_name, signer_place=signer_place,
+            auto_secure_www=auto_secure_www,
+        ))
 
     def create_dv_ucc(
         self,
         domains: list[str],
-        validity: int = 365,
-        csr: str | None = None,
-        auto_renew: bool = False,
-        custom_fields: dict[str, Any] | None = None,
+        validity_years: int = 1,
+        requestor_name: str = "",
+        requestor_email: str = "",
+        requestor_phone: str = "",
+        requestor_designation: str = "",
+        signer_name: str = "",
+        signer_place: str = "",
+        auto_secure_www: bool = False,
     ) -> SslOrder:
         """Create a DV UCC (multi-domain / Unified Communications) certificate order.
 
-        Product code resolved from catalog.
+        The first entry in ``domains`` is the primary domain; the remainder
+        become subject alternative names.
 
         Args:
-            domains: List of all FQDNs to include as SANs.
-            validity: Certificate validity in days (default: 365).
-            csr: Optional PEM-encoded CSR.
-            auto_renew: Enable automatic renewal (default: ``False``).
-            custom_fields: Optional dict of product-specific custom field values.
+            domains: List of all FQDNs to include. The first is the primary domain.
+            validity_years: Certificate validity in years (1, 2, or 3; default: 1).
+            requestor_name: Full name of the certificate requestor.
+            requestor_email: Email address of the requestor.
+            requestor_phone: Phone number in E.164 format.
+            requestor_designation: Job title or designation of the requestor.
+            signer_name: Name of the subscriber agreement signer (defaults to requestor_name).
+            signer_place: City or location of the signer.
+            auto_secure_www: Request automatic www-redirect coverage (default: ``False``).
 
         Returns:
             :class:`SslOrder` for the multi-domain certificate.
 
         Raises:
-            LookupError: If the DV UCC product is not found in the catalog.
+            ValueError: If ``domains`` is empty.
             CertiNextAPIError: On a non-2xx API response. Provides ``.status_code`` and ``.body``.
         """
-        code = self._get_product_code("DV", wildcard=False, ucc=True)
-        return self._create(
-            code, "/dv/ucc",
-            self._multi_domain_body(domains, validity, csr, auto_renew, custom_fields),
-        )
+        if not domains:
+            raise ValueError("domains must not be empty")
+        return self._create(self._build_body(
+            "dv-ucc", domains[0], validity_years,
+            requestor_name, requestor_email, requestor_phone, requestor_designation,
+            additional_domains=domains[1:] or None,
+            signer_name=signer_name, signer_place=signer_place,
+            auto_secure_www=auto_secure_www,
+        ))
 
     def create_dv_wildcard_ucc(
         self,
         domains: list[str],
-        validity: int = 365,
-        csr: str | None = None,
-        auto_renew: bool = False,
-        custom_fields: dict[str, Any] | None = None,
+        validity_years: int = 1,
+        requestor_name: str = "",
+        requestor_email: str = "",
+        requestor_phone: str = "",
+        requestor_designation: str = "",
+        signer_name: str = "",
+        signer_place: str = "",
+        auto_secure_www: bool = False,
     ) -> SslOrder:
         """Create a DV wildcard UCC certificate order.
 
         ``domains`` may contain wildcard entries such as ``"*.example.com"``.
-        Product code resolved from catalog.
+        The first entry is the primary domain; the remainder become SANs.
 
         Args:
             domains: List of all FQDNs (may include wildcard entries).
-            validity: Certificate validity in days (default: 365).
-            csr: Optional PEM-encoded CSR.
-            auto_renew: Enable automatic renewal (default: ``False``).
-            custom_fields: Optional dict of product-specific custom field values.
+            validity_years: Certificate validity in years (1, 2, or 3; default: 1).
+            requestor_name: Full name of the certificate requestor.
+            requestor_email: Email address of the requestor.
+            requestor_phone: Phone number in E.164 format.
+            requestor_designation: Job title or designation of the requestor.
+            signer_name: Name of the subscriber agreement signer (defaults to requestor_name).
+            signer_place: City or location of the signer.
+            auto_secure_www: Request automatic www-redirect coverage (default: ``False``).
 
         Returns:
             :class:`SslOrder` for the wildcard UCC certificate.
 
         Raises:
-            LookupError: If the DV Wildcard UCC product is not found in the catalog.
+            ValueError: If ``domains`` is empty.
             CertiNextAPIError: On a non-2xx API response. Provides ``.status_code`` and ``.body``.
         """
-        code = self._get_product_code("DV", wildcard=True, ucc=True)
-        return self._create(
-            code, "/dv/wildcard-ucc",
-            self._multi_domain_body(domains, validity, csr, auto_renew, custom_fields),
-        )
+        if not domains:
+            raise ValueError("domains must not be empty")
+        return self._create(self._build_body(
+            "dv-wildcard-ucc", domains[0], validity_years,
+            requestor_name, requestor_email, requestor_phone, requestor_designation,
+            additional_domains=domains[1:] or None,
+            signer_name=signer_name, signer_place=signer_place,
+            auto_secure_www=auto_secure_www,
+        ))
 
     def create_ov(
         self,
         domain: str,
         organization_id: str,
-        validity: int = 365,
+        validity_years: int = 1,
         additional_domains: list[str] | None = None,
-        csr: str | None = None,
-        auto_renew: bool = False,
-        custom_fields: dict[str, Any] | None = None,
+        requestor_name: str = "",
+        requestor_email: str = "",
+        requestor_phone: str = "",
+        requestor_designation: str = "",
+        signer_name: str = "",
+        signer_place: str = "",
+        auto_secure_www: bool = False,
     ) -> SslOrder:
         """Create an OV (Organization Validated) single-domain certificate order.
 
         Requires a pre-vetted ``organization_id`` from
         :meth:`certinext.accounts.AccountAccessor.list_organizations`.
-        Product code resolved from catalog.
 
         Args:
             domain: Primary FQDN.
             organization_id: :attr:`~certinext.accounts.Organization.organization_number`
                 of the pre-vetted organization.
-            validity: Certificate validity in days (default: 365).
+            validity_years: Certificate validity in years (1, 2, or 3; default: 1).
             additional_domains: Optional list of additional SAN domains.
-            csr: Optional PEM-encoded CSR.
-            auto_renew: Enable automatic renewal (default: ``False``).
-            custom_fields: Optional dict of product-specific custom field values.
+            requestor_name: Full name of the certificate requestor.
+            requestor_email: Email address of the requestor.
+            requestor_phone: Phone number in E.164 format.
+            requestor_designation: Job title or designation of the requestor.
+            signer_name: Name of the subscriber agreement signer (defaults to requestor_name).
+            signer_place: City or location of the signer.
+            auto_secure_www: Request automatic www-redirect coverage (default: ``False``).
 
         Returns:
             :class:`SslOrder` for the OV certificate.
 
         Raises:
-            LookupError: If the OV SSL product is not found in the catalog.
             CertiNextAPIError: On a non-2xx API response. Provides ``.status_code`` and ``.body``.
         """
-        code = self._get_product_code("OV", wildcard=False, ucc=False)
-        return self._create(
-            code, "/ov",
-            self._single_domain_body(
-                domain, validity, additional_domains, csr, auto_renew, custom_fields,
-                organizationId=organization_id,
-            ),
-        )
+        return self._create(self._build_body(
+            "ov", domain, validity_years,
+            requestor_name, requestor_email, requestor_phone, requestor_designation,
+            additional_domains=additional_domains,
+            organization_id=organization_id,
+            signer_name=signer_name, signer_place=signer_place,
+            auto_secure_www=auto_secure_www,
+        ))
 
     def create_ov_wildcard(
         self,
         domain: str,
         organization_id: str,
-        validity: int = 365,
-        csr: str | None = None,
-        auto_renew: bool = False,
-        custom_fields: dict[str, Any] | None = None,
+        validity_years: int = 1,
+        requestor_name: str = "",
+        requestor_email: str = "",
+        requestor_phone: str = "",
+        requestor_designation: str = "",
+        signer_name: str = "",
+        signer_place: str = "",
+        auto_secure_www: bool = False,
     ) -> SslOrder:
         """Create an OV wildcard certificate order.
 
-        ``domain`` must start with ``*.``. Product code resolved from catalog.
+        ``domain`` must start with ``*.``.
 
         Args:
             domain: Wildcard FQDN (e.g. ``"*.example.com"``).
             organization_id: :attr:`~certinext.accounts.Organization.organization_number`
                 of the pre-vetted organization.
-            validity: Certificate validity in days (default: 365).
-            csr: Optional PEM-encoded CSR.
-            auto_renew: Enable automatic renewal (default: ``False``).
-            custom_fields: Optional dict of product-specific custom field values.
+            validity_years: Certificate validity in years (1, 2, or 3; default: 1).
+            requestor_name: Full name of the certificate requestor.
+            requestor_email: Email address of the requestor.
+            requestor_phone: Phone number in E.164 format.
+            requestor_designation: Job title or designation of the requestor.
+            signer_name: Name of the subscriber agreement signer (defaults to requestor_name).
+            signer_place: City or location of the signer.
+            auto_secure_www: Request automatic www-redirect coverage (default: ``False``).
 
         Returns:
             :class:`SslOrder` for the OV wildcard certificate.
 
         Raises:
-            LookupError: If the OV Wildcard product is not found in the catalog.
             CertiNextAPIError: On a non-2xx API response. Provides ``.status_code`` and ``.body``.
         """
-        code = self._get_product_code("OV", wildcard=True, ucc=False)
-        return self._create(
-            code, "/ov/wildcard",
-            self._single_domain_body(
-                domain, validity, None, csr, auto_renew, custom_fields,
-                organizationId=organization_id,
-            ),
-        )
+        return self._create(self._build_body(
+            "ov-wildcard", domain, validity_years,
+            requestor_name, requestor_email, requestor_phone, requestor_designation,
+            organization_id=organization_id,
+            signer_name=signer_name, signer_place=signer_place,
+            auto_secure_www=auto_secure_www,
+        ))
 
     def create_ov_ucc(
         self,
         domains: list[str],
         organization_id: str,
-        validity: int = 365,
-        csr: str | None = None,
-        auto_renew: bool = False,
-        custom_fields: dict[str, Any] | None = None,
+        validity_years: int = 1,
+        requestor_name: str = "",
+        requestor_email: str = "",
+        requestor_phone: str = "",
+        requestor_designation: str = "",
+        signer_name: str = "",
+        signer_place: str = "",
+        auto_secure_www: bool = False,
     ) -> SslOrder:
         """Create an OV UCC (multi-domain) certificate order.
 
-        Product code resolved from catalog.
+        The first entry in ``domains`` is the primary domain; the remainder
+        become subject alternative names.
 
         Args:
             domains: List of all FQDNs to include.
             organization_id: :attr:`~certinext.accounts.Organization.organization_number`
                 of the pre-vetted organization.
-            validity: Certificate validity in days (default: 365).
-            csr: Optional PEM-encoded CSR.
-            auto_renew: Enable automatic renewal (default: ``False``).
-            custom_fields: Optional dict of product-specific custom field values.
+            validity_years: Certificate validity in years (1, 2, or 3; default: 1).
+            requestor_name: Full name of the certificate requestor.
+            requestor_email: Email address of the requestor.
+            requestor_phone: Phone number in E.164 format.
+            requestor_designation: Job title or designation of the requestor.
+            signer_name: Name of the subscriber agreement signer (defaults to requestor_name).
+            signer_place: City or location of the signer.
+            auto_secure_www: Request automatic www-redirect coverage (default: ``False``).
 
         Returns:
             :class:`SslOrder` for the OV multi-domain certificate.
 
         Raises:
-            LookupError: If the OV UCC product is not found in the catalog.
+            ValueError: If ``domains`` is empty.
             CertiNextAPIError: On a non-2xx API response. Provides ``.status_code`` and ``.body``.
         """
-        code = self._get_product_code("OV", wildcard=False, ucc=True)
-        return self._create(
-            code, "/ov/ucc",
-            self._multi_domain_body(
-                domains, validity, csr, auto_renew, custom_fields,
-                organizationId=organization_id,
-            ),
-        )
+        if not domains:
+            raise ValueError("domains must not be empty")
+        return self._create(self._build_body(
+            "ov-ucc", domains[0], validity_years,
+            requestor_name, requestor_email, requestor_phone, requestor_designation,
+            additional_domains=domains[1:] or None,
+            organization_id=organization_id,
+            signer_name=signer_name, signer_place=signer_place,
+            auto_secure_www=auto_secure_www,
+        ))
 
     def create_ov_wildcard_ucc(
         self,
         domains: list[str],
         organization_id: str,
-        validity: int = 365,
-        csr: str | None = None,
-        auto_renew: bool = False,
-        custom_fields: dict[str, Any] | None = None,
+        validity_years: int = 1,
+        requestor_name: str = "",
+        requestor_email: str = "",
+        requestor_phone: str = "",
+        requestor_designation: str = "",
+        signer_name: str = "",
+        signer_place: str = "",
+        auto_secure_www: bool = False,
     ) -> SslOrder:
         """Create an OV wildcard UCC certificate order.
 
-        Product code resolved from catalog.
+        The first entry in ``domains`` is the primary domain; the remainder
+        become subject alternative names.
 
         Args:
             domains: List of all FQDNs (may include wildcard entries).
             organization_id: :attr:`~certinext.accounts.Organization.organization_number`
                 of the pre-vetted organization.
-            validity: Certificate validity in days (default: 365).
-            csr: Optional PEM-encoded CSR.
-            auto_renew: Enable automatic renewal (default: ``False``).
-            custom_fields: Optional dict of product-specific custom field values.
+            validity_years: Certificate validity in years (1, 2, or 3; default: 1).
+            requestor_name: Full name of the certificate requestor.
+            requestor_email: Email address of the requestor.
+            requestor_phone: Phone number in E.164 format.
+            requestor_designation: Job title or designation of the requestor.
+            signer_name: Name of the subscriber agreement signer (defaults to requestor_name).
+            signer_place: City or location of the signer.
+            auto_secure_www: Request automatic www-redirect coverage (default: ``False``).
 
         Returns:
             :class:`SslOrder` for the OV wildcard UCC certificate.
 
         Raises:
-            LookupError: If the OV Wildcard UCC product is not found in the catalog.
+            ValueError: If ``domains`` is empty.
             CertiNextAPIError: On a non-2xx API response. Provides ``.status_code`` and ``.body``.
         """
-        code = self._get_product_code("OV", wildcard=True, ucc=True)
-        return self._create(
-            code, "/ov/wildcard-ucc",
-            self._multi_domain_body(
-                domains, validity, csr, auto_renew, custom_fields,
-                organizationId=organization_id,
-            ),
-        )
+        if not domains:
+            raise ValueError("domains must not be empty")
+        return self._create(self._build_body(
+            "ov-wildcard-ucc", domains[0], validity_years,
+            requestor_name, requestor_email, requestor_phone, requestor_designation,
+            additional_domains=domains[1:] or None,
+            organization_id=organization_id,
+            signer_name=signer_name, signer_place=signer_place,
+            auto_secure_www=auto_secure_www,
+        ))
 
     def create_ev(
         self,
         domain: str,
         organization_id: str,
-        validity: int = 365,
+        validity_years: int = 1,
         additional_domains: list[str] | None = None,
-        csr: str | None = None,
-        auto_renew: bool = False,
-        custom_fields: dict[str, Any] | None = None,
+        requestor_name: str = "",
+        requestor_email: str = "",
+        requestor_phone: str = "",
+        requestor_designation: str = "",
+        signer_name: str = "",
+        signer_place: str = "",
+        auto_secure_www: bool = False,
     ) -> SslOrder:
         """Create an EV (Extended Validation) single-domain certificate order.
 
         Requires a pre-vetted ``organization_id`` from
         :meth:`certinext.accounts.AccountAccessor.list_organizations`.
-        Product code resolved from catalog.
 
         Args:
             domain: Primary FQDN.
             organization_id: :attr:`~certinext.accounts.Organization.organization_number`
                 of the pre-vetted organization.
-            validity: Certificate validity in days (default: 365).
+            validity_years: Certificate validity in years (1, 2, or 3; default: 1).
             additional_domains: Optional list of additional SAN domains.
-            csr: Optional PEM-encoded CSR.
-            auto_renew: Enable automatic renewal (default: ``False``).
-            custom_fields: Optional dict of product-specific custom field values.
+            requestor_name: Full name of the certificate requestor.
+            requestor_email: Email address of the requestor.
+            requestor_phone: Phone number in E.164 format.
+            requestor_designation: Job title or designation of the requestor.
+            signer_name: Name of the subscriber agreement signer (defaults to requestor_name).
+            signer_place: City or location of the signer.
+            auto_secure_www: Request automatic www-redirect coverage (default: ``False``).
 
         Returns:
             :class:`SslOrder` for the EV certificate.
 
         Raises:
-            LookupError: If the EV SSL product is not found in the catalog.
             CertiNextAPIError: On a non-2xx API response. Provides ``.status_code`` and ``.body``.
         """
-        code = self._get_product_code("EV", wildcard=False, ucc=False)
-        return self._create(
-            code, "/ev",
-            self._single_domain_body(
-                domain, validity, additional_domains, csr, auto_renew, custom_fields,
-                organizationId=organization_id,
-            ),
-        )
+        return self._create(self._build_body(
+            "ev", domain, validity_years,
+            requestor_name, requestor_email, requestor_phone, requestor_designation,
+            additional_domains=additional_domains,
+            organization_id=organization_id,
+            signer_name=signer_name, signer_place=signer_place,
+            auto_secure_www=auto_secure_www,
+        ))
 
     def create_ev_ucc(
         self,
         domains: list[str],
         organization_id: str,
-        validity: int = 365,
-        csr: str | None = None,
-        auto_renew: bool = False,
-        custom_fields: dict[str, Any] | None = None,
+        validity_years: int = 1,
+        requestor_name: str = "",
+        requestor_email: str = "",
+        requestor_phone: str = "",
+        requestor_designation: str = "",
+        signer_name: str = "",
+        signer_place: str = "",
+        auto_secure_www: bool = False,
     ) -> SslOrder:
         """Create an EV UCC (multi-domain) certificate order.
 
-        Product code resolved from catalog.
+        The first entry in ``domains`` is the primary domain; the remainder
+        become subject alternative names.
 
         Args:
             domains: List of all FQDNs to include.
             organization_id: :attr:`~certinext.accounts.Organization.organization_number`
                 of the pre-vetted organization.
-            validity: Certificate validity in days (default: 365).
-            csr: Optional PEM-encoded CSR.
-            auto_renew: Enable automatic renewal (default: ``False``).
-            custom_fields: Optional dict of product-specific custom field values.
+            validity_years: Certificate validity in years (1, 2, or 3; default: 1).
+            requestor_name: Full name of the certificate requestor.
+            requestor_email: Email address of the requestor.
+            requestor_phone: Phone number in E.164 format.
+            requestor_designation: Job title or designation of the requestor.
+            signer_name: Name of the subscriber agreement signer (defaults to requestor_name).
+            signer_place: City or location of the signer.
+            auto_secure_www: Request automatic www-redirect coverage (default: ``False``).
 
         Returns:
             :class:`SslOrder` for the EV multi-domain certificate.
 
         Raises:
-            LookupError: If the EV UCC product is not found in the catalog.
+            ValueError: If ``domains`` is empty.
             CertiNextAPIError: On a non-2xx API response. Provides ``.status_code`` and ``.body``.
         """
-        code = self._get_product_code("EV", wildcard=False, ucc=True)
-        return self._create(
-            code, "/ev/ucc",
-            self._multi_domain_body(
-                domains, validity, csr, auto_renew, custom_fields,
-                organizationId=organization_id,
-            ),
-        )
+        if not domains:
+            raise ValueError("domains must not be empty")
+        return self._create(self._build_body(
+            "ev-ucc", domains[0], validity_years,
+            requestor_name, requestor_email, requestor_phone, requestor_designation,
+            additional_domains=domains[1:] or None,
+            organization_id=organization_id,
+            signer_name=signer_name, signer_place=signer_place,
+            auto_secure_www=auto_secure_www,
+        ))
 
     def get(self, order_id: str) -> SslOrder:
         """Return an existing SSL order by its order ID.

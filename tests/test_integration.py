@@ -334,9 +334,8 @@ class TestSandboxCatalog:
 
     def test_dv_product_present(self, sandbox_catalog: list[ProductCategory]) -> None:
         """The catalog includes at least one DV SSL product."""
-        from certinext.ssl_certificates import _matches_variant
         products = [p for cat in sandbox_catalog for p in cat.products]
-        dv = [p for p in products if p.product_name and _matches_variant(p.product_name, "DV", False, False)]
+        dv = [p for p in products if p.product_name and "DV" in p.product_name.upper()]
         assert len(dv) > 0, "expected at least one DV SSL product in catalog"
 
     def test_get_custom_fields_returns_list(
@@ -410,11 +409,10 @@ class TestSandboxSsl:
     """
 
     def test_ssl_dv_product_resolvable(self, sandbox_session: certinext.CertiNextSession) -> None:
-        """The catalog contains at least one DV SSL product that SslAccessor can resolve."""
-        from certinext.ssl_certificates import _matches_variant
+        """The catalog contains at least one DV SSL product."""
         categories = sandbox_session.catalog.list_products()
         products = [p for cat in categories for p in cat.products]
-        dv = [p for p in products if p.product_name and _matches_variant(p.product_name, "DV", False, False)]
+        dv = [p for p in products if p.product_name and "DV" in p.product_name.upper()]
         assert len(dv) > 0, "no DV SSL product found in catalog"
 
     def test_get_ssl_order_by_order_number(

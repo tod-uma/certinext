@@ -54,9 +54,13 @@ dev = [
     "types-requests>=2.31",
     "types-tabulate>=0.9",
     "keyring",
+    "cryptography>=42.0.0",
 ]
 keyring = [
     "keyring",
+]
+csr = [
+    "cryptography>=42.0.0",
 ]
 
 [tool.setuptools.packages.find]
