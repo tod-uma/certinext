@@ -93,6 +93,20 @@ SslOrderStatus = Literal[
 ReissueMode = Literal["rekey", "update-sans"]
 """Valid reissue modes accepted by :meth:`SslOrder.reissue`."""
 
+RevocationReason = Literal[
+    "unspecified",
+    "keyCompromise",
+    "cACompromise",
+    "affiliationChanged",
+    "superseded",
+    "cessationOfOperation",
+    "privilegeWithdrawn",
+]
+"""Valid ``reason`` values accepted by :meth:`SslOrder.revoke`.
+
+Maps to the RFC 5280 CRL reason code extensions supported by CertiNext.
+"""
+
 
 class DcvChallenge:
     """DCV challenge for a single domain in an SSL order.
@@ -375,6 +389,27 @@ class SslOrder:
         result.extend(self.additional_domains)
         return result
 
+    @property
+    def interim_dv_issued(self) -> bool:
+        """Whether an interim DV certificate was issued for this order.
+
+        ``True`` when the CA issued a short-lived DV certificate while an OV or
+        EV order is pending organization verification. Present only on OV/EV orders
+        and only when the CA offers interim issuance; ``False`` otherwise.
+        """
+        return bool(self._data.get("interimDvIssued", False))
+
+    @property
+    def subscriber_agreement(self) -> dict[str, Any] | None:
+        """The subscriber agreement block returned for this order, or ``None``.
+
+        Returns the raw ``subscriberAgreement`` dict from the API response when
+        present. Contains acceptance status, signer name, and timestamp if the
+        agreement has been accepted.
+        """
+        val = self._data.get("subscriberAgreement")
+        return val if isinstance(val, dict) else None
+
     # --- helpers ---
 
     def as_dict(self) -> dict[str, Any]:
@@ -422,22 +457,40 @@ class SslOrder:
             self._data = result
         return self
 
-    def get_dcv(self) -> list[DcvChallenge]:
-        """Return the DCV challenges for all domains in this order.
+    def get_dcv(
+        self,
+        domain: str | None = None,
+        method: str | None = None,
+    ) -> list[DcvChallenge]:
+        """Return the DCV challenges for domains in this order.
 
         .. note::
             UMS domains are pre-validated in CertiNext; orders will not enter
             ``pending-dcv`` status and this method is not called in normal
             UMS issuance flows. It has not been tested against the UMS account.
 
+        Args:
+            domain: Filter to challenges for a specific domain name only.
+                ``None`` returns challenges for all domains in the order.
+            method: Filter to challenges using a specific DCV method
+                (e.g. ``"DNS-TXT"``, ``"HTTP-URL"``). ``None`` returns all methods.
+
         Returns:
-            List of :class:`DcvChallenge` objects, one per domain requiring
-            validation. Publish each challenge, then call :meth:`verify_dcv`.
+            List of :class:`DcvChallenge` objects, one per domain (or filtered
+            subset). Publish each challenge, then call :meth:`verify_dcv`.
 
         Raises:
             CertiNextAPIError: On a non-2xx API response. Provides ``.status_code`` and ``.body``.
         """
-        result = self._client.get(f"{_SSL_BASE}/{self.order_id}/dcv")
+        params: dict[str, Any] = {}
+        if domain is not None:
+            params["domain"] = domain
+        if method is not None:
+            params["method"] = method
+        result = self._client.get(
+            f"{_SSL_BASE}/{self.order_id}/dcv",
+            params=params or None,
+        )
         raw: list[Any] = []
         if isinstance(result, list):
             raw = result
@@ -452,16 +505,22 @@ class SslOrder:
                         break
         return [DcvChallenge(item) for item in raw]
 
-    def verify_dcv(self) -> dict[str, Any]:
-        """Trigger DCV verification for all domains in this order.
+    def verify_dcv(self, domain: str, method: str) -> dict[str, Any]:
+        """Trigger DCV verification for a specific domain and method.
 
-        Call after publishing all DCV challenges returned by :meth:`get_dcv`.
-        Call :meth:`refresh` and check :attr:`status` to confirm the outcome.
+        Call after publishing the DCV challenge for ``domain`` using ``method``.
+        Repeat for each domain returned by :meth:`get_dcv`, then call
+        :meth:`refresh` and check :attr:`status` to confirm the outcome.
 
         .. note::
             UMS domains are pre-validated in CertiNext; this method is not
             called in normal UMS issuance flows and has not been tested
             against the UMS account.
+
+        Args:
+            domain: The domain name to verify (must match a challenge from
+                :meth:`get_dcv`).
+            method: DCV method to verify (e.g. ``"DNS-TXT"``, ``"HTTP-URL"``).
 
         Returns:
             Raw API response dict.
@@ -469,9 +528,12 @@ class SslOrder:
         Raises:
             CertiNextAPIError: On a non-2xx API response. Provides ``.status_code`` and ``.body``.
         """
-        return self._client.post(f"{_SSL_BASE}/{self.order_id}/dcv/verify")
+        return self._client.post(
+            f"{_SSL_BASE}/{self.order_id}/dcv/verify",
+            json={"domain": domain, "method": method},
+        )
 
-    def submit_csr(self, csr: str) -> dict[str, Any]:
+    def submit_csr(self, csr: str, attested: bool = False) -> dict[str, Any]:
         """Submit a Certificate Signing Request for this order.
 
         Must be called after order creation when the order status is
@@ -480,6 +542,10 @@ class SslOrder:
 
         Args:
             csr: PEM-encoded Certificate Signing Request string.
+            attested: Whether the CSR was generated and certified according to
+                the CA's attestation requirements. Defaults to ``False``;
+                pass ``True`` when the CSR was generated by a hardware security
+                module or other attested source.
 
         Returns:
             Raw API response dict (structure is opaque).
@@ -487,7 +553,10 @@ class SslOrder:
         Raises:
             CertiNextAPIError: On a non-2xx API response. Provides ``.status_code`` and ``.body``.
         """
-        return self._client.put(f"{_SSL_BASE}/{self.order_id}/csr", json={"csr": csr})
+        body: dict[str, Any] = {"csr": csr}
+        if attested:
+            body["attested"] = True
+        return self._client.put(f"{_SSL_BASE}/{self.order_id}/csr", json=body)
 
     def accept_agreement(self, signer_name: str, signer_place: str) -> dict[str, Any]:
         """Accept the subscriber agreement for this order.
@@ -576,12 +645,17 @@ class SslOrder:
         """
         return self._client.post(f"{_SSL_BASE}/{self.order_id}/reject")
 
-    def revoke(self, reason: str | None = None) -> dict[str, Any]:
+    def revoke(
+        self,
+        reason: RevocationReason | None = None,
+        note: str | None = None,
+    ) -> dict[str, Any]:
         """Revoke this issued certificate.
 
         Args:
-            reason: Optional revocation reason string (e.g. ``"keyCompromise"``).
-                If ``None``, the API default reason is used.
+            reason: Revocation reason from :data:`RevocationReason`. If ``None``,
+                the API default (``"unspecified"``) is used.
+            note: Optional free-text note to record with the revocation.
 
         Returns:
             Raw API response dict.
@@ -592,6 +666,8 @@ class SslOrder:
         body: dict[str, Any] = {}
         if reason is not None:
             body["reason"] = reason
+        if note is not None:
+            body["note"] = note
         return self._client.post(f"{_SSL_BASE}/{self.order_id}/revoke", json=body or None)
 
     def reissue(
@@ -599,6 +675,10 @@ class SslOrder:
         mode: ReissueMode,
         csr: str | None = None,
         additional_domains: list[str] | None = None,
+        reason: str | None = None,
+        revoke_previous: bool = False,
+        revoke_reason: RevocationReason | None = None,
+        revoke_all_prior_reissues: bool = False,
     ) -> dict[str, Any]:
         """Reissue this certificate.
 
@@ -609,6 +689,16 @@ class SslOrder:
             csr: PEM-encoded CSR. Required when ``mode="rekey"``.
             additional_domains: List of additional domain names to add as SANs.
                 Required when ``mode="update-sans"``.
+            reason: Optional free-text reason for the reissue (e.g.
+                ``"Key rotation"``).
+            revoke_previous: When ``True``, revoke the currently-issued
+                certificate as part of this reissue. Defaults to ``False``.
+            revoke_reason: Revocation reason from :data:`RevocationReason` to
+                use when revoking the previous certificate. Only meaningful when
+                ``revoke_previous=True``.
+            revoke_all_prior_reissues: When ``True``, revoke all previously
+                issued certificates in the reissue chain, not just the immediately
+                preceding one. Defaults to ``False``.
 
         Returns:
             Raw API response dict.
@@ -626,6 +716,14 @@ class SslOrder:
             body["csr"] = csr
         if additional_domains is not None:
             body["additionalDomains"] = additional_domains
+        if reason is not None:
+            body["reason"] = reason
+        if revoke_previous:
+            body["revokePrevious"] = True
+        if revoke_reason is not None:
+            body["revokeReason"] = revoke_reason
+        if revoke_all_prior_reissues:
+            body["revokeAllPriorReissues"] = True
         return self._client.post(f"{_SSL_BASE}/{self.order_id}/reissue", json=body)
 
 

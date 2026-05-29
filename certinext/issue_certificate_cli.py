@@ -35,7 +35,7 @@ from certinext._cli import (
 )
 from certinext.exceptions import CertiNextAPIError
 from certinext.session import CertiNextSession
-from certinext.ssl_certificates import SslOrder
+from certinext.ssl_certificates import DcvChallenge, SslOrder
 
 log = logging.getLogger(__name__)
 
@@ -335,6 +335,7 @@ def _advance_order(
                 exc.status_code,
             )
     elif order.status == "pending-dcv":
+        challenges: list[DcvChallenge] = []
         try:
             challenges = order.get_dcv()
             if challenges and (_dcv_logged is None or order.order_id not in _dcv_logged):
@@ -350,14 +351,16 @@ def _advance_order(
                 "get_dcv returned HTTP %s for order %s",
                 exc.status_code, order.order_id,
             )
-        try:
-            order.verify_dcv()
-            order.refresh()
-        except CertiNextAPIError as exc:
-            log.debug(
-                "verify_dcv returned HTTP %s for order %s — will retry on next poll",
-                exc.status_code, order.order_id,
-            )
+        for c in challenges:
+            if c.domain and c.method:
+                try:
+                    order.verify_dcv(c.domain, c.method)
+                except CertiNextAPIError as exc:
+                    log.debug(
+                        "verify_dcv returned HTTP %s for %s on order %s — will retry on next poll",
+                        exc.status_code, c.domain, order.order_id,
+                    )
+        order.refresh()
     elif order.status == "pending-csr":
         if not csr.strip():
             log.error(
