@@ -19,6 +19,7 @@ Python library and CLI scripts for managing your [CertiNext](https://us.certinex
   - [certinext-list-certificates](#certinext-list-certificates)
   - [certinext-pending-dcv](#certinext-pending-dcv)
   - [certinext-domain-cert-count](#certinext-domain-cert-count)
+  - [certinext-issue-cert](#certinext-issue-cert)
 - [Python library](#python-library)
 - [Examples](#examples)
 - [Project structure](#project-structure)
@@ -43,6 +44,13 @@ Or with `uv`:
 uv add certinext --index https://gitlab.its.maine.edu/api/v4/groups/2236/-/packages/pypi/simple
 ```
 
+To use `certinext-issue-cert` (CSR parsing), also install the `csr` optional extra:
+
+```bash
+pip install "certinext[csr]" \
+  --extra-index-url https://gitlab.its.maine.edu/api/v4/groups/2236/-/packages/pypi/simple
+```
+
 ### Development install
 
 Clone the repository, then install in editable mode:
@@ -56,6 +64,12 @@ uv pip install -e .
 ```
 
 This installs the `certinext` package and its dependencies (`requests`, `tabulate`, `python-dotenv`).
+
+To use `certinext-issue-cert` (CSR parsing), also install the `csr` optional extra:
+
+```bash
+uv pip install -e .[csr]
+```
 
 ## Credentials
 
@@ -441,6 +455,108 @@ certinext-domain-cert-count --condense --status issued
 certinext-domain-cert-count --json | jq '.[] | select(.certificates != "0")'
 ```
 
+### certinext-issue-cert
+
+`certinext-issue-cert` submits a CSR to CertiNext and downloads the issued
+certificate.  It reads the domain and SANs directly from the CSR, creates a
+certificate order, handles the full lifecycle (agreement, DCV if needed, CSR
+submission), and writes the signed PEM to stdout or a file once the CA has
+issued it.
+
+Requires the `csr` optional extra:
+
+```bash
+pip install "certinext[csr]"
+```
+
+#### Arguments
+
+```
+# Connection
+--profile NAME              Credential profile for keyring lookup (env: CERTINEXT_PROFILE)
+--sandbox                   Use the sandbox API and sandbox keyring profile
+--account-number ACCT       CertiNext account number (env: CERTINEXT_CLIENT_ID)
+--client-secret SECRET      OAuth2 client secret (env: CERTINEXT_CLIENT_SECRET)
+
+# Certificate
+csr_file                    PEM-encoded CSR file (positional; omit to read from stdin)
+--csr FILE                  Same as positional argument
+--type dv|ov|ev             Validation type (default: dv)
+--validity YEARS            Validity in years: 1, 2, or 3 (default: 1)
+--org-id ID                 Organization ID — required for OV and EV certificates
+--domain FQDN               Override the primary domain (default: extracted from CSR CN)
+--san FQDN                  Override SANs (default: extracted from CSR; repeatable)
+--auto-secure-www           Request automatic www-redirect coverage (API default: true)
+
+# Requestor (can also be set via environment variables)
+--requestor-name NAME       Full name of the requestor (env: CERTINEXT_REQUESTOR_NAME)
+--requestor-email EMAIL     Email address of the requestor (env: CERTINEXT_REQUESTOR_EMAIL)
+--requestor-phone PHONE     Phone in E.164 format, e.g. +12075551234 (env: CERTINEXT_REQUESTOR_PHONE)
+--requestor-designation TTL Job title or designation (env: CERTINEXT_REQUESTOR_DESIGNATION)
+--signer-place PLACE        City/location for the subscriber agreement (env: CERTINEXT_SIGNER_PLACE)
+
+# Output / control
+-o FILE, --output FILE      Write the certificate PEM to FILE (default: stdout)
+--wait SECONDS              Seconds to wait for issuance (default: 300; 0 = submit and exit)
+--order-id ID               Resume polling an existing order instead of creating a new one
+-v, --verbose               Increase verbosity (-vvv for debug logging)
+```
+
+#### Examples
+
+```bash
+# DV certificate — credentials and requestor info from keychain / env vars
+certinext-issue-cert example.com.csr
+
+# Read CSR from stdin
+certinext-issue-cert < example.com.csr
+
+# Save certificate to a file
+certinext-issue-cert example.com.csr --output example.com.pem
+
+# OV certificate with explicit org
+certinext-issue-cert example.com.csr --type ov --org-id 8921215
+
+# Two-year DV certificate against the sandbox
+certinext-issue-cert example.com.csr --validity 2 --sandbox
+
+# Submit and exit immediately without waiting for issuance
+certinext-issue-cert example.com.csr --wait 0
+
+# Resume polling an order created in a previous run
+certinext-issue-cert --order-id ORDER-ID --wait 600
+
+# Resume and supply the CSR (in case the order is still in pending-csr)
+certinext-issue-cert --order-id ORDER-ID --csr example.com.csr
+```
+
+Set requestor environment variables once to avoid repeating them on every call:
+
+```bash
+export CERTINEXT_REQUESTOR_NAME="Jane Doe"
+export CERTINEXT_REQUESTOR_EMAIL="jane.doe@example.com"
+export CERTINEXT_REQUESTOR_PHONE="+12075551234"
+export CERTINEXT_REQUESTOR_DESIGNATION="Systems Administrator"
+export CERTINEXT_SIGNER_PLACE="Portland, ME"
+
+certinext-issue-cert example.com.csr --output example.com.pem
+```
+
+#### Certificate lifecycle
+
+The tool handles the full CertiNext order lifecycle automatically:
+
+1. **`pending-approval`** — waits for CA approval (no action needed)
+2. **`pending-agreement`** — accepts the subscriber agreement on your behalf
+3. **`pending-dcv`** — logs challenge details and triggers verification; in
+   environments where domains are pre-validated (e.g. University of Maine
+   System), DCV auto-resolves without manual intervention
+4. **`pending-csr`** — submits the provided CSR
+5. **`issued`** — downloads and writes the PEM certificate chain
+
+If the order does not reach `issued` within `--wait` seconds, the tool exits
+with code 1 and prints the order ID so you can resume with `--order-id`.
+
 ---
 
 ## Python library
@@ -756,19 +872,19 @@ automatically from the catalog — you never hardcode a product code.
 
 ```python
 # DV single-domain
-order = sess.ssl.create_dv("example.com", validity=365)
+order = sess.ssl.create_dv("example.com", validity_years=1)
 
 # DV wildcard
-order = sess.ssl.create_dv_wildcard("example.com", validity=365)
+order = sess.ssl.create_dv_wildcard("example.com", validity_years=1)
 
 # OV single-domain (requires organization_id from sess.accounts.list_organizations())
-order = sess.ssl.create_ov("example.com", organization_id="8921215", validity=365)
+order = sess.ssl.create_ov("example.com", organization_id="8921215", validity_years=1)
 
 # EV single-domain
-order = sess.ssl.create_ev("example.com", organization_id="8921215", validity=365)
+order = sess.ssl.create_ev("example.com", organization_id="8921215", validity_years=1)
 
 # UCC (multi-domain) — pass a list for DV, OV, or EV
-order = sess.ssl.create_dv_ucc(["example.com", "www.example.com"], validity=365)
+order = sess.ssl.create_dv_ucc(["example.com", "www.example.com"], validity_years=1)
 ```
 
 #### DV lifecycle
@@ -809,7 +925,7 @@ import certinext, time
 
 sess = certinext.session(client_id="YOUR_ACCOUNT", client_secret="YOUR_SECRET")
 
-order = sess.ssl.create_dv("example.com", validity=365)
+order = sess.ssl.create_dv("example.com", validity_years=1)
 print(f"Order {order.order_id} created, status={order.status}")
 
 for ch in order.get_dcv():
@@ -902,17 +1018,19 @@ Run the script repeatedly — each run advances every pending domain as far as i
 ```
 certinext/
     __init__.py                   # session() factory, top-level exports, URL constants
-    _cli.py                       # shared CLI utilities (add_connection_args, build_session)
+    _cli.py                       # shared CLI utilities (add_connection_args, add_requestor_args, fatal_api_error, build_session)
     _keyring.py                   # shared keyring helpers (keyring_service, keyring_get)
     accounts.py                   # AccountInfo, Group, Organization, AccountAccessor
     accounts_cli.py               # certinext-accounts CLI entry point
     auth.py                       # OAuth 2.0 client credentials token management
     catalog.py                    # Product, ProductCategory, CustomField, CatalogAccessor
     client.py                     # HTTP session wrapper (get/post/put/delete/get_bytes)
+    csr.py                        # parse_csr() — extract CN and SANs from a PEM CSR (requires certinext[csr])
     domain_cert_count_cli.py      # certinext-domain-cert-count CLI entry point
     domains.py                    # Domain class and DomainAccessor
     domains_cli.py                # certinext-domains CLI entry point
     exceptions.py                 # CertiNextAPIError
+    issue_certificate_cli.py      # certinext-issue-cert CLI entry point
     ledger.py                     # LedgerRecord and LedgerAccessor
     ledger_cli.py                 # certinext-ledger CLI entry point
     list_certificates_cli.py      # certinext-list-certificates CLI entry point
