@@ -72,8 +72,6 @@ from certinext.ssl_certificates import DcvChallenge, OrderWorkflow, SslOrder
 log = logging.getLogger(__name__)
 
 
-
-
 def build_parser() -> argparse.ArgumentParser:
     """Return the argument parser for certinext-issue-cert.
 
