@@ -65,14 +65,17 @@ with the initial order or separately via ``PUT /ssl-certificates/{orderId}/csr``
 """
 
 import logging
+import time
+from collections.abc import Callable
 from typing import Any, Literal
 
 from .client import CertiNextClient
-from .exceptions import CertiNextAPIError  # noqa: F401 — referenced in Raises docstrings
+from .exceptions import CertiNextAPIError, CertiNextTimeoutError  # noqa: F401 — referenced in Raises docstrings
 
 log = logging.getLogger(__name__)
 
 _SSL_BASE = "/api/certinext/v2/ssl-certificates"
+_WORKFLOW_TERMINAL = frozenset({"issued", "revoked", "cancelled", "rejected", "expired"})
 
 SslOrderStatus = Literal[
     "pending-dcv",
@@ -1764,3 +1767,405 @@ class SslAccessor:
         if not isinstance(result, dict):
             raise ValueError(f"Unexpected response type for order {order_id!r}")
         return SslOrder(self._client, result)
+
+
+class OrderWorkflow:
+    """Drives a CertiNext SSL certificate order through to issuance.
+
+    Encapsulates the full certificate lifecycle state machine — agreement
+    acceptance, CSR submission, DCV challenge handling, polling, and
+    certificate download — so scripts don't need to reimplement it.
+
+    The simplest usage::
+
+        order = sess.ssl.create_ov("example.com", org_id, ...)
+        pem = OrderWorkflow(order, signer_name="Jane Doe", signer_place="Portland, ME").run(csr=csr_pem)
+
+    Or, when you have a CSR, use :meth:`from_csr` to fill defaults automatically::
+
+        pem = OrderWorkflow.from_csr(order, csr_pem, signer_name="Jane Doe").run()
+
+    For more control, drive the workflow step by step::
+
+        wf = (
+            OrderWorkflow.from_csr(order, csr_pem, signer_name="Jane Doe")
+            .on("status_change", lambda old, new: print(f"{old} → {new}"))
+            .on("dcv_available", lambda cs: publish_dns(cs))
+            .on("issued", lambda o: print(f"Issued: {o.order_id}"))
+        )
+        wf.submit_csr(csr_pem, force=True)
+        if not wf.poll(wait=600):
+            raise TimeoutError("timed out")
+        pem = wf.download()
+
+    **Events**
+
+    Register handlers with :meth:`on`. All handlers receive positional arguments:
+
+    - ``"status_change"`` — ``(old_status: str | None, new_status: str | None)``
+    - ``"dcv_available"`` — ``(challenges: list[DcvChallenge])``
+    - ``"poll"`` — ``(order: SslOrder)`` — fired each tick while waiting
+    - ``"issued"`` — ``(order: SslOrder)``
+    """
+
+    def __init__(
+        self,
+        order: SslOrder,
+        *,
+        signer_name: str = "",
+        signer_place: str = "",
+        auto_verify_dcv: bool = True,
+    ) -> None:
+        """
+        Args:
+            order: The :class:`SslOrder` to drive.
+            signer_name: Full name of the person accepting the subscriber
+                agreement. Required when the order enters ``pending-agreement``.
+            signer_place: City and state of the signer (e.g. ``"Portland, ME"``).
+                Required when the order enters ``pending-agreement``. Can be
+                derived from the CSR via :meth:`from_csr`.
+            auto_verify_dcv: When ``True`` (default), :meth:`advance` calls
+                :meth:`~SslOrder.verify_dcv` automatically for each challenge
+                when the order is in ``pending-dcv``. Set ``False`` for
+                environments where you must publish DNS records manually before
+                triggering verification — in that case call :meth:`verify_dcv`
+                yourself after publishing, then resume :meth:`poll`.
+        """
+        self._order = order
+        self._signer_name = signer_name
+        self._signer_place = signer_place
+        self._auto_verify_dcv = auto_verify_dcv
+        self._handlers: dict[str, list[Callable[..., None]]] = {}
+
+    @classmethod
+    def from_csr(
+        cls,
+        order: SslOrder,
+        csr_pem: str,
+        *,
+        signer_name: str = "",
+        signer_place: str = "",
+        auto_verify_dcv: bool = True,
+    ) -> "OrderWorkflow":
+        """Create an :class:`OrderWorkflow`, filling defaults from the CSR subject.
+
+        Parses ``csr_pem`` with :func:`~certinext.csr.parse_csr` and uses
+        :attr:`~certinext.csr.CsrInfo.signer_place` as the default for
+        ``signer_place`` when not explicitly provided.
+
+        Falls back to an empty string if the ``cryptography`` package is not
+        installed or the CSR cannot be parsed — no exception is raised.
+
+        Args:
+            order: The :class:`SslOrder` to drive.
+            csr_pem: PEM-encoded CSR to parse for subject fields.
+            signer_name: Signer name; not inferred from the CSR.
+            signer_place: Signer location. Defaults to ``"<L>, <ST>"`` from the
+                CSR subject when not provided.
+            auto_verify_dcv: Passed through to :meth:`__init__`.
+
+        Returns:
+            A configured :class:`OrderWorkflow`.
+        """
+        if not signer_place:
+            try:
+                from .csr import parse_csr
+                info = parse_csr(csr_pem)
+                signer_place = info.signer_place or ""
+            except (ImportError, ValueError):
+                pass
+        return cls(order, signer_name=signer_name, signer_place=signer_place, auto_verify_dcv=auto_verify_dcv)
+
+    # --- Event registration ---
+
+    def on(self, event: str, handler: Callable[..., None]) -> "OrderWorkflow":
+        """Register an event handler. Returns ``self`` for method chaining.
+
+        Args:
+            event: One of ``"status_change"``, ``"dcv_available"``,
+                ``"poll"``, or ``"issued"``.
+            handler: Callable invoked when the event fires. Arguments depend
+                on the event — see class docstring for signatures.
+
+        Returns:
+            ``self``, so calls can be chained: ``wf.on(...).on(...)``.
+        """
+        self._handlers.setdefault(event, []).append(handler)
+        return self
+
+    def _emit(self, event: str, *args: Any) -> None:
+        """Invoke all handlers registered for *event*."""
+        for handler in self._handlers.get(event, []):
+            handler(*args)
+
+    # --- Properties ---
+
+    @property
+    def order(self) -> SslOrder:
+        """The underlying :class:`SslOrder`."""
+        return self._order
+
+    @property
+    def status(self) -> str | None:
+        """Current order status (passthrough to :attr:`SslOrder.status`)."""
+        return self._order.status
+
+    @property
+    def is_terminal(self) -> bool:
+        """``True`` when the order is in any terminal status.
+
+        Terminal statuses are ``issued``, ``revoked``, ``cancelled``,
+        ``rejected``, and ``expired``.
+        """
+        return self._order.status in _WORKFLOW_TERMINAL
+
+    @property
+    def is_complete(self) -> bool:
+        """``True`` when the order has been issued successfully."""
+        return self._order.status == "issued"
+
+    # --- Step-by-step API ---
+
+    def submit_csr(self, csr: str, *, force: bool = False) -> bool:
+        """Submit the CSR to the order (best-effort).
+
+        Skips silently when the order is already in a terminal status
+        (unless ``force=True``) or when ``csr`` is empty. A 422 response is
+        treated as "not needed" (the CSR was already submitted or not required
+        at this stage) rather than an error.
+
+        Args:
+            csr: PEM-encoded CSR string.
+            force: When ``True``, attempt submission even if the order is not
+                in ``pending-csr`` status. Useful immediately after order
+                creation when the CA may have already advanced the order.
+
+        Returns:
+            ``True`` if the CSR was accepted, ``False`` if skipped or not needed.
+
+        Raises:
+            CertiNextAPIError: On any non-422 API error during submission.
+        """
+        if not csr.strip():
+            return False
+        if not force and self.is_terminal:
+            return False
+        try:
+            self._order.submit_csr(csr)
+            self._order.refresh()
+            return True
+        except CertiNextAPIError as exc:
+            if exc.status_code == 422:
+                return False
+            raise
+
+    def advance(self, csr: str = "") -> str:
+        """Perform one state-machine step based on the current order status.
+
+        Refreshes the order first, fires ``"status_change"`` if the status
+        changed since the last refresh, then acts on the current state:
+
+        - ``pending-agreement``: accepts the subscriber agreement (errors are
+          logged and swallowed — the CA may advance the order on its own).
+        - ``pending-csr``: submits ``csr``; raises :exc:`ValueError` if no CSR
+          was provided.
+        - ``pending-dcv``: fires ``"dcv_available"``; calls
+          :meth:`~SslOrder.verify_dcv` for each challenge when
+          ``auto_verify_dcv`` is ``True``.
+        - Terminal states: fires ``"issued"`` if issued.
+        - All other states (``pending-approval``, etc.): fires ``"poll"``
+          and returns ``"waiting"``.
+
+        Args:
+            csr: PEM-encoded CSR. Required when the order reaches
+                ``pending-csr``.
+
+        Returns:
+            One of ``"accepted-agreement"``, ``"submitted-csr"``,
+            ``"triggered-dcv"``, ``"dcv-pending"``, ``"waiting"``,
+            or ``"complete"``.
+
+        Raises:
+            CertiNextAPIError: On an API error during any state action.
+            ValueError: If the order is in ``pending-csr`` and no CSR was provided.
+        """
+        prev = self._order.status
+        self._order.refresh()
+        current = self._order.status
+
+        if current != prev:
+            self._emit("status_change", prev, current)
+
+        if current in _WORKFLOW_TERMINAL:
+            if current == "issued":
+                self._emit("issued", self._order)
+            return "complete"
+
+        if current == "pending-agreement":
+            try:
+                self._order.accept_agreement(self._signer_name, self._signer_place)
+                self._order.refresh()
+                if self._order.status != current:
+                    self._emit("status_change", current, self._order.status)
+            except CertiNextAPIError as exc:
+                log.debug(
+                    "accept_agreement returned HTTP %s for order %s — "
+                    "order may advance on its own",
+                    exc.status_code, self._order.order_id,
+                )
+            return "accepted-agreement"
+
+        if current == "pending-csr":
+            if not csr.strip():
+                raise ValueError(
+                    f"Order {self._order.order_id!r} is in pending-csr "
+                    "but no CSR was provided to advance()"
+                )
+            self._order.submit_csr(csr)
+            self._order.refresh()
+            if self._order.status != current:
+                self._emit("status_change", current, self._order.status)
+            return "submitted-csr"
+
+        if current == "pending-dcv":
+            challenges: list[DcvChallenge] = []
+            try:
+                challenges = self._order.get_dcv()
+            except CertiNextAPIError as exc:
+                log.debug(
+                    "get_dcv returned HTTP %s for order %s",
+                    exc.status_code, self._order.order_id,
+                )
+            if challenges:
+                self._emit("dcv_available", challenges)
+            if self._auto_verify_dcv:
+                for c in challenges:
+                    if c.domain and c.method:
+                        try:
+                            self._order.verify_dcv(c.domain, c.method)
+                        except CertiNextAPIError as exc:
+                            log.debug(
+                                "verify_dcv returned HTTP %s for %s on order %s",
+                                exc.status_code, c.domain, self._order.order_id,
+                            )
+                self._order.refresh()
+                if self._order.status != current:
+                    self._emit("status_change", current, self._order.status)
+                return "triggered-dcv"
+            return "dcv-pending"
+
+        self._emit("poll", self._order)
+        return "waiting"
+
+    def poll(self, wait: int = 300, interval: int = 5) -> bool:
+        """Poll the order by calling :meth:`advance` repeatedly until terminal.
+
+        Calls :meth:`advance` immediately on entry (no initial sleep), then
+        sleeps ``interval`` seconds between subsequent calls. Returns as soon
+        as the order reaches a terminal status or the deadline passes.
+
+        Args:
+            wait: Maximum seconds to wait before returning ``False``.
+            interval: Seconds between :meth:`advance` calls.
+
+        Returns:
+            ``True`` if the order reached ``issued``, ``False`` if the
+            deadline was reached before a terminal status.
+
+        Raises:
+            CertiNextAPIError: On an unrecoverable API error during polling.
+        """
+        deadline = time.monotonic() + wait
+        while not self.is_terminal:
+            self.advance()
+            if self.is_terminal:
+                break
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return False
+            time.sleep(min(interval, remaining))
+        return self.is_complete
+
+    def verify_dcv(self) -> None:
+        """Manually trigger DCV verification for all pending challenges.
+
+        Fetches the current DCV challenges and calls
+        :meth:`~SslOrder.verify_dcv` for each. Use this when
+        ``auto_verify_dcv=False`` — publish your DNS records first, then
+        call this method, then resume :meth:`poll`.
+
+        Raises:
+            CertiNextAPIError: On an API error during verification.
+        """
+        challenges: list[DcvChallenge] = []
+        try:
+            challenges = self._order.get_dcv()
+        except CertiNextAPIError:
+            pass
+        for c in challenges:
+            if c.domain and c.method:
+                self._order.verify_dcv(c.domain, c.method)
+        self._order.refresh()
+
+    def download(self, *, retries: int = 5, retry_delay: int = 5) -> str:
+        """Download the issued certificate as a PEM string.
+
+        Retries on HTTP 422 (certificate file not yet ready after issuance)
+        up to ``retries`` times, waiting ``retry_delay`` seconds between
+        attempts.
+
+        Args:
+            retries: Maximum number of download attempts (default 5).
+            retry_delay: Seconds between retries (default 5).
+
+        Returns:
+            PEM-encoded certificate string.
+
+        Raises:
+            CertiNextAPIError: If all attempts fail.
+        """
+        for attempt in range(1, retries + 1):
+            try:
+                return self._order.download_certificate_pem()
+            except CertiNextAPIError as exc:
+                if exc.status_code == 422 and attempt < retries:
+                    log.debug(
+                        "Certificate not ready yet (HTTP 422), retrying in %ds "
+                        "(attempt %d/%d)",
+                        retry_delay, attempt, retries,
+                    )
+                    time.sleep(retry_delay)
+                else:
+                    raise
+        raise AssertionError("unreachable")  # pragma: no cover
+
+    # --- High-level API ---
+
+    def run(self, csr: str = "", *, wait: int = 300) -> str:
+        """Run the complete workflow and return the issued PEM certificate.
+
+        Calls :meth:`submit_csr` (``force=True``) to attempt an upfront CSR
+        submission, then :meth:`poll` to drive the order to issuance, then
+        :meth:`download` to retrieve the certificate.
+
+        Args:
+            csr: PEM-encoded CSR. Required unless the CSR was already
+                submitted at order creation time.
+            wait: Maximum seconds to wait for issuance.
+
+        Returns:
+            PEM-encoded certificate string.
+
+        Raises:
+            CertiNextTimeoutError: If the order does not reach ``issued``
+                within ``wait`` seconds. :attr:`CertiNextTimeoutError.order_id`
+                can be used to resume with
+                :meth:`~certinext.ssl_certificates.SslAccessor.get`.
+            CertiNextAPIError: On an unrecoverable API error.
+            ValueError: If the order reaches ``pending-csr`` and no CSR
+                was provided.
+        """
+        self.submit_csr(csr, force=True)
+        if not self.poll(wait=wait):
+            raise CertiNextTimeoutError(self._order.order_id, wait)
+        return self.download()

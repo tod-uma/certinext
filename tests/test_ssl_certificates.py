@@ -14,14 +14,16 @@
 
 """Tests for certinext.ssl_certificates: DcvChallenge, CertificateDownload, SslOrder, SslAccessor."""
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from certinext.client import CertiNextClient
+from certinext.exceptions import CertiNextAPIError, CertiNextTimeoutError
 from certinext.ssl_certificates import (
     CertificateDownload,
     DcvChallenge,
+    OrderWorkflow,
     SslAccessor,
     SslOrder,
 )
@@ -756,3 +758,316 @@ class TestSslAccessorGet:
         accessor = SslAccessor(client)
         with pytest.raises(ValueError, match="Unexpected response type"):
             accessor.get("ORDER-001")
+
+
+# ---------------------------------------------------------------------------
+# OrderWorkflow
+# ---------------------------------------------------------------------------
+
+def _make_workflow(status: str = "pending-approval") -> tuple[OrderWorkflow, SslOrder, MagicMock]:
+    """Return an (OrderWorkflow, SslOrder, mock_session) triple."""
+    client, mock_session = _make_client()
+    order = SslOrder(client, {**_ORDER_DATA, "status": status})
+    wf = OrderWorkflow(order, signer_name="Jane Doe", signer_place="Portland, ME")
+    return wf, order, mock_session
+
+
+def _refresh_response(status: str) -> MagicMock:
+    """Mock GET response that returns an order with the given status."""
+    return _ok_response({**_ORDER_DATA, "status": status})
+
+
+class TestOrderWorkflowProperties:
+    """OrderWorkflow exposes order state through properties."""
+
+    def test_status_passthrough(self):
+        """status returns the underlying order's status."""
+        wf, _, _ = _make_workflow("pending-approval")
+        assert wf.status == "pending-approval"
+
+    def test_is_terminal_false_for_pending(self):
+        """is_terminal is False for non-terminal statuses."""
+        wf, _, _ = _make_workflow("pending-approval")
+        assert not wf.is_terminal
+
+    def test_is_terminal_true_for_issued(self):
+        """is_terminal is True for 'issued'."""
+        wf, _, _ = _make_workflow("issued")
+        assert wf.is_terminal
+
+    def test_is_terminal_true_for_cancelled(self):
+        """is_terminal is True for 'cancelled'."""
+        wf, _, _ = _make_workflow("cancelled")
+        assert wf.is_terminal
+
+    def test_is_complete_true_only_for_issued(self):
+        """is_complete is True only when status is 'issued'."""
+        wf_issued, _, _ = _make_workflow("issued")
+        wf_cancelled, _, _ = _make_workflow("cancelled")
+        assert wf_issued.is_complete
+        assert not wf_cancelled.is_complete
+
+    def test_order_property_returns_ssl_order(self):
+        """order property returns the underlying SslOrder."""
+        wf, order, _ = _make_workflow()
+        assert wf.order is order
+
+
+class TestOrderWorkflowOn:
+    """OrderWorkflow.on() registers handlers and returns self for chaining."""
+
+    def test_on_returns_self(self):
+        """on() returns self for method chaining."""
+        wf, _, _ = _make_workflow()
+        result = wf.on("status_change", lambda *a: None)
+        assert result is wf
+
+    def test_multiple_handlers_for_same_event(self):
+        """Multiple handlers for the same event are all called."""
+        wf, _, _ = _make_workflow()
+        calls = []
+        wf.on("poll", lambda o: calls.append("first"))
+        wf.on("poll", lambda o: calls.append("second"))
+        wf._emit("poll", wf.order)
+        assert calls == ["first", "second"]
+
+
+class TestOrderWorkflowSubmitCsr:
+    """OrderWorkflow.submit_csr() attempts CSR submission."""
+
+    def test_returns_false_for_empty_csr(self):
+        """submit_csr returns False without calling the API when csr is empty."""
+        wf, _, mock_session = _make_workflow("pending-csr")
+        result = wf.submit_csr("")
+        assert result is False
+        mock_session.put.assert_not_called()
+
+    def test_returns_false_on_422(self):
+        """submit_csr returns False (not needed) on a 422 response."""
+        wf, _, mock_session = _make_workflow("pending-approval")
+        resp_422 = MagicMock()
+        resp_422.status_code = 422
+        resp_422.raise_for_status.side_effect = Exception("422")
+        resp_422.json.return_value = {}
+        resp_422.content = b"{}"
+
+        with patch.object(wf.order, "submit_csr", side_effect=CertiNextAPIError(422, {})):
+            result = wf.submit_csr("-----BEGIN CERTIFICATE REQUEST-----\n...\n-----END CERTIFICATE REQUEST-----")
+        assert result is False
+
+    def test_propagates_non_422_errors(self):
+        """submit_csr re-raises errors other than 422."""
+        wf, _, _ = _make_workflow()
+        with patch.object(wf.order, "submit_csr", side_effect=CertiNextAPIError(500, {"detail": "server error"})):
+            with pytest.raises(CertiNextAPIError):
+                wf.submit_csr("-----BEGIN CERTIFICATE REQUEST-----\n...\n-----END CERTIFICATE REQUEST-----")
+
+    def test_returns_false_for_terminal_without_force(self):
+        """submit_csr skips silently when order is terminal and force=False."""
+        wf, _, mock_session = _make_workflow("issued")
+        result = wf.submit_csr("some-csr")
+        assert result is False
+
+
+class TestOrderWorkflowAdvance:
+    """OrderWorkflow.advance() drives the state machine one step."""
+
+    def test_returns_complete_for_issued(self):
+        """advance() returns 'complete' when order is already issued."""
+        wf, _, mock_session = _make_workflow("issued")
+        mock_session.get.return_value = _refresh_response("issued")
+        result = wf.advance()
+        assert result == "complete"
+
+    def test_returns_complete_for_cancelled(self):
+        """advance() returns 'complete' for any terminal status."""
+        wf, _, mock_session = _make_workflow("cancelled")
+        mock_session.get.return_value = _refresh_response("cancelled")
+        result = wf.advance()
+        assert result == "complete"
+
+    def test_returns_waiting_for_pending_approval(self):
+        """advance() returns 'waiting' when status is pending-approval."""
+        wf, _, mock_session = _make_workflow("pending-approval")
+        mock_session.get.return_value = _refresh_response("pending-approval")
+        result = wf.advance()
+        assert result == "waiting"
+
+    def test_accepts_agreement_when_pending_agreement(self):
+        """advance() calls accept_agreement when status is pending-agreement."""
+        wf, _, mock_session = _make_workflow("pending-agreement")
+        mock_session.get.return_value = _refresh_response("pending-agreement")
+        mock_session.post.return_value = _ok_response({})
+        result = wf.advance()
+        assert result == "accepted-agreement"
+        post_url = mock_session.post.call_args[0][0]
+        assert "agreement" in post_url
+
+    def test_submits_csr_when_pending_csr(self):
+        """advance() submits the CSR when status is pending-csr."""
+        wf, _, mock_session = _make_workflow("pending-csr")
+        mock_session.get.return_value = _refresh_response("pending-csr")
+        mock_session.put.return_value = _ok_response({})
+        result = wf.advance(csr="-----BEGIN CERTIFICATE REQUEST-----\n...\n-----END CERTIFICATE REQUEST-----")
+        assert result == "submitted-csr"
+
+    def test_raises_when_pending_csr_without_csr(self):
+        """advance() raises ValueError when pending-csr and no CSR provided."""
+        wf, _, mock_session = _make_workflow("pending-csr")
+        mock_session.get.return_value = _refresh_response("pending-csr")
+        with pytest.raises(ValueError, match="pending-csr"):
+            wf.advance()
+
+    def test_fires_status_change_event(self):
+        """advance() fires 'status_change' when the status changes."""
+        wf, _, mock_session = _make_workflow("pending-approval")
+        mock_session.get.return_value = _refresh_response("issued")
+        events: list[tuple[str | None, str | None]] = []
+        wf.on("status_change", lambda old, new: events.append((old, new)))
+        wf.advance()
+        assert ("pending-approval", "issued") in events
+
+    def test_fires_issued_event_when_issued(self):
+        """advance() fires 'issued' when the order reaches issued status."""
+        wf, _, mock_session = _make_workflow("pending-approval")
+        mock_session.get.return_value = _refresh_response("issued")
+        fired: list[SslOrder] = []
+        wf.on("issued", lambda o: fired.append(o))
+        wf.advance()
+        assert len(fired) == 1
+
+    def test_fires_poll_event_while_waiting(self):
+        """advance() fires 'poll' when in a non-actionable pending state."""
+        wf, _, mock_session = _make_workflow("pending-approval")
+        mock_session.get.return_value = _refresh_response("pending-approval")
+        polls: list[object] = []
+        wf.on("poll", lambda o: polls.append(o))
+        wf.advance()
+        assert len(polls) == 1
+
+    def test_fires_dcv_available_when_pending_dcv(self):
+        """advance() fires 'dcv_available' with challenge list when pending-dcv."""
+        wf, _, mock_session = _make_workflow("pending-dcv")
+        challenge_data = {"domain": "example.com", "dcvMethod": "DNS-TXT",
+                          "dnsHost": "_certinext.example.com", "txtToken": "abc123"}
+        mock_session.get.side_effect = [
+            _refresh_response("pending-dcv"),   # refresh()
+            _ok_response({"challenges": [challenge_data]}),  # get_dcv()
+            _refresh_response("pending-dcv"),   # refresh() after verify
+        ]
+        mock_session.post.return_value = _ok_response({})
+        dcv_events: list[list[DcvChallenge]] = []
+        wf.on("dcv_available", lambda cs: dcv_events.append(cs))
+        wf.advance()
+        assert len(dcv_events) == 1
+        assert dcv_events[0][0].domain == "example.com"
+
+
+class TestOrderWorkflowDownload:
+    """OrderWorkflow.download() fetches the PEM and retries on 422."""
+
+    def test_returns_pem_on_success(self):
+        """download() returns the PEM string from the first attempt."""
+        wf, _, mock_session = _make_workflow("issued")
+        cert = b"-----BEGIN CERTIFICATE-----\nABC\n-----END CERTIFICATE-----\n"
+        mock_session.get.return_value = _ok_bytes_response(cert)
+        pem = wf.download()
+        assert pem.startswith("-----BEGIN CERTIFICATE-----")
+
+    def test_retries_on_422_then_succeeds(self):
+        """download() retries when the first attempt returns 422."""
+        wf, _, mock_session = _make_workflow("issued")
+        resp_422 = MagicMock()
+        resp_422.status_code = 422
+        resp_422.raise_for_status.return_value = None
+
+        cert_bytes = b"-----BEGIN CERTIFICATE-----\nABC\n-----END CERTIFICATE-----\n"
+        call_count = 0
+
+        def side_effect() -> str:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise CertiNextAPIError(422, {"detail": "EMS-1165"})
+            return cert_bytes.decode()
+
+        with patch.object(wf.order, "download_certificate_pem", side_effect=side_effect):
+            with patch("certinext.ssl_certificates.time") as mock_time:
+                mock_time.monotonic.return_value = 0
+                mock_time.sleep.return_value = None
+                pem = wf.download(retry_delay=0)
+
+        assert pem.startswith("-----BEGIN CERTIFICATE-----")
+        assert call_count == 2
+
+    def test_raises_after_all_retries_exhausted(self):
+        """download() raises CertiNextAPIError after all retries fail."""
+        wf, _, _ = _make_workflow("issued")
+        with patch.object(wf.order, "download_certificate_pem",
+                          side_effect=CertiNextAPIError(422, {})):
+            with patch("certinext.ssl_certificates.time"):
+                with pytest.raises(CertiNextAPIError):
+                    wf.download(retries=2, retry_delay=0)
+
+
+class TestOrderWorkflowRun:
+    """OrderWorkflow.run() drives the full workflow."""
+
+    def test_raises_timeout_error_when_poll_times_out(self):
+        """run() raises CertiNextTimeoutError when the order doesn't issue in time."""
+        wf, _, mock_session = _make_workflow("pending-approval")
+        mock_session.get.return_value = _refresh_response("pending-approval")
+        with patch("certinext.ssl_certificates.time") as mock_time:
+            mock_time.monotonic.side_effect = [0, 0, 400]  # deadline exceeded
+            mock_time.sleep.return_value = None
+            with pytest.raises(CertiNextTimeoutError) as exc_info:
+                wf.run(wait=300)
+        assert exc_info.value.order_id == "ORDER-001"
+        assert exc_info.value.wait == 300
+
+    def test_timeout_error_is_also_builtin_timeout_error(self):
+        """CertiNextTimeoutError is catchable as the built-in TimeoutError."""
+        err = CertiNextTimeoutError("ORDER-001", 300)
+        assert isinstance(err, TimeoutError)
+
+    def test_submit_csr_called_with_force(self):
+        """run() calls submit_csr(force=True) before polling."""
+        wf, _, mock_session = _make_workflow("issued")
+        mock_session.get.return_value = _refresh_response("issued")
+        mock_session.get.side_effect = [
+            _refresh_response("issued"),
+        ]
+        cert_pem = "-----BEGIN CERTIFICATE-----\nABC\n-----END CERTIFICATE-----\n"
+        with patch.object(wf, "submit_csr", return_value=False) as mock_submit:
+            with patch.object(wf, "poll", return_value=True):
+                with patch.object(wf, "download", return_value=cert_pem):
+                    wf.run(csr="some-csr", wait=10)
+        mock_submit.assert_called_once_with("some-csr", force=True)
+
+
+class TestOrderWorkflowFromCsr:
+    """OrderWorkflow.from_csr() fills signer_place from the CSR subject."""
+
+    def test_explicit_signer_place_not_overridden(self):
+        """from_csr does not override signer_place when explicitly provided."""
+        _, order, _ = _make_workflow()
+        wf = OrderWorkflow.from_csr(order, "fake-pem", signer_name="X",
+                                     signer_place="Custom Place")
+        assert wf._signer_place == "Custom Place"
+
+    def test_falls_back_gracefully_on_import_error(self):
+        """from_csr returns a workflow with empty signer_place when cryptography is absent."""
+        _, order, _ = _make_workflow()
+        with patch("certinext.csr.parse_csr", side_effect=ImportError("no crypto")):
+            wf = OrderWorkflow.from_csr(order, "fake-pem", signer_name="X")
+        assert wf._signer_place == ""
+
+    def test_populates_signer_place_from_csr(self):
+        """from_csr derives signer_place from locality/state when not supplied."""
+        from certinext.csr import CsrInfo
+        _, order, _ = _make_workflow()
+        fake_info = CsrInfo(common_name="x", email=None, locality="Orono",
+                            state="Maine", organization=None)
+        with patch("certinext.csr.parse_csr", return_value=fake_info):
+            wf = OrderWorkflow.from_csr(order, "fake-pem", signer_name="X")
+        assert wf._signer_place == "Orono, Maine"

@@ -1,10 +1,42 @@
 """Submit a CSR to CertiNext and download the issued certificate.
 
-Reads a PEM-encoded CSR from a file or stdin, extracts the domain and SANs
-from the CSR itself, creates a certificate order, submits the CSR, and writes
-the issued PEM certificate to stdout or a file once the CA has signed it.
+This script is both a working CLI and a reference implementation showing how
+to drive the full certificate lifecycle using :class:`~certinext.ssl_certificates.OrderWorkflow`.
+The same pattern can be used directly in your own scripts::
 
-The target domain must already have DCV completed in CertiNext.  Use
+    import certinext
+    from certinext.ssl_certificates import OrderWorkflow
+    from certinext.exceptions import CertiNextTimeoutError
+
+    sess = certinext.session(client_id="YOUR_ACCOUNT", client_secret="YOUR_SECRET")
+
+    # Create the order (domain and requestor come from your own data)
+    order = sess.ssl.create_ov(
+        "example.maine.edu",
+        organization_id="2517111",
+        requestor_name="Jane Doe",
+        requestor_email="jane@maine.edu",
+        requestor_phone="+12075551234",
+        csr=open("example.csr").read(),
+    )
+
+    # Drive the order from creation to a PEM certificate in one call.
+    # from_csr() fills signer_place from the CSR subject's L/ST fields.
+    try:
+        pem = (
+            OrderWorkflow.from_csr(order, open("example.csr").read(), signer_name="Jane Doe")
+            .on("status_change", lambda old, new: print(f"Status: {old} -> {new}"))
+            .on("issued", lambda o: print(f"Issued! Order {o.order_id}"))
+            .run(wait=300)
+        )
+        open("example.pem", "w").write(pem)
+    except CertiNextTimeoutError as exc:
+        print(f"Timed out. Resume with --order-id {exc.order_id}")
+
+This CLI wraps the same workflow and adds argument parsing, credential loading
+from the keyring, and sandbox switching.
+
+The target domain must already have DCV completed in CertiNext. Use
 ``certinext-pending-dcv`` (or ``dcv-update``) to complete DCV first.
 
 Requires the ``csr`` optional dependency::
@@ -13,17 +45,16 @@ Requires the ``csr`` optional dependency::
 
 Usage::
 
-    certinext-issue-cert example.com.csr --requestor-name "John Doe" ...
+    certinext-issue-cert --csr example.com.csr --requestor-name "Jane Doe"
     certinext-issue-cert --csr example.com.csr --output example.com.pem
     certinext-issue-cert --csr example.com.csr --sandbox
     certinext-issue-cert < example.com.csr
-    certinext-issue-cert --order-id <ID> --wait 300  # resume polling an existing order
+    certinext-issue-cert --order-id <ID> --wait 300  # resume polling
 """
 
 import argparse
 import logging
 import sys
-import time
 
 from certinext._cli import (
     _setup_logging,
@@ -33,16 +64,12 @@ from certinext._cli import (
     build_session,
     fatal_api_error,
 )
-from certinext.exceptions import CertiNextAPIError
+from certinext.csr import CsrInfo
+from certinext.exceptions import CertiNextAPIError, CertiNextTimeoutError
 from certinext.session import CertiNextSession
-from certinext.ssl_certificates import DcvChallenge, SslOrder
+from certinext.ssl_certificates import DcvChallenge, OrderWorkflow, SslOrder
 
 log = logging.getLogger(__name__)
-
-_TERMINAL_STATUSES = frozenset({"issued", "revoked", "cancelled", "rejected", "expired"})
-_POLL_INTERVAL = 5
-_DOWNLOAD_RETRIES = 5
-_DOWNLOAD_RETRY_DELAY = 5
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -154,8 +181,8 @@ def _read_csr(path: str | None) -> str:
         raise SystemExit(1) from exc
 
 
-def _parse_csr(pem: str) -> tuple[str, list[str]]:
-    """Extract the CN and DNS SANs from a PEM-encoded CSR.
+def _parse_csr(pem: str) -> CsrInfo:
+    """Parse a PEM-encoded CSR and return its subject fields and SANs.
 
     Thin wrapper around :func:`certinext.csr.parse_csr` that converts
     :exc:`ImportError` and :exc:`ValueError` to ``SystemExit(1)``.
@@ -164,9 +191,8 @@ def _parse_csr(pem: str) -> tuple[str, list[str]]:
         pem: PEM-encoded certificate signing request string.
 
     Returns:
-        A tuple of ``(cn, sans)`` where ``cn`` is the Common Name from the
-        subject and ``sans`` is a list of DNS SANs from the SAN extension,
-        excluding the CN.
+        :class:`~certinext.csr.CsrInfo` with CN, email, locality, state,
+        organisation, and DNS SANs.
 
     Raises:
         SystemExit: If ``cryptography`` is not installed, the CSR cannot be
@@ -261,142 +287,44 @@ def _create_order(sess: CertiNextSession, args: argparse.Namespace, csr: str = "
         fatal_api_error(exc, "Error creating order")
 
 
-def _submit_csr(order: SslOrder, csr: str, *, force: bool = False) -> bool:
-    """Submit the CSR for this order unless it is in a terminal state.
-
-    Refreshes the order first. If the status is not terminal (or ``force`` is
-    set), attempts CSR submission regardless of the exact status — some API
-    environments (e.g. the sandbox) skip ``pending-csr`` and return a later
-    status directly from order creation. Failure is fatal only when the order
-    was in ``pending-csr``; for other statuses the error is logged as a debug
-    message and processing continues, since the order may not need a CSR at
-    that stage.
-
-    Set ``force=True`` when the caller explicitly provided a CSR and wants
-    submission attempted even if the order appears to be in a terminal state
-    (e.g. ``"issued"`` without an actual signed certificate yet).
-
-    Args:
-        order: The SslOrder to submit the CSR for.
-        csr: PEM-encoded Certificate Signing Request string.
-        force: If ``True``, bypass the terminal-status early-exit.
-
-    Returns:
-        ``True`` if the CSR was accepted by the API; ``False`` if submission
-        was skipped (terminal state without ``force``) or the API rejected it
-        non-fatally.
-    """
-    order.refresh()
-    if not force and order.status in _TERMINAL_STATUSES:
-        return False
-    log.debug("Submitting CSR for order %s (status: %s)", order.order_id, order.status)
-    needed = order.status == "pending-csr"
-    try:
-        order.submit_csr(csr)
-        order.refresh()
-        return True
-    except CertiNextAPIError as exc:
-        if needed:
-            fatal_api_error(exc, f"Error submitting CSR for order {order.order_id}")
-        log.debug(
-            "CSR submission returned HTTP %s for order %s in status %r — "
-            "order may not require a CSR at this stage",
-            exc.status_code, order.order_id, order.status,
-        )
-        return False
-
-
-def _advance_order(
-    order: SslOrder,
-    signer_name: str,
-    signer_place: str,
-    csr: str = "",
-    *,
-    _dcv_logged: set[str] | None = None,
-) -> None:
-    """Accept the subscriber agreement, handle DCV, or submit the CSR as needed.
-
-    Refreshes the order state first, then performs the appropriate action:
-
-    - ``pending-agreement``: accepts the subscriber agreement.
-    - ``pending-dcv``: logs challenge details and triggers a verify call.
-      In UMS environments, pre-validated domains should auto-resolve without
-      any manual intervention; this code path may never produce visible output
-      in normal UMS operation.
-    - ``pending-csr``: submits the provided CSR. Exits with code 1 if
-      submission fails or if no CSR was provided.
-
-    Args:
-        order: The SslOrder to advance.
-        signer_name: Full name of the person accepting the agreement.
-        signer_place: City or location of the signer.
-        csr: PEM-encoded CSR string. Required when the order reaches
-            ``pending-csr``; ignored for other states.
-        _dcv_logged: Mutable set tracking order IDs whose DCV challenges have
-            already been logged at INFO level. Pass the same set on every call
-            to suppress repeat log messages during polling.
-    """
-    order.refresh()
-    if order.status == "pending-agreement":
-        log.debug("Accepting subscriber agreement for order %s", order.order_id)
-        try:
-            order.accept_agreement(signer_name, signer_place)
-            order.refresh()
-        except CertiNextAPIError as exc:
-            log.debug(
-                "accept_agreement returned HTTP %s — order may advance on its own",
-                exc.status_code,
-            )
-    elif order.status == "pending-dcv":
-        challenges: list[DcvChallenge] = []
-        try:
-            challenges = order.get_dcv()
-            if challenges and (_dcv_logged is None or order.order_id not in _dcv_logged):
-                for c in challenges:
-                    log.info(
-                        "DCV challenge for %s: %s %s = %s",
-                        c.domain, c.method, c.host, c.token,
-                    )
-                if _dcv_logged is not None and order.order_id is not None:
-                    _dcv_logged.add(order.order_id)
-        except CertiNextAPIError as exc:
-            log.debug(
-                "get_dcv returned HTTP %s for order %s",
-                exc.status_code, order.order_id,
-            )
-        for c in challenges:
-            if c.domain and c.method:
-                try:
-                    order.verify_dcv(c.domain, c.method)
-                except CertiNextAPIError as exc:
-                    log.debug(
-                        "verify_dcv returned HTTP %s for %s on order %s — will retry on next poll",
-                        exc.status_code, c.domain, order.order_id,
-                    )
-        order.refresh()
-    elif order.status == "pending-csr":
-        if not csr.strip():
-            log.error(
-                "Order %s requires a CSR — re-run with --order-id %s --csr <file>",
-                order.order_id, order.order_id,
-            )
-            raise SystemExit(1)
-        log.debug("Submitting CSR for order %s (status: pending-csr)", order.order_id)
-        try:
-            order.submit_csr(csr)
-            order.refresh()
-        except CertiNextAPIError as exc:
-            fatal_api_error(exc, f"CSR submission failed for order {order.order_id}")
-
-
 def main() -> None:
-    """Entry point for certinext-issue-cert."""
+    """Entry point for certinext-issue-cert.
+
+    The function is structured in three phases:
+
+    1. **Argument parsing and validation** — parse CLI flags, cross-validate
+       required combinations (e.g. ``--org-id`` for OV/EV), and build an
+       authenticated session from the keyring or environment.
+
+    2. **Order acquisition** — either fetch an existing order by ``--order-id``
+       (resume path) or create a new one. For new orders, missing fields are
+       filled from the CSR subject: domain from CN, SANs from the SAN
+       extension, ``requestor_email`` from ``emailAddress``, and
+       ``signer_place`` from ``L`` + ``ST``.
+
+    3. **Workflow execution** — an :class:`~certinext.ssl_certificates.OrderWorkflow`
+       drives the order through all pending states (agreement acceptance, CSR
+       submission, DCV) and polls until issuance. Event hooks wire up logging
+       so status transitions and DCV challenges are visible at INFO/DEBUG
+       level without any polling logic in this function.
+
+    On any non-zero exit after an order has been created, the resume hint
+    ``Re-run with --order-id <ID>`` is printed so the operator can continue
+    from where the process left off.
+    """
+    # `order` is declared here so the except-SystemExit handler can reference
+    # it even if the error occurs partway through order creation.
+    order: SslOrder | None = None
     try:
+        # ------------------------------------------------------------------
+        # Phase 1: Argument parsing and validation
+        # ------------------------------------------------------------------
         parser = build_parser()
         args = parser.parse_intermixed_args()
 
         _setup_logging(args.verbose)
 
+        # Cross-argument validation that argparse can't express natively.
         if args.cert_type in ("ov", "ev") and not args.org_id:
             parser.error(f"--org-id is required for {args.cert_type.upper()} certificates")
 
@@ -406,43 +334,52 @@ def main() -> None:
                 f"got: {args.requestor_phone!r}"
             )
 
+        # apply_sandbox() rewrites base_url/token_url when --sandbox is set.
+        # build_session() loads credentials from the keyring (or env vars) and
+        # returns an authenticated CertiNextSession.
         apply_sandbox(args)
         sess = build_session(args)
 
+        # Capture signer fields early; they may be overridden by CSR defaults.
         signer_name = args.requestor_name
         signer_place = args.signer_place
 
+        # ------------------------------------------------------------------
+        # Phase 2: Order acquisition
+        # ------------------------------------------------------------------
+
         if args.order_id:
+            # Resume path: fetch an existing order by its numeric ID.
             try:
                 order = sess.ssl.get(args.order_id)
             except CertiNextAPIError as exc:
                 log.error("Error fetching order %s: HTTP %s", args.order_id, exc.status_code)
                 raise SystemExit(1) from exc
             log.info("Resuming order %s (status: %s)", order.order_id, order.status)
-
             csr_path = getattr(args, "csr_file", None)
             csr = _read_csr(csr_path) if csr_path is not None else ""
-            # Immediate attempt when a file is provided — force=True so we try
-            # even if the current status is not pending-csr (e.g. the CA may
-            # have already advanced the order). If this fails non-fatally,
-            # _advance_order will retry when the order reaches pending-csr.
-            if csr.strip():
-                if _submit_csr(order, csr, force=True):
-                    log.info("CSR submitted, order status: %s", order.status)
+
         else:
+            # New-order path: parse the CSR, fill any missing fields from its
+            # subject, then POST to the ssl-certificates endpoint.
             csr_path = getattr(args, "csr_file", None)
             csr = _read_csr(csr_path)
             if not csr.strip():
                 log.error("Empty CSR")
                 raise SystemExit(1)
 
-            # Fill in domain and SANs from the CSR unless explicitly overridden.
-            if not args.domain or args.sans is None:
-                cn, csr_sans = _parse_csr(csr)
-                if not args.domain:
-                    args.domain = cn
-                if args.sans is None:
-                    args.sans = csr_sans
+            # parse_csr() extracts CN, SANs, emailAddress, L, and ST.
+            # Each field only overrides the CLI argument when the argument was
+            # not supplied, so explicit flags always take precedence.
+            csr_info = _parse_csr(csr)
+            if not args.domain:
+                args.domain = csr_info.common_name          # CN → primary domain
+            if args.sans is None:
+                args.sans = csr_info.sans                   # SAN extension
+            if not args.requestor_email and csr_info.email:
+                args.requestor_email = csr_info.email       # emailAddress OID
+            if not signer_place and csr_info.signer_place:
+                signer_place = csr_info.signer_place        # "Orono, Maine"
 
             log.info(
                 "Ordering certificate for %s%s",
@@ -452,37 +389,59 @@ def main() -> None:
             order = _create_order(sess, args, csr=csr)
             log.info("Created order %s (status: %s)", order.order_id, order.status)
 
-            # If the CSR was accepted upfront the order may have already advanced
-            # past pending-csr. _submit_csr is a best-effort fallback for APIs
-            # or environments that don't accept an upfront CSR.
-            if order.status not in _TERMINAL_STATUSES:
-                _submit_csr(order, csr)
-                log.info("Order %s status after CSR: %s", order.order_id, order.status)
+        # ------------------------------------------------------------------
+        # Phase 3: Workflow execution
+        # ------------------------------------------------------------------
 
-        dcv_logged: set[str] = set()
-        _advance_order(order, signer_name, signer_place, csr, _dcv_logged=dcv_logged)
+        # DCV challenges are only logged once even if advance() fires the
+        # dcv_available event on subsequent poll ticks.
+        dcv_logged = False
+
+        def _on_dcv(challenges: list[DcvChallenge]) -> None:
+            nonlocal dcv_logged
+            if not dcv_logged:
+                for c in challenges:
+                    log.info(
+                        "DCV challenge for %s: %s %s = %s",
+                        c.domain, c.method, c.host, c.token,
+                    )
+                dcv_logged = True
+
+        # OrderWorkflow drives the order through every pending state and polls
+        # until issuance. Event hooks replace explicit polling logic here —
+        # the workflow emits events; this function just logs them.
+        wf = (
+            OrderWorkflow(order, signer_name=signer_name, signer_place=signer_place)
+            .on("status_change", lambda old, new: log.debug(
+                "Order %s: %s -> %s", order.order_id, old, new,
+            ))
+            .on("poll", lambda o: log.debug(
+                "Order %s status: %s (polling)", o.order_id, o.status,
+            ))
+            .on("dcv_available", _on_dcv)
+            .on("issued", lambda o: log.info("Order %s issued.", o.order_id))
+        )
 
         if args.wait == 0:
+            # Non-blocking mode: submit the CSR and advance one step, then
+            # exit so the caller can schedule a later resume run.
+            wf.submit_csr(csr, force=True)
+            wf.advance(csr)
             log.info("Order %s submitted (status: %s)", order.order_id, order.status)
             log.info("Re-run with --order-id %s to resume polling.", order.order_id)
             return
 
-        deadline = time.monotonic() + args.wait
-        while order.status not in _TERMINAL_STATUSES:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                log.error(
-                    "Timed out after %ds waiting for issuance "
-                    "(order %s, status: %s). Re-run with --order-id %s to resume.",
-                    args.wait, order.order_id, order.status, order.order_id,
-                )
-                raise SystemExit(1)
-            log.debug(
-                "Order %s status: %s (polling, %ds remaining)",
-                order.order_id, order.status, int(remaining),
+        # wf.run() submits the CSR (force=True), drives all state transitions,
+        # polls until issued, and downloads the PEM with automatic 422 retry.
+        # It raises CertiNextTimeoutError if wait seconds elapse without issuance.
+        try:
+            pem = wf.run(csr=csr, wait=args.wait)
+        except CertiNextTimeoutError as exc:
+            log.error(
+                "Timed out after %ds waiting for issuance (order %s, status: %s).",
+                exc.wait, order.order_id, order.status,
             )
-            time.sleep(min(_POLL_INTERVAL, remaining))
-            _advance_order(order, signer_name, signer_place, csr, _dcv_logged=dcv_logged)
+            raise SystemExit(1) from exc
 
         if order.status != "issued":
             log.error(
@@ -491,28 +450,9 @@ def main() -> None:
             )
             raise SystemExit(1)
 
-        log.info("Order %s issued.", order.order_id)
-        pem = ""
-        for attempt in range(1, _DOWNLOAD_RETRIES + 1):
-            try:
-                pem = order.download_certificate_pem()
-                break
-            except CertiNextAPIError as exc:
-                if exc.status_code == 422 and attempt < _DOWNLOAD_RETRIES:
-                    log.debug(
-                        "Certificate not ready yet (HTTP 422), retrying in %ds "
-                        "(attempt %d/%d)",
-                        _DOWNLOAD_RETRY_DELAY, attempt, _DOWNLOAD_RETRIES,
-                    )
-                    time.sleep(_DOWNLOAD_RETRY_DELAY)
-                else:
-                    log.error(
-                        "Error downloading certificate for order %s: %s",
-                        order.order_id, exc,
-                    )
-                    log.debug("  Full response body: %s", exc.body)
-                    raise SystemExit(1) from exc
-
+        # ------------------------------------------------------------------
+        # Output: write the PEM to a file or print to stdout
+        # ------------------------------------------------------------------
         if args.output:
             try:
                 with open(args.output, "w") as f:
@@ -524,6 +464,13 @@ def main() -> None:
         else:
             print(pem, end="")
 
+    except SystemExit as exc:
+        # If we have an order that can be resumed, always print the hint so
+        # the operator knows how to continue after any unexpected failure.
+        if exc.code not in (0, 130) and order is not None and order.order_id:
+            if order.status not in ("cancelled", "rejected", "revoked"):
+                log.error("Re-run with --order-id %s to resume.", order.order_id)
+        raise
     except KeyboardInterrupt:
         print("\nAborted.", file=sys.stderr)
         raise SystemExit(130)
