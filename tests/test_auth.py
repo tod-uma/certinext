@@ -136,3 +136,24 @@ class TestFetchTokenErrors:
         with patch("certinext.auth.requests.post", return_value=bad_resp):
             with pytest.raises(RuntimeError, match="non-JSON"):
                 auth.get_token()
+
+
+class TestInvalidate:
+    """OAuth2ClientCredentials.invalidate() clears the cached token."""
+
+    def test_invalidate_causes_fresh_fetch(self):
+        """invalidate() forces get_token() to fetch a new token on the next call."""
+        auth = _make_auth()
+        with patch("certinext.auth.requests.post", return_value=_mock_token_response()) as mock_post:
+            auth.get_token()
+            auth.invalidate()
+            auth.get_token()
+        assert mock_post.call_count == 2
+
+    def test_invalidate_clears_cached_token(self):
+        """After invalidate(), the cached token attribute is None."""
+        auth = _make_auth()
+        with patch("certinext.auth.requests.post", return_value=_mock_token_response()):
+            auth.get_token()
+        auth.invalidate()
+        assert auth._access_token is None

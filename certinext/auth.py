@@ -55,6 +55,11 @@ class OAuth2ClientCredentials:
         assert self._access_token is not None
         return self._access_token
 
+    def invalidate(self) -> None:
+        """Discard the cached token, forcing a fresh fetch on the next :meth:`get_token` call."""
+        self._access_token = None
+        self._expires_at = 0.0
+
     def _fetch_token(self) -> None:
         """Request a new token from the token endpoint and cache it."""
         data = {
