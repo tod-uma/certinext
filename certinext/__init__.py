@@ -49,8 +49,8 @@ Errors:
 from .accounts import AccountAccessor, AccountInfo, Group, Organization
 from .catalog import CatalogAccessor, CustomField, Product, ProductCategory
 from .client import CertiNextClient
-from .domains import VALID_DCV_METHODS, DcvInfo, DcvMethod, DcvStatus, Domain, DomainAccessor, DomainStatus
 from .csr import CsrInfo
+from .domains import VALID_DCV_METHODS, DcvInfo, DcvMethod, DcvStatus, Domain, DomainAccessor, DomainStatus
 from .exceptions import (
     CertiNextAPIError,
     CertiNextConflictError,

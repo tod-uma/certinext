@@ -14,13 +14,11 @@
 
 """Tests for certinext.ssl_certificates: DcvChallenge, CertificateDownload, SslOrder, SslAccessor."""
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from certinext.client import CertiNextClient
-from unittest.mock import patch
-
 from certinext.exceptions import CertiNextAPIError, CertiNextTimeoutError
 from certinext.ssl_certificates import (
     CertificateDownload,
@@ -971,7 +969,8 @@ class TestOrderWorkflowDownload:
     def test_returns_pem_on_success(self):
         """download() returns the PEM string from the first attempt."""
         wf, _, mock_session = _make_workflow("issued")
-        mock_session.get.return_value = _ok_bytes_response(b"-----BEGIN CERTIFICATE-----\nABC\n-----END CERTIFICATE-----\n")
+        cert = b"-----BEGIN CERTIFICATE-----\nABC\n-----END CERTIFICATE-----\n"
+        mock_session.get.return_value = _ok_bytes_response(cert)
         pem = wf.download()
         assert pem.startswith("-----BEGIN CERTIFICATE-----")
 
@@ -983,12 +982,7 @@ class TestOrderWorkflowDownload:
         resp_422.raise_for_status.return_value = None
 
         cert_bytes = b"-----BEGIN CERTIFICATE-----\nABC\n-----END CERTIFICATE-----\n"
-
-        def _patched_download_pem() -> str:
-            return cert_bytes.decode()
-
         call_count = 0
-        original = wf.order.download_certificate_pem
 
         def side_effect() -> str:
             nonlocal call_count
