@@ -22,6 +22,7 @@ Python library and CLI scripts for managing your [CertiNext](https://us.certinex
   - [certinext-issue-cert](#certinext-issue-cert)
 - [Python library](#python-library)
 - [Examples](#examples)
+- [API documentation](#api-documentation)
 - [Project structure](#project-structure)
 
 ## Requirements
@@ -1007,6 +1008,22 @@ python examples/dns_txt_dcv.py \
 Run the script repeatedly — each run advances every pending domain as far as it can go and exits cleanly when waiting for propagation. Once a domain is fully propagated, the script calls `domain.verify()` automatically.
 
 </details>
+
+---
+
+## API documentation
+
+The CertiNext REST API is documented in two places:
+
+| Resource | URL | Notes |
+|---|---|---|
+| Swagger UI (sandbox) | [sandbox-us-api.certinext.io/swagger-ui/index.html](https://sandbox-us-api.certinext.io/swagger-ui/index.html) | Interactive; select **certinext-v2** from the spec dropdown |
+| OpenAPI spec (sandbox) | [sandbox-us-api.certinext.io/v3/api-docs/certinext-v2](https://sandbox-us-api.certinext.io/v3/api-docs/certinext-v2) | Raw JSON — complete schema including undocumented fields |
+| Postman collection | [documenter.getpostman.com/…](https://documenter.getpostman.com/view/40123569/2sBXqJJLFh) | Official docs; less complete than the Swagger spec |
+
+Replace `sandbox-us-api.certinext.io` with `us-api.certinext.io` for the production equivalents.
+
+The Swagger spec is the most authoritative source — it exposes fields not present in the Postman collection (e.g. `preVettingToken`, `csr` in the initial order body, `delegation`, `recipientEmails`, `tags`).
 
 ---
 

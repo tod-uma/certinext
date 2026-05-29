@@ -768,7 +768,7 @@ class SslAccessor:
                 "preVetted": True,
             }
             if prevetting_token:
-                org["prevettingToken"] = prevetting_token
+                org["preVettingToken"] = prevetting_token
             body["organization"] = org
         if csr:
             body["csr"] = csr
