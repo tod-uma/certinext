@@ -145,6 +145,32 @@ class CertiNextRateLimitError(CertiNextAPIError):
         super().__init__(status_code, body, *args, **kwargs)
 
 
+class CertiNextTimeoutError(TimeoutError):
+    """Raised when polling for order issuance exceeds the configured wait limit.
+
+    Subclasses the built-in :exc:`TimeoutError` so callers can catch it
+    with either ``CertiNextTimeoutError`` or the standard ``TimeoutError``.
+
+    Attributes:
+        order_id: The order that did not issue in time. Pass this value to
+            ``--order-id`` (or :meth:`~certinext.ssl_certificates.SslAccessor.get`)
+            to resume polling.
+        wait: The wait limit in seconds that was exceeded.
+    """
+
+    def __init__(self, order_id: str | None, wait: int) -> None:
+        """
+        Args:
+            order_id: The order ID that timed out.
+            wait: The wait limit in seconds that was exceeded.
+        """
+        self.order_id = order_id
+        self.wait = wait
+        super().__init__(
+            f"Order {order_id!r} did not reach 'issued' status within {wait}s"
+        )
+
+
 class CertiNextConflictError(CertiNextAPIError):
     """Raised when the API returns 409 Conflict.
 

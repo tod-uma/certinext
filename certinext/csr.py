@@ -19,18 +19,68 @@ Requires the ``csr`` optional dependency::
     pip install certinext[csr]
 """
 
+from dataclasses import dataclass, field
 
-def parse_csr(pem: str) -> tuple[str, list[str]]:
-    """Extract the CN and DNS SANs from a PEM-encoded CSR.
+
+@dataclass
+class CsrInfo:
+    """Structured information extracted from a PEM-encoded CSR.
+
+    Returned by :func:`parse_csr`. All string fields are ``None`` when the
+    corresponding OID is absent from the CSR subject or extensions.
+
+    :class:`CsrInfo` itself has no dependency on ``cryptography`` — only
+    :func:`parse_csr` requires it. You can import and type-hint :class:`CsrInfo`
+    without installing the optional ``[csr]`` extra.
+
+    Attributes:
+        common_name: Common Name (CN) from the subject.
+        email: Email address (``emailAddress`` OID) from the subject.
+        locality: City or locality (L) from the subject.
+        state: State or province (ST) from the subject.
+        organization: Organisation name (O) from the subject.
+        sans: DNS Subject Alternative Names, excluding the common name.
+
+    Example::
+
+        from certinext.csr import parse_csr
+
+        info = parse_csr(open("server.csr").read())
+        print(info.common_name, info.email, info.signer_place)
+    """
+
+    common_name: str | None
+    email: str | None
+    locality: str | None
+    state: str | None
+    organization: str | None
+    sans: list[str] = field(default_factory=list)
+
+    @property
+    def signer_place(self) -> str | None:
+        """Return ``"<locality>, <state>"`` derived from the CSR subject.
+
+        Combines :attr:`locality` and :attr:`state` (e.g. ``"Orono, Maine"``).
+        Returns whichever field is present when only one is available, or
+        ``None`` when both are absent.
+        """
+        parts = [p for p in [self.locality, self.state] if p]
+        return ", ".join(parts) if parts else None
+
+
+def parse_csr(pem: str) -> CsrInfo:
+    """Extract identity fields and DNS SANs from a PEM-encoded CSR.
+
+    Parses the subject for ``CN``, ``emailAddress``, ``L``, ``ST``, and ``O``,
+    and the SAN extension for DNS names. Use :attr:`CsrInfo.signer_place` to
+    combine locality and state into a single string suitable for the
+    ``signer_place`` argument of certificate creation methods.
 
     Args:
         pem: PEM-encoded certificate signing request string.
 
     Returns:
-        A tuple of ``(cn, sans)`` where ``cn`` is the Common Name from the
-        subject and ``sans`` is a list of DNS SANs from the SAN extension,
-        excluding the CN (CertiNext takes the primary domain separately from
-        additional domains).
+        :class:`CsrInfo` with all available fields populated.
 
     Raises:
         ImportError: If the ``cryptography`` package is not installed. Install
@@ -52,25 +102,32 @@ def parse_csr(pem: str) -> tuple[str, list[str]]:
     except Exception as exc:
         raise ValueError(f"Failed to parse CSR: {exc}") from exc
 
-    cn_attrs = csr.subject.get_attributes_for_oid(NameOID.COMMON_NAME)
-    if not cn_attrs:
+    def _get(oid: object) -> str | None:
+        attrs = csr.subject.get_attributes_for_oid(oid)  # type: ignore[arg-type]
+        return str(attrs[0].value) if attrs else None
+
+    cn = _get(NameOID.COMMON_NAME)
+    if not cn:
         raise ValueError(
             "CSR subject has no Common Name — use --domain to specify the primary domain"
         )
-    cn = str(cn_attrs[0].value)
 
     try:
         san_ext = csr.extensions.get_extension_for_oid(ExtensionOID.SUBJECT_ALTERNATIVE_NAME)
         san_value = san_ext.value
-        if isinstance(san_value, x509.SubjectAlternativeName):
-            dns_names = [
-                name
-                for name in san_value.get_values_for_type(x509.DNSName)
-                if name != cn
-            ]
-        else:
-            dns_names = []
+        dns_names = (
+            [name for name in san_value.get_values_for_type(x509.DNSName) if name != cn]
+            if isinstance(san_value, x509.SubjectAlternativeName)
+            else []
+        )
     except x509.ExtensionNotFound:
         dns_names = []
 
-    return cn, dns_names
+    return CsrInfo(
+        common_name=cn,
+        email=_get(NameOID.EMAIL_ADDRESS),
+        locality=_get(NameOID.LOCALITY_NAME),
+        state=_get(NameOID.STATE_OR_PROVINCE_NAME),
+        organization=_get(NameOID.ORGANIZATION_NAME),
+        sans=dns_names,
+    )

@@ -33,6 +33,7 @@ from certinext._cli import (
     build_session,
     fatal_api_error,
 )
+from certinext.csr import CsrInfo
 from certinext.exceptions import CertiNextAPIError
 from certinext.session import CertiNextSession
 from certinext.ssl_certificates import DcvChallenge, SslOrder
@@ -152,8 +153,8 @@ def _read_csr(path: str | None) -> str:
         raise SystemExit(1) from exc
 
 
-def _parse_csr(pem: str) -> tuple[str, list[str]]:
-    """Extract the CN and DNS SANs from a PEM-encoded CSR.
+def _parse_csr(pem: str) -> CsrInfo:
+    """Parse a PEM-encoded CSR and return its subject fields and SANs.
 
     Thin wrapper around :func:`certinext.csr.parse_csr` that converts
     :exc:`ImportError` and :exc:`ValueError` to ``SystemExit(1)``.
@@ -162,9 +163,8 @@ def _parse_csr(pem: str) -> tuple[str, list[str]]:
         pem: PEM-encoded certificate signing request string.
 
     Returns:
-        A tuple of ``(cn, sans)`` where ``cn`` is the Common Name from the
-        subject and ``sans`` is a list of DNS SANs from the SAN extension,
-        excluding the CN.
+        :class:`~certinext.csr.CsrInfo` with CN, email, locality, state,
+        organisation, and DNS SANs.
 
     Raises:
         SystemExit: If ``cryptography`` is not installed, the CSR cannot be
@@ -434,13 +434,17 @@ def main() -> None:
                 log.error("Empty CSR")
                 raise SystemExit(1)
 
-            # Fill in domain and SANs from the CSR unless explicitly overridden.
-            if not args.domain or args.sans is None:
-                cn, csr_sans = _parse_csr(csr)
-                if not args.domain:
-                    args.domain = cn
-                if args.sans is None:
-                    args.sans = csr_sans
+            # Fill in domain, SANs, email, and signer_place from the CSR
+            # unless the caller already supplied them explicitly.
+            csr_info = _parse_csr(csr)
+            if not args.domain:
+                args.domain = csr_info.common_name
+            if args.sans is None:
+                args.sans = csr_info.sans
+            if not args.requestor_email and csr_info.email:
+                args.requestor_email = csr_info.email
+            if not signer_place and csr_info.signer_place:
+                signer_place = csr_info.signer_place
 
             log.info(
                 "Ordering certificate for %s%s",
