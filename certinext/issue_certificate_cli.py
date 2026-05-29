@@ -41,6 +41,8 @@ log = logging.getLogger(__name__)
 
 _TERMINAL_STATUSES = frozenset({"issued", "revoked", "cancelled", "rejected", "expired"})
 _POLL_INTERVAL = 5
+_DOWNLOAD_RETRIES = 5
+_DOWNLOAD_RETRY_DELAY = 5
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -490,12 +492,26 @@ def main() -> None:
             raise SystemExit(1)
 
         log.info("Order %s issued.", order.order_id)
-        try:
-            pem = order.download_certificate_pem()
-        except CertiNextAPIError as exc:
-            log.error("Error downloading certificate for order %s: %s", order.order_id, exc)
-            log.debug("  Full response body: %s", exc.body)
-            raise SystemExit(1) from exc
+        pem = ""
+        for attempt in range(1, _DOWNLOAD_RETRIES + 1):
+            try:
+                pem = order.download_certificate_pem()
+                break
+            except CertiNextAPIError as exc:
+                if exc.status_code == 422 and attempt < _DOWNLOAD_RETRIES:
+                    log.debug(
+                        "Certificate not ready yet (HTTP 422), retrying in %ds "
+                        "(attempt %d/%d)",
+                        _DOWNLOAD_RETRY_DELAY, attempt, _DOWNLOAD_RETRIES,
+                    )
+                    time.sleep(_DOWNLOAD_RETRY_DELAY)
+                else:
+                    log.error(
+                        "Error downloading certificate for order %s: %s",
+                        order.order_id, exc,
+                    )
+                    log.debug("  Full response body: %s", exc.body)
+                    raise SystemExit(1) from exc
 
         if args.output:
             try:
