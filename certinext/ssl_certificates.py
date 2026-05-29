@@ -21,8 +21,29 @@ reissue.
 
 All certificate creation uses the single ``POST /api/certinext/v2/ssl-certificates``
 endpoint with the ``productVariant`` field in the request body. Certificate
-validity is specified in years (1, 2, or 3). A PEM-encoded CSR is submitted as
-a separate ``PUT /ssl-certificates/{orderId}/csr`` call after order creation.
+validity is specified in years (1, 2, or 3). A PEM-encoded CSR may be submitted
+with the initial order or separately via ``PUT /ssl-certificates/{orderId}/csr``.
+
+.. note:: **Organization Consent Token (prevettingToken)**
+
+    OV and EV orders include ``organization.preVetted: true`` in the request
+    body. Providing the Organization Consent Token via ``prevetting_token``
+    additionally allows the CA to auto-approve the order without a manual
+    approver step, bypassing the ``pending-approval`` stage.
+
+    The token is a static administrative credential — it cannot be generated
+    via the REST API. To retrieve it:
+
+    1. Log in to the CertiNext Enterprise Portal.
+    2. Go to **Organization Management** (or the Organization Vetting dashboard).
+    3. Select the pre-vetted organization or department the certificate is for.
+    4. Look for **Organization Consent**, **Consent Tokens**, or
+       **API Integration Settings** in that organization's profile.
+    5. The alphanumeric string listed there is the ``prevettingToken`` value.
+
+    If your organization uses delegated departments, use the token for the
+    specific department matching the certificate request — tokens are bound
+    to individual pre-vetted entities.
 
 .. note:: **DCV not required in this environment**
 
@@ -782,9 +803,11 @@ class SslAccessor:
         requestor_designation: str,
         additional_domains: list[str] | None = None,
         organization_id: str | None = None,
+        prevetting_token: str | None = None,
         signer_name: str = "",
         signer_place: str = "",
         auto_secure_www: bool = False,
+        csr: str | None = None,
     ) -> dict[str, Any]:
         """Build the JSON body for a certificate creation request.
 
@@ -798,6 +821,9 @@ class SslAccessor:
             requestor_designation: Job title or designation of the requestor.
             additional_domains: Optional SANs beyond the primary domain.
             organization_id: Organization number for OV/EV orders; ``None`` for DV.
+            prevetting_token: Organization Consent Token for OV/EV orders. When
+                provided alongside ``organization_id``, the CA automatically
+                approves the order without a manual approver step.
             signer_name: Full name of the person accepting the subscriber agreement.
                 Defaults to ``requestor_name`` when empty.
             signer_place: City or location of the signer (e.g. ``"Portland, ME"``).
@@ -805,6 +831,8 @@ class SslAccessor:
                 Defaults to ``False``; omitting this field from the request
                 causes the API to default to ``True``, so it is always sent
                 explicitly.
+            csr: PEM-encoded CSR to include with the initial order. When provided,
+                the CA may skip the ``pending-csr`` stage entirely.
 
         Returns:
             Dict ready to be serialised as the JSON request body. The
@@ -819,7 +847,7 @@ class SslAccessor:
         body: dict[str, Any] = {
             "productVariant": product_variant,
             "certificate": cert,
-            "subscription": {"validityYears": validity_years},
+            "subscription": {"validityYears": validity_years, "autoRenew": False},
             "requestor": {
                 "name": requestor_name,
                 "email": requestor_email,
@@ -833,10 +861,15 @@ class SslAccessor:
             },
         }
         if organization_id is not None:
-            body["organization"] = {
+            org: dict[str, Any] = {
                 "organizationNumber": organization_id,
                 "preVetted": True,
             }
+            if prevetting_token:
+                org["preVettingToken"] = prevetting_token
+            body["organization"] = org
+        if csr:
+            body["csr"] = csr
         return body
 
     # --- create methods ---
@@ -853,11 +886,12 @@ class SslAccessor:
         signer_name: str = "",
         signer_place: str = "",
         auto_secure_www: bool = False,
+        csr: str | None = None,
     ) -> SslOrder:
         """Create a DV (Domain Validated) single-domain certificate order.
 
-        The CSR must be submitted separately via :meth:`SslOrder.submit_csr`
-        after the order is created.
+        The CSR may be included with the initial order via ``csr`` or submitted
+        separately via :meth:`SslOrder.submit_csr` after the order is created.
 
         Args:
             domain: Primary FQDN (e.g. ``"example.com"``).
@@ -870,6 +904,7 @@ class SslAccessor:
             signer_name: Name of the subscriber agreement signer (defaults to requestor_name).
             signer_place: City or location of the signer (e.g. ``"Portland, ME"``).
             auto_secure_www: Request automatic www-redirect coverage (default: ``False``).
+            csr: PEM-encoded CSR to include with the initial order (optional).
 
         Returns:
             :class:`SslOrder` with status ``"pending-csr"`` or a later stage.
@@ -883,6 +918,7 @@ class SslAccessor:
             additional_domains=additional_domains,
             signer_name=signer_name, signer_place=signer_place,
             auto_secure_www=auto_secure_www,
+            csr=csr,
         ))
 
     def create_dv_wildcard(
@@ -896,6 +932,7 @@ class SslAccessor:
         signer_name: str = "",
         signer_place: str = "",
         auto_secure_www: bool = False,
+        csr: str | None = None,
     ) -> SslOrder:
         """Create a DV wildcard certificate order.
 
@@ -911,6 +948,7 @@ class SslAccessor:
             signer_name: Name of the subscriber agreement signer (defaults to requestor_name).
             signer_place: City or location of the signer.
             auto_secure_www: Request automatic www-redirect coverage (default: ``False``).
+            csr: PEM-encoded CSR to include with the initial order (optional).
 
         Returns:
             :class:`SslOrder` for the wildcard certificate.
@@ -923,6 +961,7 @@ class SslAccessor:
             requestor_name, requestor_email, requestor_phone, requestor_designation,
             signer_name=signer_name, signer_place=signer_place,
             auto_secure_www=auto_secure_www,
+            csr=csr,
         ))
 
     def create_dv_ucc(
@@ -936,6 +975,7 @@ class SslAccessor:
         signer_name: str = "",
         signer_place: str = "",
         auto_secure_www: bool = False,
+        csr: str | None = None,
     ) -> SslOrder:
         """Create a DV UCC (multi-domain / Unified Communications) certificate order.
 
@@ -952,6 +992,7 @@ class SslAccessor:
             signer_name: Name of the subscriber agreement signer (defaults to requestor_name).
             signer_place: City or location of the signer.
             auto_secure_www: Request automatic www-redirect coverage (default: ``False``).
+            csr: PEM-encoded CSR to include with the initial order (optional).
 
         Returns:
             :class:`SslOrder` for the multi-domain certificate.
@@ -968,6 +1009,7 @@ class SslAccessor:
             additional_domains=domains[1:] or None,
             signer_name=signer_name, signer_place=signer_place,
             auto_secure_www=auto_secure_www,
+            csr=csr,
         ))
 
     def create_dv_wildcard_ucc(
@@ -981,6 +1023,7 @@ class SslAccessor:
         signer_name: str = "",
         signer_place: str = "",
         auto_secure_www: bool = False,
+        csr: str | None = None,
     ) -> SslOrder:
         """Create a DV wildcard UCC certificate order.
 
@@ -997,6 +1040,7 @@ class SslAccessor:
             signer_name: Name of the subscriber agreement signer (defaults to requestor_name).
             signer_place: City or location of the signer.
             auto_secure_www: Request automatic www-redirect coverage (default: ``False``).
+            csr: PEM-encoded CSR to include with the initial order (optional).
 
         Returns:
             :class:`SslOrder` for the wildcard UCC certificate.
@@ -1013,6 +1057,7 @@ class SslAccessor:
             additional_domains=domains[1:] or None,
             signer_name=signer_name, signer_place=signer_place,
             auto_secure_www=auto_secure_www,
+            csr=csr,
         ))
 
     def create_ov(
@@ -1028,6 +1073,8 @@ class SslAccessor:
         signer_name: str = "",
         signer_place: str = "",
         auto_secure_www: bool = False,
+        prevetting_token: str | None = None,
+        csr: str | None = None,
     ) -> SslOrder:
         """Create an OV (Organization Validated) single-domain certificate order.
 
@@ -1047,6 +1094,9 @@ class SslAccessor:
             signer_name: Name of the subscriber agreement signer (defaults to requestor_name).
             signer_place: City or location of the signer.
             auto_secure_www: Request automatic www-redirect coverage (default: ``False``).
+            prevetting_token: Organization Consent Token; when provided the CA
+                auto-approves without a manual approver step.
+            csr: PEM-encoded CSR to include with the initial order (optional).
 
         Returns:
             :class:`SslOrder` for the OV certificate.
@@ -1059,8 +1109,10 @@ class SslAccessor:
             requestor_name, requestor_email, requestor_phone, requestor_designation,
             additional_domains=additional_domains,
             organization_id=organization_id,
+            prevetting_token=prevetting_token,
             signer_name=signer_name, signer_place=signer_place,
             auto_secure_www=auto_secure_www,
+            csr=csr,
         ))
 
     def create_ov_wildcard(
@@ -1075,6 +1127,8 @@ class SslAccessor:
         signer_name: str = "",
         signer_place: str = "",
         auto_secure_www: bool = False,
+        prevetting_token: str | None = None,
+        csr: str | None = None,
     ) -> SslOrder:
         """Create an OV wildcard certificate order.
 
@@ -1092,6 +1146,9 @@ class SslAccessor:
             signer_name: Name of the subscriber agreement signer (defaults to requestor_name).
             signer_place: City or location of the signer.
             auto_secure_www: Request automatic www-redirect coverage (default: ``False``).
+            prevetting_token: Organization Consent Token; when provided the CA
+                auto-approves without a manual approver step.
+            csr: PEM-encoded CSR to include with the initial order (optional).
 
         Returns:
             :class:`SslOrder` for the OV wildcard certificate.
@@ -1103,8 +1160,10 @@ class SslAccessor:
             "ov-wildcard", domain, validity_years,
             requestor_name, requestor_email, requestor_phone, requestor_designation,
             organization_id=organization_id,
+            prevetting_token=prevetting_token,
             signer_name=signer_name, signer_place=signer_place,
             auto_secure_www=auto_secure_www,
+            csr=csr,
         ))
 
     def create_ov_ucc(
@@ -1119,6 +1178,8 @@ class SslAccessor:
         signer_name: str = "",
         signer_place: str = "",
         auto_secure_www: bool = False,
+        prevetting_token: str | None = None,
+        csr: str | None = None,
     ) -> SslOrder:
         """Create an OV UCC (multi-domain) certificate order.
 
@@ -1137,6 +1198,9 @@ class SslAccessor:
             signer_name: Name of the subscriber agreement signer (defaults to requestor_name).
             signer_place: City or location of the signer.
             auto_secure_www: Request automatic www-redirect coverage (default: ``False``).
+            prevetting_token: Organization Consent Token; when provided the CA
+                auto-approves without a manual approver step.
+            csr: PEM-encoded CSR to include with the initial order (optional).
 
         Returns:
             :class:`SslOrder` for the OV multi-domain certificate.
@@ -1152,8 +1216,10 @@ class SslAccessor:
             requestor_name, requestor_email, requestor_phone, requestor_designation,
             additional_domains=domains[1:] or None,
             organization_id=organization_id,
+            prevetting_token=prevetting_token,
             signer_name=signer_name, signer_place=signer_place,
             auto_secure_www=auto_secure_www,
+            csr=csr,
         ))
 
     def create_ov_wildcard_ucc(
@@ -1168,6 +1234,8 @@ class SslAccessor:
         signer_name: str = "",
         signer_place: str = "",
         auto_secure_www: bool = False,
+        prevetting_token: str | None = None,
+        csr: str | None = None,
     ) -> SslOrder:
         """Create an OV wildcard UCC certificate order.
 
@@ -1186,6 +1254,9 @@ class SslAccessor:
             signer_name: Name of the subscriber agreement signer (defaults to requestor_name).
             signer_place: City or location of the signer.
             auto_secure_www: Request automatic www-redirect coverage (default: ``False``).
+            prevetting_token: Organization Consent Token; when provided the CA
+                auto-approves without a manual approver step.
+            csr: PEM-encoded CSR to include with the initial order (optional).
 
         Returns:
             :class:`SslOrder` for the OV wildcard UCC certificate.
@@ -1201,8 +1272,10 @@ class SslAccessor:
             requestor_name, requestor_email, requestor_phone, requestor_designation,
             additional_domains=domains[1:] or None,
             organization_id=organization_id,
+            prevetting_token=prevetting_token,
             signer_name=signer_name, signer_place=signer_place,
             auto_secure_www=auto_secure_www,
+            csr=csr,
         ))
 
     def create_ev(
@@ -1218,6 +1291,8 @@ class SslAccessor:
         signer_name: str = "",
         signer_place: str = "",
         auto_secure_www: bool = False,
+        prevetting_token: str | None = None,
+        csr: str | None = None,
     ) -> SslOrder:
         """Create an EV (Extended Validation) single-domain certificate order.
 
@@ -1237,6 +1312,9 @@ class SslAccessor:
             signer_name: Name of the subscriber agreement signer (defaults to requestor_name).
             signer_place: City or location of the signer.
             auto_secure_www: Request automatic www-redirect coverage (default: ``False``).
+            prevetting_token: Organization Consent Token; when provided the CA
+                auto-approves without a manual approver step.
+            csr: PEM-encoded CSR to include with the initial order (optional).
 
         Returns:
             :class:`SslOrder` for the EV certificate.
@@ -1249,8 +1327,10 @@ class SslAccessor:
             requestor_name, requestor_email, requestor_phone, requestor_designation,
             additional_domains=additional_domains,
             organization_id=organization_id,
+            prevetting_token=prevetting_token,
             signer_name=signer_name, signer_place=signer_place,
             auto_secure_www=auto_secure_www,
+            csr=csr,
         ))
 
     def create_ev_ucc(
@@ -1265,6 +1345,8 @@ class SslAccessor:
         signer_name: str = "",
         signer_place: str = "",
         auto_secure_www: bool = False,
+        prevetting_token: str | None = None,
+        csr: str | None = None,
     ) -> SslOrder:
         """Create an EV UCC (multi-domain) certificate order.
 
@@ -1283,6 +1365,9 @@ class SslAccessor:
             signer_name: Name of the subscriber agreement signer (defaults to requestor_name).
             signer_place: City or location of the signer.
             auto_secure_www: Request automatic www-redirect coverage (default: ``False``).
+            prevetting_token: Organization Consent Token; when provided the CA
+                auto-approves without a manual approver step.
+            csr: PEM-encoded CSR to include with the initial order (optional).
 
         Returns:
             :class:`SslOrder` for the EV multi-domain certificate.
@@ -1298,8 +1383,10 @@ class SslAccessor:
             requestor_name, requestor_email, requestor_phone, requestor_designation,
             additional_domains=domains[1:] or None,
             organization_id=organization_id,
+            prevetting_token=prevetting_token,
             signer_name=signer_name, signer_place=signer_place,
             auto_secure_www=auto_secure_www,
+            csr=csr,
         ))
 
     def get(self, order_id: str) -> SslOrder:

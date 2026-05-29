@@ -93,6 +93,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Organization ID, required for OV and EV certificates",
     )
     cert.add_argument(
+        "--prevetting-token", metavar="TOKEN", default=None,
+        help=(
+            "Organization Consent Token for OV/EV orders. "
+            "When provided, the CA auto-approves without a manual approver step. "
+            "Retrieve from the CertiNext portal under Organization Management → "
+            "Organization Consent / Consent Tokens for the target organization."
+        ),
+    )
+    cert.add_argument(
         "--auto-secure-www", action="store_true", default=False,
         help=(
             "Request automatic www-redirect coverage from the CA "
@@ -170,13 +179,17 @@ def _parse_csr(pem: str) -> tuple[str, list[str]]:
         raise SystemExit(1) from exc
 
 
-def _create_order(sess: CertiNextSession, args: argparse.Namespace) -> SslOrder:
+def _create_order(sess: CertiNextSession, args: argparse.Namespace, csr: str = "") -> SslOrder:
     """Create a new SSL order.
+
+    When ``csr`` is provided it is included in the initial order body, which
+    may allow the CA to skip the ``pending-csr`` stage entirely.
 
     Args:
         sess: An authenticated CertiNextSession.
         args: Parsed CLI arguments with ``domain``, ``cert_type``, ``org_id``,
-            ``sans``, ``validity``, and requestor fields.
+            ``sans``, ``validity``, ``prevetting_token``, and requestor fields.
+        csr: PEM-encoded CSR to include with the initial order (optional).
 
     Returns:
         The created SslOrder.
@@ -186,6 +199,7 @@ def _create_order(sess: CertiNextSession, args: argparse.Namespace) -> SslOrder:
     """
     cert_type = args.cert_type
     sans: list[str] | None = args.sans or None
+    csr_arg: str | None = csr.strip() or None
 
     requestor_kwargs = dict(
         requestor_name=args.requestor_name or "",
@@ -196,6 +210,7 @@ def _create_order(sess: CertiNextSession, args: argparse.Namespace) -> SslOrder:
         signer_place=args.signer_place or "",
     )
     auto_secure_www: bool = bool(args.auto_secure_www)
+    prevetting_token: str | None = getattr(args, "prevetting_token", None)
 
     try:
         if cert_type == "dv":
@@ -204,6 +219,7 @@ def _create_order(sess: CertiNextSession, args: argparse.Namespace) -> SslOrder:
                 validity_years=args.validity,
                 additional_domains=sans,
                 auto_secure_www=auto_secure_www,
+                csr=csr_arg,
                 **requestor_kwargs,
             )
         elif cert_type == "ov":
@@ -213,6 +229,8 @@ def _create_order(sess: CertiNextSession, args: argparse.Namespace) -> SslOrder:
                 validity_years=args.validity,
                 additional_domains=sans,
                 auto_secure_www=auto_secure_www,
+                prevetting_token=prevetting_token,
+                csr=csr_arg,
                 **requestor_kwargs,
             )
         else:
@@ -222,6 +240,8 @@ def _create_order(sess: CertiNextSession, args: argparse.Namespace) -> SslOrder:
                 validity_years=args.validity,
                 additional_domains=sans,
                 auto_secure_www=auto_secure_www,
+                prevetting_token=prevetting_token,
+                csr=csr_arg,
                 **requestor_kwargs,
             )
     except CertiNextAPIError as exc:
@@ -416,15 +436,15 @@ def main() -> None:
                 args.domain,
                 f" + {len(args.sans)} SAN(s)" if args.sans else "",
             )
-            order = _create_order(sess, args)
+            order = _create_order(sess, args, csr=csr)
             log.info("Created order %s (status: %s)", order.order_id, order.status)
 
-            # Best-effort initial CSR submission. Fails silently if the order
-            # hasn't reached pending-csr yet (common in production, where the
-            # lifecycle is pending-approval → pending-dcv → pending-csr).
-            # _advance_order handles the submission when pending-csr is reached.
-            _submit_csr(order, csr)
-            log.info("Order %s status after CSR: %s", order.order_id, order.status)
+            # If the CSR was accepted upfront the order may have already advanced
+            # past pending-csr. _submit_csr is a best-effort fallback for APIs
+            # or environments that don't accept an upfront CSR.
+            if order.status not in _TERMINAL_STATUSES:
+                _submit_csr(order, csr)
+                log.info("Order %s status after CSR: %s", order.order_id, order.status)
 
         dcv_logged: set[str] = set()
         _advance_order(order, signer_name, signer_place, csr, _dcv_logged=dcv_logged)
