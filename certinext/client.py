@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from collections.abc import Callable
 from typing import Any, cast
 
 import requests
@@ -104,6 +105,28 @@ class CertiNextClient:
                 raise CertiNextRateLimitError(status, body, retry_after=retry_after, response=resp) from exc
             raise CertiNextAPIError(status, body, response=resp) from exc
 
+    def _execute(self, make_request: Callable[[], requests.Response]) -> requests.Response:
+        """Execute a request callable, retrying once with a fresh token on 401.
+
+        If the server returns 401 (e.g. ``ACCESS_TOKEN_REVOKED`` when the token
+        expires mid-poll), the cached token is invalidated and the request is
+        retried once. If the retry also returns 401, the error propagates normally.
+
+        Args:
+            make_request: Zero-argument callable that performs the HTTP request
+                and returns the response. Called a second time on 401 after the
+                token cache is cleared, so the callable must call
+                ``self._headers()`` rather than capturing pre-built headers.
+
+        Returns:
+            The HTTP response (from the original call or the retry).
+        """
+        resp = make_request()
+        if resp.status_code == 401:
+            self._auth.invalidate()
+            resp = make_request()
+        return resp
+
     def get(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any] | list[Any]:
         """Send a GET request and return the parsed JSON response.
 
@@ -117,7 +140,9 @@ class CertiNextClient:
         Raises:
             CertiNextAPIError: On a non-2xx response. Provides ``.status_code`` and ``.body``.
         """
-        resp = self._session.get(f"{self.base_url}{path}", headers=self._headers(), params=params)
+        resp = self._execute(
+            lambda: self._session.get(f"{self.base_url}{path}", headers=self._headers(), params=params)
+        )
         self._raise_api_error(resp)
         return cast(dict[str, Any], resp.json())
 
@@ -139,9 +164,11 @@ class CertiNextClient:
         Raises:
             CertiNextAPIError: On a non-2xx response. Provides ``.status_code`` and ``.body``.
         """
-        headers = self._headers()
-        headers["Accept"] = accept
-        resp = self._session.get(f"{self.base_url}{path}", headers=headers, params=params)
+        def _req() -> requests.Response:
+            headers = self._headers()
+            headers["Accept"] = accept
+            return self._session.get(f"{self.base_url}{path}", headers=headers, params=params)
+        resp = self._execute(_req)
         self._raise_api_error(resp)
         return resp.content
 
@@ -165,10 +192,12 @@ class CertiNextClient:
         Raises:
             CertiNextAPIError: On a non-2xx response. Provides ``.status_code`` and ``.body``.
         """
-        headers = self._headers()
-        if extra_headers:
-            headers.update(extra_headers)
-        resp = self._session.post(f"{self.base_url}{path}", headers=headers, json=json)
+        def _req() -> requests.Response:
+            headers = self._headers()
+            if extra_headers:
+                headers.update(extra_headers)
+            return self._session.post(f"{self.base_url}{path}", headers=headers, json=json)
+        resp = self._execute(_req)
         self._raise_api_error(resp)
         return cast(dict[str, Any], resp.json() if resp.content else {})
 
@@ -191,10 +220,12 @@ class CertiNextClient:
         Raises:
             CertiNextAPIError: On a non-2xx response. Provides ``.status_code`` and ``.body``.
         """
-        headers = self._headers()
-        if extra_headers:
-            headers.update(extra_headers)
-        resp = self._session.put(f"{self.base_url}{path}", headers=headers, json=json)
+        def _req() -> requests.Response:
+            headers = self._headers()
+            if extra_headers:
+                headers.update(extra_headers)
+            return self._session.put(f"{self.base_url}{path}", headers=headers, json=json)
+        resp = self._execute(_req)
         self._raise_api_error(resp)
         return cast(dict[str, Any], resp.json() if resp.content else {})
 
@@ -211,7 +242,9 @@ class CertiNextClient:
         Raises:
             CertiNextAPIError: On a non-2xx response. Provides ``.status_code`` and ``.body``.
         """
-        resp = self._session.patch(f"{self.base_url}{path}", headers=self._headers(), json=json)
+        resp = self._execute(
+            lambda: self._session.patch(f"{self.base_url}{path}", headers=self._headers(), json=json)
+        )
         self._raise_api_error(resp)
         return cast(dict[str, Any], resp.json() if resp.content else {})
 
@@ -227,6 +260,8 @@ class CertiNextClient:
         Raises:
             CertiNextAPIError: On a non-2xx response. Provides ``.status_code`` and ``.body``.
         """
-        resp = self._session.delete(f"{self.base_url}{path}", headers=self._headers())
+        resp = self._execute(
+            lambda: self._session.delete(f"{self.base_url}{path}", headers=self._headers())
+        )
         self._raise_api_error(resp)
         return resp.json() if resp.content else None

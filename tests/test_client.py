@@ -14,12 +14,14 @@
 
 """Tests for certinext.client.CertiNextClient."""
 
+from typing import cast
 from unittest.mock import MagicMock
 
 import pytest
 import requests
 
 from certinext.client import CertiNextClient
+from certinext.exceptions import CertiNextAPIError
 
 
 def _make_client() -> tuple[CertiNextClient, MagicMock]:
@@ -214,3 +216,56 @@ class TestGetBytes:
         client.get_bytes("/path", accept="application/x-pem-file", params={"format": "pem"})
         _, kwargs = mock_session.get.call_args
         assert kwargs["params"] == {"format": "pem"}
+
+
+def _401_response() -> MagicMock:
+    """Return a mock 401 response with ACCESS_TOKEN_REVOKED body."""
+    resp = MagicMock()
+    resp.status_code = 401
+    resp.raise_for_status.side_effect = requests.HTTPError("401")
+    resp.json.return_value = {"error": "ACCESS_TOKEN_REVOKED"}
+    resp.text = "ACCESS_TOKEN_REVOKED"
+    resp.content = b'{"error":"ACCESS_TOKEN_REVOKED"}'
+    return resp
+
+
+class TestTokenRefreshOn401:
+    """CertiNextClient retries once with a fresh token when the server returns 401."""
+
+    def test_get_retries_on_401(self):
+        """get() retries with a fresh token when the server returns ACCESS_TOKEN_REVOKED."""
+        client, mock_session = _make_client()
+        mock_session.get.side_effect = [_401_response(), _ok_response({"orderId": "abc"})]
+        result = client.get("/api/certinext/v2/ssl-certificates/abc")
+        assert mock_session.get.call_count == 2
+        cast(MagicMock, client._auth.invalidate).assert_called_once()
+        assert result == {"orderId": "abc"}
+
+    def test_get_raises_if_retry_also_401(self):
+        """get() propagates CertiNextAPIError when the retry also returns 401."""
+        client, mock_session = _make_client()
+        mock_session.get.side_effect = [_401_response(), _401_response()]
+        with pytest.raises(CertiNextAPIError):
+            client.get("/api/certinext/v2/ssl-certificates/abc")
+        assert mock_session.get.call_count == 2
+
+    def test_post_retries_on_401(self):
+        """post() retries with a fresh token when the server returns 401."""
+        client, mock_session = _make_client()
+        mock_session.post.side_effect = [_401_response(), _ok_response({"status": "created"})]
+        result = client.post("/api/certinext/v2/domains", json={"name": "test.com"})
+        assert mock_session.post.call_count == 2
+        assert result == {"status": "created"}
+
+    def test_non_401_error_not_retried(self):
+        """get() does not retry on non-401 errors (e.g. 404)."""
+        client, mock_session = _make_client()
+        resp_404 = MagicMock()
+        resp_404.status_code = 404
+        resp_404.raise_for_status.side_effect = requests.HTTPError("404")
+        resp_404.json.return_value = {"detail": "Not found"}
+        resp_404.content = b'{"detail":"Not found"}'
+        mock_session.get.return_value = resp_404
+        with pytest.raises(CertiNextAPIError):
+            client.get("/api/certinext/v2/missing")
+        assert mock_session.get.call_count == 1
