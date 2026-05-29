@@ -200,15 +200,11 @@ def _create_order(sess: CertiNextSession, args: argparse.Namespace, csr: str = "
     cert_type = args.cert_type
     sans: list[str] | None = args.sans or None
     csr_arg: str | None = csr.strip() or None
-
-    requestor_kwargs = dict(
-        requestor_name=args.requestor_name or "",
-        requestor_email=args.requestor_email or "",
-        requestor_phone=args.requestor_phone or "",
-        requestor_designation=args.requestor_designation or "",
-        signer_name=args.requestor_name or "",
-        signer_place=args.signer_place or "",
-    )
+    requestor_name: str = args.requestor_name or ""
+    requestor_email: str = args.requestor_email or ""
+    requestor_phone: str = args.requestor_phone or ""
+    requestor_designation: str = args.requestor_designation or ""
+    signer_place: str = args.signer_place or ""
     auto_secure_www: bool = bool(args.auto_secure_www)
     prevetting_token: str | None = getattr(args, "prevetting_token", None)
 
@@ -220,7 +216,12 @@ def _create_order(sess: CertiNextSession, args: argparse.Namespace, csr: str = "
                 additional_domains=sans,
                 auto_secure_www=auto_secure_www,
                 csr=csr_arg,
-                **requestor_kwargs,
+                requestor_name=requestor_name,
+                requestor_email=requestor_email,
+                requestor_phone=requestor_phone,
+                requestor_designation=requestor_designation,
+                signer_name=requestor_name,
+                signer_place=signer_place,
             )
         elif cert_type == "ov":
             return sess.ssl.create_ov(
@@ -231,7 +232,12 @@ def _create_order(sess: CertiNextSession, args: argparse.Namespace, csr: str = "
                 auto_secure_www=auto_secure_www,
                 prevetting_token=prevetting_token,
                 csr=csr_arg,
-                **requestor_kwargs,
+                requestor_name=requestor_name,
+                requestor_email=requestor_email,
+                requestor_phone=requestor_phone,
+                requestor_designation=requestor_designation,
+                signer_name=requestor_name,
+                signer_place=signer_place,
             )
         else:
             return sess.ssl.create_ev(
@@ -242,7 +248,12 @@ def _create_order(sess: CertiNextSession, args: argparse.Namespace, csr: str = "
                 auto_secure_www=auto_secure_www,
                 prevetting_token=prevetting_token,
                 csr=csr_arg,
-                **requestor_kwargs,
+                requestor_name=requestor_name,
+                requestor_email=requestor_email,
+                requestor_phone=requestor_phone,
+                requestor_designation=requestor_designation,
+                signer_name=requestor_name,
+                signer_place=signer_place,
             )
     except CertiNextAPIError as exc:
         fatal_api_error(exc, "Error creating order")

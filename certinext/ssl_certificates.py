@@ -808,6 +808,18 @@ class SslAccessor:
         signer_place: str = "",
         auto_secure_www: bool = False,
         csr: str | None = None,
+        group_number: str | None = None,
+        request_id: str | None = None,
+        renew_before_days: int | None = None,
+        remarks: str | None = None,
+        tags: list[str] | None = None,
+        recipient_emails: list[str] | None = None,
+        email_notifications: list[str] | None = None,
+        technical_poc_name: str = "",
+        technical_poc_email: str = "",
+        technical_poc_phone: str = "",
+        technical_poc_designation: str = "",
+        delegation: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Build the JSON body for a certificate creation request.
 
@@ -833,6 +845,26 @@ class SslAccessor:
                 explicitly.
             csr: PEM-encoded CSR to include with the initial order. When provided,
                 the CA may skip the ``pending-csr`` stage entirely.
+            group_number: Account sub-group to associate with this order.
+                Contact your CertiNext account manager for the correct value.
+            request_id: Custom request identifier for correlating this order with
+                an internal ticketing or provisioning system. Must be unique per
+                account.
+            renew_before_days: Days before expiry to begin the renewal process.
+                Sent in the ``subscription`` block. ``None`` uses the account default.
+            remarks: Free-text remarks stored with the order.
+            tags: Tag strings attached to the order for filtering and reporting.
+            recipient_emails: Email addresses notified when the certificate is issued,
+                in addition to the account's default notification settings.
+            email_notifications: Email addresses included in all notification events
+                for this order (creation, issuance, expiry). Overrides the account
+                default notification list when provided.
+            technical_poc_name: Full name of the technical point of contact.
+            technical_poc_email: Email address of the technical point of contact.
+            technical_poc_phone: Phone number of the technical POC in E.164 format.
+            technical_poc_designation: Job title or designation of the technical POC.
+            delegation: Raw delegation block as a dict. Contact your CertiNext
+                account manager for the correct structure and valid values.
 
         Returns:
             Dict ready to be serialised as the JSON request body. The
@@ -840,6 +872,10 @@ class SslAccessor:
             docs; ignore API error messages that call it ``"agreementDetails"``
             — that is a vendor-side naming inconsistency.
         """
+        subscription: dict[str, Any] = {"validityYears": validity_years, "autoRenew": False}
+        if renew_before_days is not None:
+            subscription["renewBeforeDays"] = renew_before_days
+
         cert: dict[str, Any] = {"domain": domain, "autoSecureWww": auto_secure_www}
         if additional_domains:
             cert["additionalDomains"] = additional_domains
@@ -847,7 +883,7 @@ class SslAccessor:
         body: dict[str, Any] = {
             "productVariant": product_variant,
             "certificate": cert,
-            "subscription": {"validityYears": validity_years, "autoRenew": False},
+            "subscription": subscription,
             "requestor": {
                 "name": requestor_name,
                 "email": requestor_email,
@@ -870,6 +906,27 @@ class SslAccessor:
             body["organization"] = org
         if csr:
             body["csr"] = csr
+        if group_number is not None:
+            body["groupNumber"] = group_number
+        if request_id is not None:
+            body["requestId"] = request_id
+        if remarks is not None:
+            body["remarks"] = remarks
+        if tags is not None:
+            body["tags"] = tags
+        if recipient_emails is not None:
+            body["recipientEmails"] = recipient_emails
+        if email_notifications is not None:
+            body["emailNotifications"] = email_notifications
+        if any([technical_poc_name, technical_poc_email, technical_poc_phone, technical_poc_designation]):
+            body["technicalPointOfContact"] = {
+                "name": technical_poc_name,
+                "email": technical_poc_email,
+                "phone": technical_poc_phone,
+                "designation": technical_poc_designation,
+            }
+        if delegation is not None:
+            body["delegation"] = delegation
         return body
 
     # --- create methods ---
@@ -887,6 +944,18 @@ class SslAccessor:
         signer_place: str = "",
         auto_secure_www: bool = False,
         csr: str | None = None,
+        group_number: str | None = None,
+        request_id: str | None = None,
+        renew_before_days: int | None = None,
+        remarks: str | None = None,
+        tags: list[str] | None = None,
+        recipient_emails: list[str] | None = None,
+        email_notifications: list[str] | None = None,
+        technical_poc_name: str = "",
+        technical_poc_email: str = "",
+        technical_poc_phone: str = "",
+        technical_poc_designation: str = "",
+        delegation: dict[str, Any] | None = None,
     ) -> SslOrder:
         """Create a DV (Domain Validated) single-domain certificate order.
 
@@ -905,6 +974,18 @@ class SslAccessor:
             signer_place: City or location of the signer (e.g. ``"Portland, ME"``).
             auto_secure_www: Request automatic www-redirect coverage (default: ``False``).
             csr: PEM-encoded CSR to include with the initial order (optional).
+            group_number: Account sub-group for this order (optional).
+            request_id: Custom request identifier for internal correlation (optional).
+            renew_before_days: Days before expiry to begin renewal (``None`` = account default).
+            remarks: Free-text remarks stored with the order.
+            tags: Tag strings for filtering and reporting.
+            recipient_emails: Email addresses notified on issuance.
+            email_notifications: Email addresses for all order notifications.
+            technical_poc_name: Full name of the technical point of contact.
+            technical_poc_email: Email of the technical point of contact.
+            technical_poc_phone: Phone of the technical POC (E.164 format).
+            technical_poc_designation: Job title of the technical POC.
+            delegation: Raw delegation block (see CertiNext account manager).
 
         Returns:
             :class:`SslOrder` with status ``"pending-csr"`` or a later stage.
@@ -917,8 +998,13 @@ class SslAccessor:
             requestor_name, requestor_email, requestor_phone, requestor_designation,
             additional_domains=additional_domains,
             signer_name=signer_name, signer_place=signer_place,
-            auto_secure_www=auto_secure_www,
-            csr=csr,
+            auto_secure_www=auto_secure_www, csr=csr,
+            group_number=group_number, request_id=request_id,
+            renew_before_days=renew_before_days, remarks=remarks, tags=tags,
+            recipient_emails=recipient_emails, email_notifications=email_notifications,
+            technical_poc_name=technical_poc_name, technical_poc_email=technical_poc_email,
+            technical_poc_phone=technical_poc_phone, technical_poc_designation=technical_poc_designation,
+            delegation=delegation,
         ))
 
     def create_dv_wildcard(
@@ -933,6 +1019,18 @@ class SslAccessor:
         signer_place: str = "",
         auto_secure_www: bool = False,
         csr: str | None = None,
+        group_number: str | None = None,
+        request_id: str | None = None,
+        renew_before_days: int | None = None,
+        remarks: str | None = None,
+        tags: list[str] | None = None,
+        recipient_emails: list[str] | None = None,
+        email_notifications: list[str] | None = None,
+        technical_poc_name: str = "",
+        technical_poc_email: str = "",
+        technical_poc_phone: str = "",
+        technical_poc_designation: str = "",
+        delegation: dict[str, Any] | None = None,
     ) -> SslOrder:
         """Create a DV wildcard certificate order.
 
@@ -949,6 +1047,18 @@ class SslAccessor:
             signer_place: City or location of the signer.
             auto_secure_www: Request automatic www-redirect coverage (default: ``False``).
             csr: PEM-encoded CSR to include with the initial order (optional).
+            group_number: Account sub-group for this order (optional).
+            request_id: Custom request identifier for internal correlation (optional).
+            renew_before_days: Days before expiry to begin renewal (``None`` = account default).
+            remarks: Free-text remarks stored with the order.
+            tags: Tag strings for filtering and reporting.
+            recipient_emails: Email addresses notified on issuance.
+            email_notifications: Email addresses for all order notifications.
+            technical_poc_name: Full name of the technical point of contact.
+            technical_poc_email: Email of the technical point of contact.
+            technical_poc_phone: Phone of the technical POC (E.164 format).
+            technical_poc_designation: Job title of the technical POC.
+            delegation: Raw delegation block (see CertiNext account manager).
 
         Returns:
             :class:`SslOrder` for the wildcard certificate.
@@ -960,8 +1070,13 @@ class SslAccessor:
             "dv-wildcard", domain, validity_years,
             requestor_name, requestor_email, requestor_phone, requestor_designation,
             signer_name=signer_name, signer_place=signer_place,
-            auto_secure_www=auto_secure_www,
-            csr=csr,
+            auto_secure_www=auto_secure_www, csr=csr,
+            group_number=group_number, request_id=request_id,
+            renew_before_days=renew_before_days, remarks=remarks, tags=tags,
+            recipient_emails=recipient_emails, email_notifications=email_notifications,
+            technical_poc_name=technical_poc_name, technical_poc_email=technical_poc_email,
+            technical_poc_phone=technical_poc_phone, technical_poc_designation=technical_poc_designation,
+            delegation=delegation,
         ))
 
     def create_dv_ucc(
@@ -976,6 +1091,18 @@ class SslAccessor:
         signer_place: str = "",
         auto_secure_www: bool = False,
         csr: str | None = None,
+        group_number: str | None = None,
+        request_id: str | None = None,
+        renew_before_days: int | None = None,
+        remarks: str | None = None,
+        tags: list[str] | None = None,
+        recipient_emails: list[str] | None = None,
+        email_notifications: list[str] | None = None,
+        technical_poc_name: str = "",
+        technical_poc_email: str = "",
+        technical_poc_phone: str = "",
+        technical_poc_designation: str = "",
+        delegation: dict[str, Any] | None = None,
     ) -> SslOrder:
         """Create a DV UCC (multi-domain / Unified Communications) certificate order.
 
@@ -993,6 +1120,18 @@ class SslAccessor:
             signer_place: City or location of the signer.
             auto_secure_www: Request automatic www-redirect coverage (default: ``False``).
             csr: PEM-encoded CSR to include with the initial order (optional).
+            group_number: Account sub-group for this order (optional).
+            request_id: Custom request identifier for internal correlation (optional).
+            renew_before_days: Days before expiry to begin renewal (``None`` = account default).
+            remarks: Free-text remarks stored with the order.
+            tags: Tag strings for filtering and reporting.
+            recipient_emails: Email addresses notified on issuance.
+            email_notifications: Email addresses for all order notifications.
+            technical_poc_name: Full name of the technical point of contact.
+            technical_poc_email: Email of the technical point of contact.
+            technical_poc_phone: Phone of the technical POC (E.164 format).
+            technical_poc_designation: Job title of the technical POC.
+            delegation: Raw delegation block (see CertiNext account manager).
 
         Returns:
             :class:`SslOrder` for the multi-domain certificate.
@@ -1008,8 +1147,13 @@ class SslAccessor:
             requestor_name, requestor_email, requestor_phone, requestor_designation,
             additional_domains=domains[1:] or None,
             signer_name=signer_name, signer_place=signer_place,
-            auto_secure_www=auto_secure_www,
-            csr=csr,
+            auto_secure_www=auto_secure_www, csr=csr,
+            group_number=group_number, request_id=request_id,
+            renew_before_days=renew_before_days, remarks=remarks, tags=tags,
+            recipient_emails=recipient_emails, email_notifications=email_notifications,
+            technical_poc_name=technical_poc_name, technical_poc_email=technical_poc_email,
+            technical_poc_phone=technical_poc_phone, technical_poc_designation=technical_poc_designation,
+            delegation=delegation,
         ))
 
     def create_dv_wildcard_ucc(
@@ -1024,6 +1168,18 @@ class SslAccessor:
         signer_place: str = "",
         auto_secure_www: bool = False,
         csr: str | None = None,
+        group_number: str | None = None,
+        request_id: str | None = None,
+        renew_before_days: int | None = None,
+        remarks: str | None = None,
+        tags: list[str] | None = None,
+        recipient_emails: list[str] | None = None,
+        email_notifications: list[str] | None = None,
+        technical_poc_name: str = "",
+        technical_poc_email: str = "",
+        technical_poc_phone: str = "",
+        technical_poc_designation: str = "",
+        delegation: dict[str, Any] | None = None,
     ) -> SslOrder:
         """Create a DV wildcard UCC certificate order.
 
@@ -1041,6 +1197,18 @@ class SslAccessor:
             signer_place: City or location of the signer.
             auto_secure_www: Request automatic www-redirect coverage (default: ``False``).
             csr: PEM-encoded CSR to include with the initial order (optional).
+            group_number: Account sub-group for this order (optional).
+            request_id: Custom request identifier for internal correlation (optional).
+            renew_before_days: Days before expiry to begin renewal (``None`` = account default).
+            remarks: Free-text remarks stored with the order.
+            tags: Tag strings for filtering and reporting.
+            recipient_emails: Email addresses notified on issuance.
+            email_notifications: Email addresses for all order notifications.
+            technical_poc_name: Full name of the technical point of contact.
+            technical_poc_email: Email of the technical point of contact.
+            technical_poc_phone: Phone of the technical POC (E.164 format).
+            technical_poc_designation: Job title of the technical POC.
+            delegation: Raw delegation block (see CertiNext account manager).
 
         Returns:
             :class:`SslOrder` for the wildcard UCC certificate.
@@ -1056,8 +1224,13 @@ class SslAccessor:
             requestor_name, requestor_email, requestor_phone, requestor_designation,
             additional_domains=domains[1:] or None,
             signer_name=signer_name, signer_place=signer_place,
-            auto_secure_www=auto_secure_www,
-            csr=csr,
+            auto_secure_www=auto_secure_www, csr=csr,
+            group_number=group_number, request_id=request_id,
+            renew_before_days=renew_before_days, remarks=remarks, tags=tags,
+            recipient_emails=recipient_emails, email_notifications=email_notifications,
+            technical_poc_name=technical_poc_name, technical_poc_email=technical_poc_email,
+            technical_poc_phone=technical_poc_phone, technical_poc_designation=technical_poc_designation,
+            delegation=delegation,
         ))
 
     def create_ov(
@@ -1075,6 +1248,18 @@ class SslAccessor:
         auto_secure_www: bool = False,
         prevetting_token: str | None = None,
         csr: str | None = None,
+        group_number: str | None = None,
+        request_id: str | None = None,
+        renew_before_days: int | None = None,
+        remarks: str | None = None,
+        tags: list[str] | None = None,
+        recipient_emails: list[str] | None = None,
+        email_notifications: list[str] | None = None,
+        technical_poc_name: str = "",
+        technical_poc_email: str = "",
+        technical_poc_phone: str = "",
+        technical_poc_designation: str = "",
+        delegation: dict[str, Any] | None = None,
     ) -> SslOrder:
         """Create an OV (Organization Validated) single-domain certificate order.
 
@@ -1097,6 +1282,18 @@ class SslAccessor:
             prevetting_token: Organization Consent Token; when provided the CA
                 auto-approves without a manual approver step.
             csr: PEM-encoded CSR to include with the initial order (optional).
+            group_number: Account sub-group for this order (optional).
+            request_id: Custom request identifier for internal correlation (optional).
+            renew_before_days: Days before expiry to begin renewal (``None`` = account default).
+            remarks: Free-text remarks stored with the order.
+            tags: Tag strings for filtering and reporting.
+            recipient_emails: Email addresses notified on issuance.
+            email_notifications: Email addresses for all order notifications.
+            technical_poc_name: Full name of the technical point of contact.
+            technical_poc_email: Email of the technical point of contact.
+            technical_poc_phone: Phone of the technical POC (E.164 format).
+            technical_poc_designation: Job title of the technical POC.
+            delegation: Raw delegation block (see CertiNext account manager).
 
         Returns:
             :class:`SslOrder` for the OV certificate.
@@ -1108,11 +1305,15 @@ class SslAccessor:
             "ov", domain, validity_years,
             requestor_name, requestor_email, requestor_phone, requestor_designation,
             additional_domains=additional_domains,
-            organization_id=organization_id,
-            prevetting_token=prevetting_token,
+            organization_id=organization_id, prevetting_token=prevetting_token,
             signer_name=signer_name, signer_place=signer_place,
-            auto_secure_www=auto_secure_www,
-            csr=csr,
+            auto_secure_www=auto_secure_www, csr=csr,
+            group_number=group_number, request_id=request_id,
+            renew_before_days=renew_before_days, remarks=remarks, tags=tags,
+            recipient_emails=recipient_emails, email_notifications=email_notifications,
+            technical_poc_name=technical_poc_name, technical_poc_email=technical_poc_email,
+            technical_poc_phone=technical_poc_phone, technical_poc_designation=technical_poc_designation,
+            delegation=delegation,
         ))
 
     def create_ov_wildcard(
@@ -1129,6 +1330,18 @@ class SslAccessor:
         auto_secure_www: bool = False,
         prevetting_token: str | None = None,
         csr: str | None = None,
+        group_number: str | None = None,
+        request_id: str | None = None,
+        renew_before_days: int | None = None,
+        remarks: str | None = None,
+        tags: list[str] | None = None,
+        recipient_emails: list[str] | None = None,
+        email_notifications: list[str] | None = None,
+        technical_poc_name: str = "",
+        technical_poc_email: str = "",
+        technical_poc_phone: str = "",
+        technical_poc_designation: str = "",
+        delegation: dict[str, Any] | None = None,
     ) -> SslOrder:
         """Create an OV wildcard certificate order.
 
@@ -1149,6 +1362,18 @@ class SslAccessor:
             prevetting_token: Organization Consent Token; when provided the CA
                 auto-approves without a manual approver step.
             csr: PEM-encoded CSR to include with the initial order (optional).
+            group_number: Account sub-group for this order (optional).
+            request_id: Custom request identifier for internal correlation (optional).
+            renew_before_days: Days before expiry to begin renewal (``None`` = account default).
+            remarks: Free-text remarks stored with the order.
+            tags: Tag strings for filtering and reporting.
+            recipient_emails: Email addresses notified on issuance.
+            email_notifications: Email addresses for all order notifications.
+            technical_poc_name: Full name of the technical point of contact.
+            technical_poc_email: Email of the technical point of contact.
+            technical_poc_phone: Phone of the technical POC (E.164 format).
+            technical_poc_designation: Job title of the technical POC.
+            delegation: Raw delegation block (see CertiNext account manager).
 
         Returns:
             :class:`SslOrder` for the OV wildcard certificate.
@@ -1159,11 +1384,15 @@ class SslAccessor:
         return self._create(self._build_body(
             "ov-wildcard", domain, validity_years,
             requestor_name, requestor_email, requestor_phone, requestor_designation,
-            organization_id=organization_id,
-            prevetting_token=prevetting_token,
+            organization_id=organization_id, prevetting_token=prevetting_token,
             signer_name=signer_name, signer_place=signer_place,
-            auto_secure_www=auto_secure_www,
-            csr=csr,
+            auto_secure_www=auto_secure_www, csr=csr,
+            group_number=group_number, request_id=request_id,
+            renew_before_days=renew_before_days, remarks=remarks, tags=tags,
+            recipient_emails=recipient_emails, email_notifications=email_notifications,
+            technical_poc_name=technical_poc_name, technical_poc_email=technical_poc_email,
+            technical_poc_phone=technical_poc_phone, technical_poc_designation=technical_poc_designation,
+            delegation=delegation,
         ))
 
     def create_ov_ucc(
@@ -1180,6 +1409,18 @@ class SslAccessor:
         auto_secure_www: bool = False,
         prevetting_token: str | None = None,
         csr: str | None = None,
+        group_number: str | None = None,
+        request_id: str | None = None,
+        renew_before_days: int | None = None,
+        remarks: str | None = None,
+        tags: list[str] | None = None,
+        recipient_emails: list[str] | None = None,
+        email_notifications: list[str] | None = None,
+        technical_poc_name: str = "",
+        technical_poc_email: str = "",
+        technical_poc_phone: str = "",
+        technical_poc_designation: str = "",
+        delegation: dict[str, Any] | None = None,
     ) -> SslOrder:
         """Create an OV UCC (multi-domain) certificate order.
 
@@ -1201,6 +1442,18 @@ class SslAccessor:
             prevetting_token: Organization Consent Token; when provided the CA
                 auto-approves without a manual approver step.
             csr: PEM-encoded CSR to include with the initial order (optional).
+            group_number: Account sub-group for this order (optional).
+            request_id: Custom request identifier for internal correlation (optional).
+            renew_before_days: Days before expiry to begin renewal (``None`` = account default).
+            remarks: Free-text remarks stored with the order.
+            tags: Tag strings for filtering and reporting.
+            recipient_emails: Email addresses notified on issuance.
+            email_notifications: Email addresses for all order notifications.
+            technical_poc_name: Full name of the technical point of contact.
+            technical_poc_email: Email of the technical point of contact.
+            technical_poc_phone: Phone of the technical POC (E.164 format).
+            technical_poc_designation: Job title of the technical POC.
+            delegation: Raw delegation block (see CertiNext account manager).
 
         Returns:
             :class:`SslOrder` for the OV multi-domain certificate.
@@ -1215,11 +1468,15 @@ class SslAccessor:
             "ov-ucc", domains[0], validity_years,
             requestor_name, requestor_email, requestor_phone, requestor_designation,
             additional_domains=domains[1:] or None,
-            organization_id=organization_id,
-            prevetting_token=prevetting_token,
+            organization_id=organization_id, prevetting_token=prevetting_token,
             signer_name=signer_name, signer_place=signer_place,
-            auto_secure_www=auto_secure_www,
-            csr=csr,
+            auto_secure_www=auto_secure_www, csr=csr,
+            group_number=group_number, request_id=request_id,
+            renew_before_days=renew_before_days, remarks=remarks, tags=tags,
+            recipient_emails=recipient_emails, email_notifications=email_notifications,
+            technical_poc_name=technical_poc_name, technical_poc_email=technical_poc_email,
+            technical_poc_phone=technical_poc_phone, technical_poc_designation=technical_poc_designation,
+            delegation=delegation,
         ))
 
     def create_ov_wildcard_ucc(
@@ -1236,6 +1493,18 @@ class SslAccessor:
         auto_secure_www: bool = False,
         prevetting_token: str | None = None,
         csr: str | None = None,
+        group_number: str | None = None,
+        request_id: str | None = None,
+        renew_before_days: int | None = None,
+        remarks: str | None = None,
+        tags: list[str] | None = None,
+        recipient_emails: list[str] | None = None,
+        email_notifications: list[str] | None = None,
+        technical_poc_name: str = "",
+        technical_poc_email: str = "",
+        technical_poc_phone: str = "",
+        technical_poc_designation: str = "",
+        delegation: dict[str, Any] | None = None,
     ) -> SslOrder:
         """Create an OV wildcard UCC certificate order.
 
@@ -1257,6 +1526,18 @@ class SslAccessor:
             prevetting_token: Organization Consent Token; when provided the CA
                 auto-approves without a manual approver step.
             csr: PEM-encoded CSR to include with the initial order (optional).
+            group_number: Account sub-group for this order (optional).
+            request_id: Custom request identifier for internal correlation (optional).
+            renew_before_days: Days before expiry to begin renewal (``None`` = account default).
+            remarks: Free-text remarks stored with the order.
+            tags: Tag strings for filtering and reporting.
+            recipient_emails: Email addresses notified on issuance.
+            email_notifications: Email addresses for all order notifications.
+            technical_poc_name: Full name of the technical point of contact.
+            technical_poc_email: Email of the technical point of contact.
+            technical_poc_phone: Phone of the technical POC (E.164 format).
+            technical_poc_designation: Job title of the technical POC.
+            delegation: Raw delegation block (see CertiNext account manager).
 
         Returns:
             :class:`SslOrder` for the OV wildcard UCC certificate.
@@ -1271,11 +1552,15 @@ class SslAccessor:
             "ov-wildcard-ucc", domains[0], validity_years,
             requestor_name, requestor_email, requestor_phone, requestor_designation,
             additional_domains=domains[1:] or None,
-            organization_id=organization_id,
-            prevetting_token=prevetting_token,
+            organization_id=organization_id, prevetting_token=prevetting_token,
             signer_name=signer_name, signer_place=signer_place,
-            auto_secure_www=auto_secure_www,
-            csr=csr,
+            auto_secure_www=auto_secure_www, csr=csr,
+            group_number=group_number, request_id=request_id,
+            renew_before_days=renew_before_days, remarks=remarks, tags=tags,
+            recipient_emails=recipient_emails, email_notifications=email_notifications,
+            technical_poc_name=technical_poc_name, technical_poc_email=technical_poc_email,
+            technical_poc_phone=technical_poc_phone, technical_poc_designation=technical_poc_designation,
+            delegation=delegation,
         ))
 
     def create_ev(
@@ -1293,6 +1578,18 @@ class SslAccessor:
         auto_secure_www: bool = False,
         prevetting_token: str | None = None,
         csr: str | None = None,
+        group_number: str | None = None,
+        request_id: str | None = None,
+        renew_before_days: int | None = None,
+        remarks: str | None = None,
+        tags: list[str] | None = None,
+        recipient_emails: list[str] | None = None,
+        email_notifications: list[str] | None = None,
+        technical_poc_name: str = "",
+        technical_poc_email: str = "",
+        technical_poc_phone: str = "",
+        technical_poc_designation: str = "",
+        delegation: dict[str, Any] | None = None,
     ) -> SslOrder:
         """Create an EV (Extended Validation) single-domain certificate order.
 
@@ -1315,6 +1612,18 @@ class SslAccessor:
             prevetting_token: Organization Consent Token; when provided the CA
                 auto-approves without a manual approver step.
             csr: PEM-encoded CSR to include with the initial order (optional).
+            group_number: Account sub-group for this order (optional).
+            request_id: Custom request identifier for internal correlation (optional).
+            renew_before_days: Days before expiry to begin renewal (``None`` = account default).
+            remarks: Free-text remarks stored with the order.
+            tags: Tag strings for filtering and reporting.
+            recipient_emails: Email addresses notified on issuance.
+            email_notifications: Email addresses for all order notifications.
+            technical_poc_name: Full name of the technical point of contact.
+            technical_poc_email: Email of the technical point of contact.
+            technical_poc_phone: Phone of the technical POC (E.164 format).
+            technical_poc_designation: Job title of the technical POC.
+            delegation: Raw delegation block (see CertiNext account manager).
 
         Returns:
             :class:`SslOrder` for the EV certificate.
@@ -1326,11 +1635,15 @@ class SslAccessor:
             "ev", domain, validity_years,
             requestor_name, requestor_email, requestor_phone, requestor_designation,
             additional_domains=additional_domains,
-            organization_id=organization_id,
-            prevetting_token=prevetting_token,
+            organization_id=organization_id, prevetting_token=prevetting_token,
             signer_name=signer_name, signer_place=signer_place,
-            auto_secure_www=auto_secure_www,
-            csr=csr,
+            auto_secure_www=auto_secure_www, csr=csr,
+            group_number=group_number, request_id=request_id,
+            renew_before_days=renew_before_days, remarks=remarks, tags=tags,
+            recipient_emails=recipient_emails, email_notifications=email_notifications,
+            technical_poc_name=technical_poc_name, technical_poc_email=technical_poc_email,
+            technical_poc_phone=technical_poc_phone, technical_poc_designation=technical_poc_designation,
+            delegation=delegation,
         ))
 
     def create_ev_ucc(
@@ -1347,6 +1660,18 @@ class SslAccessor:
         auto_secure_www: bool = False,
         prevetting_token: str | None = None,
         csr: str | None = None,
+        group_number: str | None = None,
+        request_id: str | None = None,
+        renew_before_days: int | None = None,
+        remarks: str | None = None,
+        tags: list[str] | None = None,
+        recipient_emails: list[str] | None = None,
+        email_notifications: list[str] | None = None,
+        technical_poc_name: str = "",
+        technical_poc_email: str = "",
+        technical_poc_phone: str = "",
+        technical_poc_designation: str = "",
+        delegation: dict[str, Any] | None = None,
     ) -> SslOrder:
         """Create an EV UCC (multi-domain) certificate order.
 
@@ -1368,6 +1693,18 @@ class SslAccessor:
             prevetting_token: Organization Consent Token; when provided the CA
                 auto-approves without a manual approver step.
             csr: PEM-encoded CSR to include with the initial order (optional).
+            group_number: Account sub-group for this order (optional).
+            request_id: Custom request identifier for internal correlation (optional).
+            renew_before_days: Days before expiry to begin renewal (``None`` = account default).
+            remarks: Free-text remarks stored with the order.
+            tags: Tag strings for filtering and reporting.
+            recipient_emails: Email addresses notified on issuance.
+            email_notifications: Email addresses for all order notifications.
+            technical_poc_name: Full name of the technical point of contact.
+            technical_poc_email: Email of the technical point of contact.
+            technical_poc_phone: Phone of the technical POC (E.164 format).
+            technical_poc_designation: Job title of the technical POC.
+            delegation: Raw delegation block (see CertiNext account manager).
 
         Returns:
             :class:`SslOrder` for the EV multi-domain certificate.
@@ -1382,11 +1719,15 @@ class SslAccessor:
             "ev-ucc", domains[0], validity_years,
             requestor_name, requestor_email, requestor_phone, requestor_designation,
             additional_domains=domains[1:] or None,
-            organization_id=organization_id,
-            prevetting_token=prevetting_token,
+            organization_id=organization_id, prevetting_token=prevetting_token,
             signer_name=signer_name, signer_place=signer_place,
-            auto_secure_www=auto_secure_www,
-            csr=csr,
+            auto_secure_www=auto_secure_www, csr=csr,
+            group_number=group_number, request_id=request_id,
+            renew_before_days=renew_before_days, remarks=remarks, tags=tags,
+            recipient_emails=recipient_emails, email_notifications=email_notifications,
+            technical_poc_name=technical_poc_name, technical_poc_email=technical_poc_email,
+            technical_poc_phone=technical_poc_phone, technical_poc_designation=technical_poc_designation,
+            delegation=delegation,
         ))
 
     def get(self, order_id: str) -> SslOrder:
