@@ -483,17 +483,44 @@ class DomainAccessor:
             raise ValueError(f"Unexpected list response for domain {domain_id_or_name!r}")
         return Domain(self._client, result)
 
-    def create(self, name: str, **fields: Any) -> Domain:
-        """Create a new domain and return it as a `Domain` object.
+    def create(
+        self,
+        name: str,
+        organization_id: str | None = None,
+    ) -> Domain:
+        """Create a new domain and return it as a :class:`Domain` object.
 
         Args:
-            name: The fully-qualified domain name to register (e.g. ``example.com``).
-            **fields: Additional fields to include in the API request body.
+            name: The fully-qualified domain name to register (e.g. ``"example.com"``).
+            organization_id: Organization to associate this domain with. Required
+                unless your account only has a single organization.
 
         Returns:
-            The newly created `Domain`.
+            The newly created :class:`Domain`.
 
         Raises:
             CertiNextAPIError: On a non-2xx API response. Provides ``.status_code`` and ``.body``.
         """
-        return Domain(self._client, self._client.post(_BASE, json={"name": name, **fields}))
+        body: dict[str, Any] = {"name": name}
+        if organization_id is not None:
+            body["organizationId"] = organization_id
+        return Domain(self._client, self._client.post(_BASE, json=body))
+
+    def deactivate(self, domain_id: str) -> Domain:
+        """Deactivate a domain by its ID.
+
+        Equivalent to ``accessor.get(domain_id).deactivate()`` but avoids the
+        extra GET request when the domain ID is already known.
+
+        Args:
+            domain_id: The domain's opaque ID (not the domain name). Retrieve it
+                from :attr:`Domain.id` or :meth:`get`.
+
+        Returns:
+            A :class:`Domain` reflecting the deactivated state.
+
+        Raises:
+            CertiNextAPIError: On a non-2xx API response. Provides ``.status_code`` and ``.body``.
+        """
+        data = self._client.post(f"{_BASE}/{domain_id}/deactivate")
+        return Domain(self._client, data)

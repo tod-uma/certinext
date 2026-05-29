@@ -445,9 +445,32 @@ class TestDomainAccessorCreate:
         result = accessor.create("newdomain.example.edu")
         assert isinstance(result, Domain)
 
-    def test_create_passes_extra_fields(self, accessor: DomainAccessor, mock_client: MagicMock):
-        """create() includes extra keyword arguments in the POST body."""
+    def test_create_with_organization_id(self, accessor: DomainAccessor, mock_client: MagicMock):
+        """create() includes organizationId in the POST body when organization_id is given."""
         mock_client.post.return_value = dict(SAMPLE_DOMAIN_DATA)
-        accessor.create("newdomain.example.edu", organizationId="org-123")
+        accessor.create("newdomain.example.edu", organization_id="org-123")
         _, kwargs = mock_client.post.call_args
-        assert kwargs["json"]["organizationId"] == "org-123"
+        assert kwargs["json"] == {"name": "newdomain.example.edu", "organizationId": "org-123"}
+
+    def test_create_without_organization_id_omits_field(self, accessor: DomainAccessor, mock_client: MagicMock):
+        """create() omits organizationId from the body when not given."""
+        mock_client.post.return_value = dict(SAMPLE_DOMAIN_DATA)
+        accessor.create("newdomain.example.edu")
+        _, kwargs = mock_client.post.call_args
+        assert kwargs["json"] == {"name": "newdomain.example.edu"}
+
+
+class TestDomainAccessorDeactivate:
+    """DomainAccessor.deactivate() posts to the deactivate endpoint by ID."""
+
+    def test_deactivate_posts_to_correct_url(self, accessor: DomainAccessor, mock_client: MagicMock):
+        """deactivate() POSTs to /domains/{domain_id}/deactivate."""
+        mock_client.post.return_value = dict(SAMPLE_DOMAIN_DATA)
+        accessor.deactivate("dom-abc-123")
+        mock_client.post.assert_called_once_with("/api/certinext/v2/domains/dom-abc-123/deactivate")
+
+    def test_deactivate_returns_domain(self, accessor: DomainAccessor, mock_client: MagicMock):
+        """deactivate() returns a Domain wrapping the API response."""
+        mock_client.post.return_value = dict(SAMPLE_DOMAIN_DATA)
+        result = accessor.deactivate("dom-abc-123")
+        assert isinstance(result, Domain)
