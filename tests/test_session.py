@@ -108,3 +108,54 @@ class TestSessionFactory:
             client_secret="secret",
         )
         assert sess._client.base_url == "https://eu-api.certinext.io"
+
+    def test_sandbox_true_uses_sandbox_base_url(self):
+        """session(sandbox=True) defaults to the sandbox base URL, not production."""
+        sess = certinext.session(client_id="acct", client_secret="secret", sandbox=True)
+        assert sess._client.base_url == certinext.SANDBOX_BASE_URL
+        assert sess._client.base_url != certinext.BASE_URL
+
+    def test_sandbox_true_uses_sandbox_token_url(self):
+        """session(sandbox=True) defaults to the sandbox token URL."""
+        sess = certinext.session(client_id="acct", client_secret="secret", sandbox=True)
+        assert "sandbox" in sess._client._auth.token_url
+
+    def test_sandbox_false_uses_production_urls(self):
+        """session(sandbox=False) uses production URLs (default behaviour)."""
+        sess = certinext.session(client_id="acct", client_secret="secret", sandbox=False)
+        assert sess._client.base_url == certinext.BASE_URL
+
+    def test_explicit_url_overrides_sandbox_flag(self):
+        """An explicit base_url takes precedence over sandbox=True."""
+        custom = "https://custom-api.example.com"
+        sess = certinext.session(
+            base_url=custom, client_id="acct", client_secret="secret", sandbox=True
+        )
+        assert sess._client.base_url == custom
+
+    def test_sandbox_flag_stored_on_session(self):
+        """session.sandbox reflects the sandbox argument."""
+        assert certinext.session(sandbox=True).sandbox is True
+        assert certinext.session(sandbox=False).sandbox is False
+
+
+class TestCertiNextSessionSandbox:
+    """CertiNextSession.__init__ sandbox URL defaulting."""
+
+    def test_sandbox_true_defaults_to_sandbox_base_url(self):
+        """CertiNextSession(sandbox=True) uses sandbox base URL by default."""
+        sess = CertiNextSession(client_id="acct", client_secret="secret", sandbox=True)
+        assert sess._client.base_url == certinext.SANDBOX_BASE_URL
+
+    def test_sandbox_false_defaults_to_production_base_url(self):
+        """CertiNextSession(sandbox=False) uses production base URL by default."""
+        sess = CertiNextSession(client_id="acct", client_secret="secret", sandbox=False)
+        assert sess._client.base_url == certinext.BASE_URL
+
+    def test_explicit_base_url_overrides_sandbox(self):
+        """An explicit base_url overrides the sandbox=True default."""
+        custom = "https://eu-api.certinext.io"
+        sess = CertiNextSession(
+            base_url=custom, client_id="acct", client_secret="secret", sandbox=True
+        )
+        assert sess._client.base_url == custom
