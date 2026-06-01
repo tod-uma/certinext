@@ -1071,3 +1071,180 @@ class TestOrderWorkflowFromCsr:
         with patch("certinext.csr.parse_csr", return_value=fake_info):
             wf = OrderWorkflow.from_csr(order, "fake-pem", signer_name="X")
         assert wf._signer_place == "Orono, Maine"
+
+
+# ---------------------------------------------------------------------------
+# CertificateDownload.as_pem_chain
+# ---------------------------------------------------------------------------
+
+_LEAF = "-----BEGIN CERTIFICATE-----\nLEAF\n-----END CERTIFICATE-----"
+_INT1 = "-----BEGIN CERTIFICATE-----\nINT1\n-----END CERTIFICATE-----"
+_INT2 = "-----BEGIN CERTIFICATE-----\nINT2\n-----END CERTIFICATE-----"
+
+
+class TestCertificateDownloadAsPemChain:
+    """as_pem_chain() builds a leaf-first fullchain with a single trailing newline."""
+
+    def test_leaf_first_order(self):
+        """Chain is end-entity cert followed by intermediates, in order."""
+        cert = CertificateDownload({"certificatePem": _LEAF, "chainPem": [_INT1, _INT2]})
+        chain = cert.as_pem_chain()
+        assert chain == f"{_LEAF}\n{_INT1}\n{_INT2}\n"
+        assert chain.index("LEAF") < chain.index("INT1") < chain.index("INT2")
+
+    def test_single_trailing_newline(self):
+        """Trailing/embedded whitespace is normalised to one final newline."""
+        cert = CertificateDownload({"certificatePem": _LEAF + "\n\n", "chainPem": [_INT1 + "\n"]})
+        chain = cert.as_pem_chain()
+        assert chain == f"{_LEAF}\n{_INT1}\n"
+        assert chain.endswith("\n")
+        assert not chain.endswith("\n\n")
+
+    def test_leaf_only_when_no_chain(self):
+        """With no intermediates the chain is just the leaf plus a newline."""
+        cert = CertificateDownload({"certificatePem": _LEAF})
+        assert cert.as_pem_chain() == f"{_LEAF}\n"
+
+    def test_empty_when_no_certificate(self):
+        """Returns an empty string when there is no certificate at all."""
+        assert CertificateDownload({}).as_pem_chain() == ""
+
+
+# ---------------------------------------------------------------------------
+# SslAccessor.create — product dispatcher
+# ---------------------------------------------------------------------------
+
+class TestSslAccessorCreateDispatch:
+    """create() routes to create_dv/ov/ev by product and validates org id."""
+
+    def _make_accessor(self) -> tuple[SslAccessor, MagicMock]:
+        client, mock_session = _make_client()
+        return SslAccessor(client), mock_session
+
+    def test_dv_dispatch(self):
+        """create('dv', ...) POSTs a dv order."""
+        accessor, mock_session = self._make_accessor()
+        mock_session.post.return_value = _ok_response(_ORDER_DATA)
+        accessor.create("dv", "example.com")
+        _, kwargs = mock_session.post.call_args
+        assert kwargs["json"]["productVariant"] == "dv"
+
+    def test_dv_is_case_insensitive(self):
+        """Product matching ignores case and surrounding whitespace."""
+        accessor, mock_session = self._make_accessor()
+        mock_session.post.return_value = _ok_response(_ORDER_DATA)
+        accessor.create(" DV ", "example.com")
+        _, kwargs = mock_session.post.call_args
+        assert kwargs["json"]["productVariant"] == "dv"
+
+    def test_dv_forwards_kwargs(self):
+        """Extra kwargs are forwarded to the underlying create_* method."""
+        accessor, mock_session = self._make_accessor()
+        mock_session.post.return_value = _ok_response(_ORDER_DATA)
+        accessor.create("dv", "example.com", validity_years=2,
+                        additional_domains=["www.example.com"])
+        _, kwargs = mock_session.post.call_args
+        assert kwargs["json"]["subscription"]["validityYears"] == 2
+        assert "www.example.com" in kwargs["json"]["certificate"]["additionalDomains"]
+
+    def test_ov_dispatch_includes_org(self):
+        """create('ov', ..., organization_id=...) POSTs an ov order with the org."""
+        accessor, mock_session = self._make_accessor()
+        mock_session.post.return_value = _ok_response(_ORDER_DATA)
+        accessor.create("ov", "example.com", organization_id="ORG-001")
+        _, kwargs = mock_session.post.call_args
+        assert kwargs["json"]["productVariant"] == "ov"
+        assert kwargs["json"]["organization"]["organizationNumber"] == "ORG-001"
+
+    def test_ev_dispatch(self):
+        """create('ev', ..., organization_id=...) POSTs an ev order."""
+        accessor, mock_session = self._make_accessor()
+        mock_session.post.return_value = _ok_response(_ORDER_DATA)
+        accessor.create("ev", "example.com", organization_id="ORG-001")
+        _, kwargs = mock_session.post.call_args
+        assert kwargs["json"]["productVariant"] == "ev"
+
+    def test_ov_without_org_raises(self):
+        """create('ov', ...) without organization_id raises ValueError."""
+        accessor, _ = self._make_accessor()
+        with pytest.raises(ValueError, match="organization_id is required"):
+            accessor.create("ov", "example.com")
+
+    def test_ev_without_org_raises(self):
+        """create('ev', ...) without organization_id raises ValueError."""
+        accessor, _ = self._make_accessor()
+        with pytest.raises(ValueError, match="organization_id is required"):
+            accessor.create("ev", "example.com")
+
+    def test_unknown_product_raises(self):
+        """An unrecognised product raises ValueError."""
+        accessor, _ = self._make_accessor()
+        with pytest.raises(ValueError, match="Unknown product"):
+            accessor.create("xv", "example.com")
+
+
+# ---------------------------------------------------------------------------
+# OrderWorkflow.download_chain
+# ---------------------------------------------------------------------------
+
+class TestOrderWorkflowDownloadChain:
+    """download_chain() returns a normalised fullchain, retrying on 422."""
+
+    def test_returns_fullchain(self):
+        """download_chain() returns the leaf-first chain from the JSON download."""
+        wf, _, _ = _make_workflow("issued")
+        download = CertificateDownload({"certificatePem": _LEAF, "chainPem": [_INT1]})
+        with patch.object(wf.order, "download_certificate", return_value=download):
+            chain = wf.download_chain()
+        assert chain == f"{_LEAF}\n{_INT1}\n"
+
+    def test_retries_on_422_then_succeeds(self):
+        """download_chain() retries when the first attempt returns 422."""
+        wf, _, _ = _make_workflow("issued")
+        download = CertificateDownload({"certificatePem": _LEAF, "chainPem": []})
+        call_count = 0
+
+        def side_effect() -> CertificateDownload:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise CertiNextAPIError(422, {"detail": "not ready"})
+            return download
+
+        with patch.object(wf.order, "download_certificate", side_effect=side_effect):
+            with patch("certinext.ssl_certificates.time"):
+                chain = wf.download_chain(retry_delay=0)
+
+        assert chain == f"{_LEAF}\n"
+        assert call_count == 2
+
+    def test_raises_after_all_retries_exhausted(self):
+        """download_chain() raises CertiNextAPIError after all retries fail."""
+        wf, _, _ = _make_workflow("issued")
+        with patch.object(wf.order, "download_certificate",
+                          side_effect=CertiNextAPIError(422, {})):
+            with patch("certinext.ssl_certificates.time"):
+                with pytest.raises(CertiNextAPIError):
+                    wf.download_chain(retries=2, retry_delay=0)
+
+
+# ---------------------------------------------------------------------------
+# OrderWorkflow.from_order_id
+# ---------------------------------------------------------------------------
+
+class TestOrderWorkflowFromOrderId:
+    """from_order_id() resumes a workflow from a persisted order id."""
+
+    def test_fetches_and_wraps_order(self):
+        """from_order_id() fetches via session.ssl.get and wraps the result."""
+        client, _ = _make_client()
+        order = SslOrder(client, _ORDER_DATA)
+        session = MagicMock()
+        session.ssl.get.return_value = order
+        wf = OrderWorkflow.from_order_id(
+            session, "ORDER-001", signer_name="Jane Doe", signer_place="Portland, ME"
+        )
+        session.ssl.get.assert_called_once_with("ORDER-001")
+        assert wf.order is order
+        assert wf._signer_name == "Jane Doe"
+        assert wf._signer_place == "Portland, ME"
