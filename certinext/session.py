@@ -45,8 +45,8 @@ class CertiNextSession:
 
     def __init__(
         self,
-        base_url: str = "https://us-api.certinext.io",
-        token_url: str = "https://us-api.certinext.io/oauth/token",
+        base_url: str = "",
+        token_url: str = "",
         client_id: str = "",
         client_secret: str = "",
         scope: str = "",
@@ -54,17 +54,23 @@ class CertiNextSession:
     ) -> None:
         """
         Args:
-            base_url: CertiNext API base URL.
-            token_url: OAuth 2.0 token endpoint URL.
+            base_url: CertiNext API base URL. Defaults to the US production
+                endpoint, or the US sandbox endpoint when ``sandbox=True``.
+                Explicit values always take precedence over the ``sandbox`` flag.
+            token_url: OAuth 2.0 token endpoint URL. Defaults to match
+                ``base_url`` (production or sandbox).
             client_id: Your CertiNext account number (used as the OAuth client ID).
             client_secret: OAuth client secret generated in the CertiNext portal.
             scope: Optional OAuth scope string.
-            sandbox: Whether this session is connected to the sandbox API. Callers
-                can read this attribute to adjust behaviour (e.g. mark audit records
-                as sandbox entries) without re-inspecting the base URL.
+            sandbox: When ``True``, default ``base_url`` / ``token_url`` to the
+                sandbox endpoints. Callers can also read this attribute to adjust
+                behaviour without re-inspecting the base URL.
         """
+        from . import BASE_URL, SANDBOX_BASE_URL, SANDBOX_TOKEN_URL, TOKEN_URL
         self.sandbox = sandbox
-        self._client = CertiNextClient(base_url, token_url, client_id, client_secret, scope)
+        resolved_base = base_url or (SANDBOX_BASE_URL if sandbox else BASE_URL)
+        resolved_token = token_url or (SANDBOX_TOKEN_URL if sandbox else TOKEN_URL)
+        self._client = CertiNextClient(resolved_base, resolved_token, client_id, client_secret, scope)
         self.accounts = AccountAccessor(self._client)
         self.catalog = CatalogAccessor(self._client)
         self.domain = DomainAccessor(self._client)

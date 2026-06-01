@@ -85,8 +85,8 @@ SANDBOX_TOKEN_URL: str = "https://sandbox-us-api.certinext.io/oauth/token"
 
 
 def session(
-    base_url: str = BASE_URL,
-    token_url: str = TOKEN_URL,
+    base_url: str = "",
+    token_url: str = "",
     client_id: str = "",
     client_secret: str = "",
     scope: str = "",
@@ -97,20 +97,28 @@ def session(
     This is the recommended entry point for the library. The session obtains
     and caches an OAuth 2.0 bearer token automatically.
 
+    When ``sandbox=True`` the sandbox endpoints are used by default — you do
+    not need to pass explicit ``base_url`` / ``token_url`` values.  Explicit
+    URL arguments always take precedence over the ``sandbox`` flag.
+
     Args:
-        base_url: CertiNext API base URL. Defaults to the US production endpoint.
-        token_url: OAuth 2.0 token endpoint URL.
+        base_url: CertiNext API base URL. Defaults to the US production
+            endpoint, or the US sandbox endpoint when ``sandbox=True``.
+        token_url: OAuth 2.0 token endpoint URL. Defaults to the production
+            (or sandbox) token endpoint to match ``base_url``.
         client_id: Your CertiNext account number (used as the OAuth client ID).
         client_secret: OAuth client secret generated in the CertiNext portal
             under Integrations → APIs → OAuth mode.
         scope: Optional OAuth scope string. Leave empty if not required.
-        sandbox: Pass ``True`` when connecting to the sandbox environment so
-            callers can read ``session.sandbox`` without re-inspecting the URL.
+        sandbox: When ``True``, connect to the sandbox environment and default
+            ``base_url`` / ``token_url`` to the sandbox endpoints.
 
     Returns:
         A configured `CertiNextSession` ready to make API calls.
     """
-    return CertiNextSession(base_url, token_url, client_id, client_secret, scope, sandbox)
+    resolved_base = base_url or (SANDBOX_BASE_URL if sandbox else BASE_URL)
+    resolved_token = token_url or (SANDBOX_TOKEN_URL if sandbox else TOKEN_URL)
+    return CertiNextSession(resolved_base, resolved_token, client_id, client_secret, scope, sandbox)
 
 
 __all__ = [
