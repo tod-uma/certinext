@@ -67,10 +67,13 @@ with the initial order or separately via ``PUT /ssl-certificates/{orderId}/csr``
 import logging
 import time
 from collections.abc import Callable
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from .client import CertiNextClient
 from .exceptions import CertiNextAPIError, CertiNextTimeoutError  # noqa: F401 — referenced in Raises docstrings
+
+if TYPE_CHECKING:
+    from .session import CertiNextSession
 
 log = logging.getLogger(__name__)
 
@@ -254,6 +257,31 @@ class CertificateDownload:
         """List of PEM-encoded intermediate CA certificates."""
         val = self._data.get("chainPem")
         return val if isinstance(val, list) else []
+
+    def as_pem_chain(self) -> str:
+        """Return the full certificate chain as a leaf-first PEM string.
+
+        Concatenates the end-entity certificate (:attr:`certificate_pem`)
+        followed by each intermediate in :attr:`chain_pem`, normalised so the
+        result ends with exactly one trailing newline. This is the
+        ``fullchain`` layout ACME clients and servers expect, assembled
+        deterministically from the JSON download fields — independent of the
+        ordering of the raw bundle returned by
+        :meth:`SslOrder.download_certificate_pem`.
+
+        Returns:
+            Leaf-first PEM chain (end-entity certificate followed by its
+            intermediates) ending in a single newline, or an empty string if
+            no certificate is present.
+        """
+        pems = [
+            pem.strip()
+            for pem in [self.certificate_pem or "", *self.chain_pem]
+            if pem and pem.strip()
+        ]
+        if not pems:
+            return ""
+        return "\n".join(pems) + "\n"
 
     def as_dict(self) -> dict[str, Any]:
         """Return the raw API response dict."""
@@ -949,6 +977,53 @@ class SslAccessor:
         return body
 
     # --- create methods ---
+
+    def create(
+        self,
+        product: str,
+        domain: str,
+        *,
+        organization_id: str | None = None,
+        **kwargs: Any,
+    ) -> SslOrder:
+        """Create an SSL order, dispatching on validation level.
+
+        Convenience wrapper over :meth:`create_dv`, :meth:`create_ov`, and
+        :meth:`create_ev` so callers that take the product as configuration or
+        CLI input don't have to branch on it themselves.
+
+        Args:
+            product: Validation level — ``"dv"``, ``"ov"``, or ``"ev"``
+                (case-insensitive).
+            domain: Primary domain (common name) for the certificate.
+            organization_id: CertiNext organization ID. Required for ``"ov"``
+                and ``"ev"`` orders; ignored for ``"dv"``.
+            **kwargs: Forwarded verbatim to the underlying ``create_*`` method
+                (e.g. ``validity_years``, ``additional_domains``, ``csr``,
+                requestor/signer fields).
+
+        Returns:
+            The created :class:`SslOrder`.
+
+        Raises:
+            ValueError: If *product* is not one of ``dv``/``ov``/``ev``, or if
+                *organization_id* is missing for an ``ov``/``ev`` order.
+            CertiNextAPIError: On a non-2xx API response.
+        """
+        level = product.strip().lower()
+        if level == "dv":
+            return self.create_dv(domain, **kwargs)
+        if level in ("ov", "ev"):
+            if not organization_id:
+                raise ValueError(
+                    f"organization_id is required for {level!r} certificates"
+                )
+            if level == "ov":
+                return self.create_ov(domain, organization_id, **kwargs)
+            return self.create_ev(domain, organization_id, **kwargs)
+        raise ValueError(
+            f"Unknown product {product!r}; expected one of 'dv', 'ov', 'ev'"
+        )
 
     def create_dv(
         self,
@@ -1876,6 +1951,45 @@ class OrderWorkflow:
                 pass
         return cls(order, signer_name=signer_name, signer_place=signer_place, auto_verify_dcv=auto_verify_dcv)
 
+    @classmethod
+    def from_order_id(
+        cls,
+        session: "CertiNextSession",
+        order_id: str,
+        *,
+        signer_name: str = "",
+        signer_place: str = "",
+        auto_verify_dcv: bool = True,
+    ) -> "OrderWorkflow":
+        """Create an :class:`OrderWorkflow` for an existing order by its ID.
+
+        Fetches the live order with :meth:`SslAccessor.get` and wraps it. This
+        is the resume pattern for callers that persist only the ``order_id``
+        (e.g. an externally-retried finalizer) and re-derive order state from
+        the API on each attempt.
+
+        Args:
+            session: A :class:`~certinext.session.CertiNextSession`.
+            order_id: The ``orderId`` returned when the order was created.
+            signer_name: Signer name for agreement acceptance (see
+                :meth:`__init__`).
+            signer_place: Signer location for agreement acceptance.
+            auto_verify_dcv: Passed through to :meth:`__init__`.
+
+        Returns:
+            A configured :class:`OrderWorkflow` wrapping the fetched order.
+
+        Raises:
+            CertiNextAPIError: On a non-2xx API response (404 if not found).
+        """
+        order = session.ssl.get(order_id)
+        return cls(
+            order,
+            signer_name=signer_name,
+            signer_place=signer_place,
+            auto_verify_dcv=auto_verify_dcv,
+        )
+
     # --- Event registration ---
 
     def on(self, event: str, handler: Callable[..., None]) -> "OrderWorkflow":
@@ -2127,6 +2241,40 @@ class OrderWorkflow:
         for attempt in range(1, retries + 1):
             try:
                 return self._order.download_certificate_pem()
+            except CertiNextAPIError as exc:
+                if exc.status_code == 422 and attempt < retries:
+                    log.debug(
+                        "Certificate not ready yet (HTTP 422), retrying in %ds "
+                        "(attempt %d/%d)",
+                        retry_delay, attempt, retries,
+                    )
+                    time.sleep(retry_delay)
+                else:
+                    raise
+        raise AssertionError("unreachable")  # pragma: no cover
+
+    def download_chain(self, *, retries: int = 5, retry_delay: int = 5) -> str:
+        """Download the issued certificate as a leaf-first PEM fullchain.
+
+        Behaves like :meth:`download` (same HTTP 422 "not ready yet" retry
+        loop) but returns :meth:`CertificateDownload.as_pem_chain` — the
+        end-entity certificate followed by its intermediates, normalised to a
+        single trailing newline. Prefer this over :meth:`download` when you
+        need a deterministically ordered ``fullchain``.
+
+        Args:
+            retries: Maximum number of download attempts (default 5).
+            retry_delay: Seconds between retries (default 5).
+
+        Returns:
+            Leaf-first PEM fullchain string.
+
+        Raises:
+            CertiNextAPIError: If all attempts fail.
+        """
+        for attempt in range(1, retries + 1):
+            try:
+                return self._order.download_certificate().as_pem_chain()
             except CertiNextAPIError as exc:
                 if exc.status_code == 422 and attempt < retries:
                     log.debug(
