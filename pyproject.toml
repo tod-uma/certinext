@@ -62,6 +62,9 @@ keyring = [
 csr = [
     "cryptography>=42.0.0",
 ]
+dns = [
+    "dnspython>=2.0",
+]
 
 [tool.setuptools.packages.find]
 where = ["."]

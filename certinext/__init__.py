@@ -50,7 +50,16 @@ from .accounts import AccountAccessor, AccountInfo, Group, Organization
 from .catalog import CatalogAccessor, CustomField, Product, ProductCategory
 from .client import CertiNextClient
 from .csr import CsrInfo
-from .domains import VALID_DCV_METHODS, DcvInfo, DcvMethod, DcvStatus, Domain, DomainAccessor, DomainStatus
+from .domains import (
+    VALID_DCV_METHODS,
+    DcvInfo,
+    DcvMethod,
+    DcvStatus,
+    Domain,
+    DomainAccessor,
+    DomainStatus,
+    filter_needs_dcv,
+)
 from .exceptions import (
     CertiNextAPIError,
     CertiNextConflictError,
@@ -152,6 +161,7 @@ __all__ = [
     "Domain",
     "DomainAccessor",
     "DcvInfo",
+    "filter_needs_dcv",
     "DcvMethod",
     "DcvStatus",
     "DomainStatus",
