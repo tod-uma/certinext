@@ -12,13 +12,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import logging
 import re
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
 
 from .client import CertiNextClient
 from .exceptions import CertiNextAPIError  # noqa: F401 — referenced in Raises docstrings
+
+log = logging.getLogger(__name__)
 
 _BASE = "/api/certinext/v2/domains"
 
@@ -93,6 +96,34 @@ class DcvVerifyResult:
     def __repr__(self) -> str:
         """Return a developer-friendly representation."""
         return f"DcvVerifyResult({self!s})"
+
+
+def _has_ns_records(name: str) -> bool:
+    """Return True if name has its own NS records, indicating a DNS zone boundary.
+
+    Requires dnspython (``pip install certinext[dns]``). Returns ``False``
+    when dnspython is not installed or the query fails, erring on the side of
+    assuming the parent covers the domain.
+
+    Args:
+        name: Fully-qualified domain name to query for NS records.
+
+    Returns:
+        ``True`` if NS records were found, ``False`` otherwise or on error.
+    """
+    try:
+        import dns.resolver
+        dns.resolver.resolve(name, "NS")
+        return True
+    except ImportError:
+        log.debug(
+            "%s: dnspython not installed; skipping NS check "
+            "(pip install certinext[dns] to enable zone-boundary detection)",
+            name,
+        )
+        return False
+    except Exception:
+        return False
 
 
 class Domain:
@@ -181,6 +212,40 @@ class Domain:
         except (ValueError, TypeError):
             return None
 
+    @property
+    def verified_at(self) -> datetime | None:
+        """Timestamp when DCV was last completed, as a timezone-aware UTC datetime.
+
+        Returns ``None`` when the field is absent (domain not yet verified) or
+        not a parseable ISO 8601 string.
+        """
+        raw = self._data.get("verifiedAt")
+        if not raw:
+            return None
+        try:
+            return datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        except (ValueError, TypeError):
+            return None
+
+    @property
+    def dcv_expires(self) -> datetime | None:
+        """DCV token expiry as a timezone-aware UTC ``datetime``, or ``None``.
+
+        The API returns this as ``validTill`` at the top level of the domain
+        detail response.  Only present after DCV has been completed; ``None``
+        for domains in PENDING or REJECTED state.
+
+        Returns ``None`` when the field is absent, null, or not a parseable
+        ISO 8601 string.
+        """
+        raw = self._data.get("validTill")
+        if not raw:
+            return None
+        try:
+            return datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        except (ValueError, TypeError):
+            return None
+
     # --- dunder methods ---
 
     def __str__(self) -> str:
@@ -191,6 +256,8 @@ class Domain:
         lines.append(row("id:", self.id))
         lines.append(row("status:", self.status))
         lines.append(row("dcv_status:", self.dcv_status))
+        if self.dcv_expires:
+            lines.append(row("dcv_expires:", self.dcv_expires))
         lines.append(row("organization:", self.organization_name))
         if self.created_at:
             lines.append(row("created:", self.created_at))
@@ -207,6 +274,86 @@ class Domain:
         """Return True if this domain is active and not yet DCV-verified."""
         return self.status == "ACTIVE" and self.dcv_status != "VERIFIED"
 
+    def dcv_expires_soon(self, days: int = 30) -> bool:
+        """Return True if the DCV token expires within ``days`` days.
+
+        Useful for building proactive renewal workflows — call this before
+        :meth:`verify` to avoid letting DCV lapse.  Returns ``False`` when
+        :attr:`dcv_expires` is ``None`` (field not present in the API
+        response or domain has no active DCV token).
+
+        Args:
+            days: Number of days ahead to check. Default is 30.
+
+        Returns:
+            ``True`` if the DCV expiry is known and within ``days`` days
+            from now (including already-expired tokens).
+        """
+        exp = self.dcv_expires
+        if exp is None:
+            return False
+        return exp <= datetime.now(timezone.utc) + timedelta(days=days)
+
+    def dcv_covering_parent(
+        self,
+        all_domain_names: set[str],
+        *,
+        check_ns: bool = True,
+    ) -> str | None:
+        """Return the closest registered ancestor that covers this domain's DCV, or None.
+
+        CertiNext propagates DCV verification down the domain tree: once a
+        parent is verified, its subdomains inherit that status automatically.
+        This method finds the closest ancestor in *all_domain_names* that
+        provides that coverage.
+
+        However, propagation stops at DNS zone boundaries.  A subdomain that
+        has its own NS records forms a separate DNS zone and **will not**
+        inherit DCV from its parent — it must be validated directly.  When
+        *check_ns* is ``True`` an NS DNS lookup is performed; if NS records
+        are found ``None`` is returned even when a parent exists in
+        *all_domain_names*.  Requires ``dnspython``
+        (``pip install certinext[dns]``); falls back gracefully when not
+        installed.
+
+        .. note::
+
+            Zone-boundary behaviour confirmed by members of the InCommon
+            cert-users mailing list (2026-06-01):
+
+            - **Cory Gekoski, University of Maryland** — identified the
+              pattern: subdomains with MX records pointing to their own DNS
+              servers failed to inherit DCV while those sharing the parent's
+              DNS succeeded, suggesting a zone-delegation root cause.
+            - **Blake Bourgeois, Louisiana State University** — confirmed the
+              definitive indicator: every subdomain that did not inherit DCV
+              had its own NS records (a distinct DNS subzone), regardless of
+              MX configuration.
+
+        Args:
+            all_domain_names: Set of all registered domain names (typically
+                the full account list). Used to identify covering ancestors.
+            check_ns: When ``True`` (the default), query DNS for NS records
+                to detect zone boundaries. Set to ``False`` to skip DNS
+                lookups (useful in tests or environments without DNS access).
+
+        Returns:
+            The covering ancestor domain name, or ``None`` if no ancestor is
+            registered or this domain is a DNS zone boundary.
+        """
+        if check_ns and _has_ns_records(self.name or ""):
+            log.debug(
+                "%s: has NS records (DNS zone boundary) — DCV will not propagate from parent",
+                self.name,
+            )
+            return None
+        labels = (self.name or "").split(".")
+        for i in range(1, len(labels) - 1):
+            parent = ".".join(labels[i:])
+            if parent in all_domain_names:
+                return parent
+        return None
+
     def as_dict(self) -> dict[str, Any]:
         """Return the raw API response dict for this domain."""
         return self._data
@@ -219,6 +366,7 @@ class Domain:
             "name": _s(self.name),
             "status": _s(self.status),
             "dcv_status": _s(self.dcv_status),
+            "dcv_expires": self.dcv_expires.isoformat() if self.dcv_expires else "",
             "organization": _s(self.organization_name),
             "created_at": self.created_at.isoformat() if self.created_at else "",
             "id": _s(self.id),
@@ -332,6 +480,43 @@ class Domain:
             CertiNextAPIError: On a non-2xx API response. Provides ``.status_code`` and ``.body``.
         """
         return self._client.get(f"{_BASE}/{self.id}/dcv/attempts")
+
+
+def filter_needs_dcv(
+    domains: list[Domain],
+    all_domain_names: set[str],
+    *,
+    check_ns: bool = True,
+) -> list[Domain]:
+    """Return domains that genuinely need direct DCV validation.
+
+    Removes any domain whose DCV would be covered by a registered ancestor
+    in *all_domain_names* via CertiNext's propagation rules.  When
+    *check_ns* is ``True`` (the default), a DNS NS lookup is performed for
+    each domain to detect zone boundaries — domains with their own NS records
+    form a separate DNS zone and cannot inherit DCV, so they are always
+    included in the result even when an ancestor exists.
+
+    Typical usage::
+
+        all_names = {d.name for d in all_domains if d.name}
+        to_validate = filter_needs_dcv(pending_domains, all_names)
+
+    Args:
+        domains: Domains to evaluate (typically only the pending-DCV subset).
+        all_domain_names: Full set of registered domain names in the account,
+            used to identify covering ancestors.
+        check_ns: When ``True``, query DNS for NS records to detect zone
+            boundaries. Set to ``False`` to skip DNS lookups (tests, no DNS
+            access). Default is ``True``.
+
+    Returns:
+        Filtered list containing only domains that require direct DCV.
+    """
+    return [
+        d for d in domains
+        if d.dcv_covering_parent(all_domain_names, check_ns=check_ns) is None
+    ]
 
 
 class DomainAccessor:

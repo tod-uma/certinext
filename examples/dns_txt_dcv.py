@@ -51,6 +51,7 @@ import uuid
 from typing import Any
 
 from certinext._cli import add_connection_args, apply_sandbox, build_session
+from certinext.domains import filter_needs_dcv
 from certinext.exceptions import CertiNextAPIError
 
 log = logging.getLogger(__name__)
@@ -220,68 +221,6 @@ def _all_see_txt(fqdn: str, value: str, nameservers: list[str]) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Domain filtering
-# ---------------------------------------------------------------------------
-
-
-def _covered_by_parent(name: str, all_domain_names: set[str]) -> str | None:
-    """Return the closest ancestor domain in all_domain_names that covers name, or None.
-
-    CertiNext propagates DCV coverage down the domain tree: verifying
-    ``example.com`` also covers ``sub.example.com``. This function identifies
-    domains in the pending list that will be covered by a parent processed in
-    the same run, so the child can be skipped.
-
-    Stops before bare TLDs: requires at least two labels in the candidate
-    parent, so ``example.com`` may be covered by ``com`` is never matched.
-
-    Args:
-        name: The domain name to check (e.g. ``sub.example.com``).
-        all_domain_names: Set of all domain names in this run (verified + pending).
-
-    Returns:
-        The covering ancestor domain name, or None if no ancestor is present.
-    """
-    labels = name.split(".")
-    for i in range(1, len(labels) - 1):
-        parent = ".".join(labels[i:])
-        if parent in all_domain_names:
-            return parent
-    return None
-
-
-def _filter_pending(domains: list[Any], pending: list[Any]) -> list[Any]:
-    """Remove subdomains covered by a parent domain from the pending list.
-
-    Args:
-        domains: Full domain list (verified + pending), used to build the
-            set of names that count as covering parents.
-        pending: Domains that need DCV processing.
-
-    Returns:
-        Filtered pending list with covered subdomains removed.
-    """
-    all_domain_names = {d.name for d in domains if d.name}
-    covered: list[tuple[str, str]] = []
-    filtered: list[Any] = []
-    for d in pending:
-        parent = _covered_by_parent(d.name or "", all_domain_names)
-        if parent:
-            covered.append((d.name or "(unknown)", parent))
-        else:
-            filtered.append(d)
-    for name, parent in covered:
-        log.debug(
-            "%s: covered by parent domain %s — skipping (use --include-subdomains to override)",
-            name,
-            parent,
-        )
-    if covered:
-        log.info("Skipped %d subdomain(s) covered by parent domain(s)", len(covered))
-    return filtered
-
-
-# ---------------------------------------------------------------------------
 # Per-domain DCV pipeline
 # ---------------------------------------------------------------------------
 
@@ -441,7 +380,8 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Process all domains even if a parent domain is also in the list. "
             "By default, subdomains are skipped when a parent will be validated "
-            "in the same run (CertiNext propagates DCV coverage down the tree)."
+            "in the same run, unless the subdomain has its own NS records (a DNS "
+            "zone boundary) in which case it always needs direct DCV validation."
         ),
     )
     parser.add_argument(
@@ -549,7 +489,12 @@ def main() -> None:
         )
 
         if not args.include_subdomains:
-            pending = _filter_pending(domains, pending)
+            all_names = {d.name for d in domains if d.name}
+            before = len(pending)
+            pending = filter_needs_dcv(pending, all_names)
+            skipped = before - len(pending)
+            if skipped:
+                log.info("Skipped %d subdomain(s) covered by parent domain(s)", skipped)
 
         for domain in pending:
             try:

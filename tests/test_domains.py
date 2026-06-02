@@ -124,7 +124,7 @@ class TestDomainHelpers:
     def test_to_row_keys(self, domain: Domain):
         """to_row() returns a dict with the expected column keys."""
         row = domain.to_row()
-        assert set(row.keys()) == {"id", "name", "status", "dcv_status", "organization", "created_at"}
+        assert set(row.keys()) == {"id", "name", "status", "dcv_status", "dcv_expires", "organization", "created_at"}
 
     def test_to_row_values_are_strings(self, domain: Domain):
         """to_row() returns only string values."""

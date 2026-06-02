@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "certinext"
-version = "0.2.1rc2"
+version = "0.2.1rc3"
 description = "Python client library for the CertiNext certificate management API"
 readme = "README.md"
 license = "Apache-2.0"
@@ -39,6 +39,7 @@ certinext-list-certificates = "certinext.list_certificates_cli:main"
 certinext-pending-dcv = "certinext.pending_dcv_cli:main"
 certinext-domain-cert-count = "certinext.domain_cert_count_cli:main"
 certinext-issue-cert = "certinext.issue_certificate_cli:main"
+certinext-parent-dcv-status = "certinext.parent_dcv_status_cli:main"
 
 [project.urls]
 Homepage = "https://github.com/tod-uma/certinext"
@@ -55,12 +56,16 @@ dev = [
     "types-tabulate>=0.9",
     "keyring",
     "cryptography>=42.0.0",
+    "dnspython>=2.0",
 ]
 keyring = [
     "keyring",
 ]
 csr = [
     "cryptography>=42.0.0",
+]
+dns = [
+    "dnspython>=2.0",
 ]
 
 [tool.setuptools.packages.find]
