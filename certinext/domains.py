@@ -112,7 +112,7 @@ def _has_ns_records(name: str) -> bool:
         ``True`` if NS records were found, ``False`` otherwise or on error.
     """
     try:
-        import dns.resolver  # type: ignore[import-untyped]
+        import dns.resolver
         dns.resolver.resolve(name, "NS")
         return True
     except ImportError:
