@@ -15,15 +15,25 @@ To adapt this script to your environment, implement the two stub functions
 near the top of the file: ``set_dns_txt_record`` and ``has_dns_txt_record``.
 Both stubs include inline examples using dnspython and AWS Route 53.
 
+Credentials are resolved in priority order: CLI flag → OS keychain
+(``certinext-setup-keyring``) → environment variable → interactive prompt.
+Use ``--sandbox`` to target the sandbox API and sandbox keyring profile.
+
 Usage::
 
+    # credentials from keychain (run certinext-setup-keyring once first)
+    python dns_txt_dcv.py
+    python dns_txt_dcv.py --sandbox
+    python dns_txt_dcv.py --dry-run
+
+    # credentials from environment variables
     export CERTINEXT_CLIENT_ID="your-account-number"
     export CERTINEXT_CLIENT_SECRET="your-client-secret"
-
     python dns_txt_dcv.py
-    python dns_txt_dcv.py --dry-run
-    python dns_txt_dcv.py --pattern r".*\\.example\\.com"
+
+    # filter to a domain or pattern
     python dns_txt_dcv.py example.com sub.example.com
+    python dns_txt_dcv.py --pattern r".*\\.example\\.com"
 
 Verbosity levels (cumulative):
   -v      Show configuration details (nameserver overrides, domain filter).
@@ -32,18 +42,28 @@ Verbosity levels (cumulative):
 """
 
 import argparse
-import getpass
 import logging
 import os
 import re
+import signal
 import sys
 import uuid
 from typing import Any
 
-import certinext
+from certinext._cli import add_connection_args, apply_sandbox, build_session
 from certinext.exceptions import CertiNextAPIError
 
 log = logging.getLogger(__name__)
+
+
+def _sigterm_handler(_signum: int, _frame: object) -> None:
+    """Raise KeyboardInterrupt on SIGTERM so the run logs cleanly and exits 130.
+
+    Schedulers (cron, systemd) send SIGTERM before SIGKILL. Without a handler
+    the process dies silently with no log entry and no correlation_id.
+    """
+    raise KeyboardInterrupt
+
 
 # Comma-separated authoritative nameservers to check before triggering verify().
 # Leave empty to skip the authoritative propagation check and rely only on
@@ -364,61 +384,21 @@ def process_domain(
 # ---------------------------------------------------------------------------
 
 
-def _resolve(
-    arg_value: str | None,
-    env_var: str,
-    prompt: str,
-    secret: bool = False,
-) -> str:
-    """Return the first non-empty value from: CLI arg, environment variable, interactive prompt.
-
-    In non-interactive mode (no controlling terminal, e.g. cron), fails immediately
-    with a clear error rather than hanging on a prompt that will never be answered.
-
-    Args:
-        arg_value: Value from a CLI argument, or None if not provided.
-        env_var: Environment variable name to fall back to.
-        prompt: Text shown when prompting interactively.
-        secret: If True, use getpass so input is not echoed.
-
-    Returns:
-        The resolved credential string.
-    """
-    if arg_value:
-        return arg_value
-    env_value = os.environ.get(env_var)
-    if env_value:
-        return env_value
-    if not sys.stdin.isatty():
-        sys.exit(
-            f"ERROR: {prompt} not found in CLI args or env var {env_var!r} — "
-            f"cannot prompt in non-interactive mode"
-        )
-    try:
-        if secret:
-            return getpass.getpass(f"{prompt}: ")
-        return input(f"{prompt}: ")
-    except EOFError:
-        sys.exit(
-            f"ERROR: {prompt} not found in CLI args or env var {env_var!r} — "
-            f"stdin is not interactive"
-        )
-
-
 def _setup_logging(verbose: int) -> None:
     """Configure logging level and format based on verbosity count.
 
     Args:
         verbose: Verbosity count from -v flags (0=INFO, 3+=DEBUG, 4+=third-party DEBUG).
     """
-    interactive = sys.stderr.isatty()
     logging.basicConfig(
         level=logging.DEBUG if verbose >= 3 else logging.INFO,
-        format="%(message)s" if interactive else "%(asctime)s %(levelname)-8s %(message)s",
+        format="%(message)s" if sys.stderr.isatty() else "%(asctime)s %(levelname)-8s %(message)s",
     )
     if verbose < 4:
         logging.getLogger("urllib3").setLevel(logging.WARNING)
         logging.getLogger("keyring").setLevel(logging.WARNING)
+        logging.getLogger("jaraco").setLevel(logging.WARNING)
+        logging.getLogger("win32ctypes").setLevel(logging.WARNING)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -452,16 +432,8 @@ def build_parser() -> argparse.ArgumentParser:
             "-vvvv also enables third-party debug logging (urllib3)"
         ),
     )
-    parser.add_argument(
-        "--certinext-client-id",
-        metavar="ID",
-        help="CertiNext client ID / account number (env: CERTINEXT_CLIENT_ID)",
-    )
-    parser.add_argument(
-        "--certinext-client-secret",
-        metavar="SECRET",
-        help="CertiNext client secret (env: CERTINEXT_CLIENT_SECRET)",
-    )
+    cn_group = parser.add_argument_group("CertiNext connection")
+    add_connection_args(cn_group)
     parser.add_argument(
         "--include-subdomains",
         action="store_true",
@@ -512,30 +484,29 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     """Run the DNS-TXT DCV automation script."""
-    parser = build_parser()
-    args = parser.parse_args()
-
-    effective_pattern = args.pattern or os.environ.get("DOMAIN_PATTERN")
-    if args.domain and effective_pattern:
-        parser.error("DOMAIN positional args and --pattern/DOMAIN_PATTERN are mutually exclusive")
-
-    _setup_logging(args.verbose)
-
-    client_id = _resolve(args.certinext_client_id, "CERTINEXT_CLIENT_ID", "CertiNext client ID")
-    client_secret = _resolve(
-        args.certinext_client_secret,
-        "CERTINEXT_CLIENT_SECRET",
-        "CertiNext client secret",
-        secret=True,
-    )
-
-    sess = certinext.session(client_id=client_id, client_secret=client_secret)
     correlation_id = str(uuid.uuid4())
-    log.info("Starting run pid=%d correlation_id=%s", os.getpid(), correlation_id)
-
     interrupted = False
     had_errors = False
     try:
+        parser = build_parser()
+        args = parser.parse_args()
+
+        effective_pattern = args.pattern or os.environ.get("DOMAIN_PATTERN")
+        if args.domain and effective_pattern:
+            parser.error("DOMAIN positional args and --pattern/DOMAIN_PATTERN are mutually exclusive")
+
+        _setup_logging(args.verbose)
+        signal.signal(signal.SIGTERM, _sigterm_handler)
+
+        apply_sandbox(args)
+        if args.sandbox:
+            log.warning("SANDBOX MODE — connecting to CertiNext sandbox API")
+        if args.dry_run:
+            log.info("DRY RUN — no changes will be made")
+
+        sess = build_session(args)
+        log.info("Starting run pid=%d correlation_id=%s", os.getpid(), correlation_id)
+
         auth_ns_raw = args.auth_nameservers or os.environ.get("AUTH_NAMESERVERS") or _DEFAULT_AUTH_NAMESERVERS
         if args.public_nameservers is not None:
             pub_ns_raw = args.public_nameservers
@@ -559,9 +530,6 @@ def main() -> None:
                 log.info("Domain filter: exact match on %s", ", ".join(args.domain))
             elif effective_pattern:
                 log.info("Domain filter: pattern %s", effective_pattern)
-
-        if args.dry_run:
-            log.info("DRY RUN — no changes will be made")
 
         # NOTE: The API search parameter is a confirmed vendor bug — all domains are
         # returned regardless of the value passed. Use pattern for client-side filtering.
@@ -598,9 +566,12 @@ def main() -> None:
     except KeyboardInterrupt:
         sys.stderr.write("\n")
         interrupted = True
+    except (RuntimeError, CertiNextAPIError) as exc:
+        had_errors = True
+        log.error("%s", exc)
     except Exception:
         had_errors = True
-        raise
+        log.exception("Unexpected error")
     finally:
         if interrupted:
             log.warning("Interrupted correlation_id=%s", correlation_id)
