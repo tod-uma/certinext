@@ -193,7 +193,7 @@ def add_requestor_args(target: Any) -> None:
     )
     target.add_argument(
         "--requestor-email", metavar="EMAIL",
-        default=_remail or None, required=not _remail,
+        default=_remail or None,
         help="Email address of the requestor (env: CERTINEXT_REQUESTOR_EMAIL)",
     )
     target.add_argument(
