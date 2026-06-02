@@ -16,7 +16,7 @@ import logging
 import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from .client import CertiNextClient
 from .exceptions import CertiNextAPIError  # noqa: F401 — referenced in Raises docstrings
@@ -455,6 +455,43 @@ class Domain:
         return self._client.patch(
             f"{_BASE}/{self.id}/dcv/method", json={"dcvMethod": method_upper.lower()}
         )
+
+    def reinitiate_dcv(self) -> DcvInfo:
+        """Reset the DCV challenge and return a fresh set of credentials.
+
+        Calls :meth:`change_dcv_method` with the domain's current method to
+        force the API to issue a new challenge token, even when the method is
+        unchanged.  Use this when:
+
+        - The domain is ``VERIFIED`` but the challenge token (``tokenExpiry``)
+          has lapsed — :meth:`get_dcv` returns an empty token in this state.
+        - You want to proactively revalidate a domain approaching DCV expiry
+          (``validTill``) before it becomes ``EXPIRED``.
+
+        The API issues a fresh ``tokenExpiry`` and new token value.  The
+        previously published TXT or HTTP challenge artifact becomes **invalid**
+        after this call — the old token will not satisfy a subsequent
+        :meth:`verify` call.  Publish the returned token and call
+        :meth:`verify` to complete revalidation.
+
+        Returns:
+            Fresh :class:`DcvInfo` with a new ``token`` and ``host`` for the
+            same DCV method.
+
+        Raises:
+            ValueError: If the current DCV method cannot be determined or is
+                not one of the accepted values (``"DNS-TXT"``, ``"HTTP-URL"``).
+            CertiNextAPIError: On a non-2xx API response.
+        """
+        current = self.get_dcv()
+        if not current.method or current.method not in VALID_DCV_METHODS:
+            raise ValueError(
+                f"Cannot reinitiate DCV for {self.name!r}: "
+                f"current method {current.method!r} is not in "
+                f"{sorted(VALID_DCV_METHODS)}"
+            )
+        self.change_dcv_method(cast(DcvMethod, current.method))
+        return self.get_dcv()
 
     def last_dcv_attempt(self) -> dict[str, Any]:
         """Return details of the most recent DCV attempt for this domain.

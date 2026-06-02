@@ -27,39 +27,53 @@ from certinext.orders import OrderAccessor, OrderRecord
 # Fixtures
 # ---------------------------------------------------------------------------
 
+# common_name reads four field names in priority order: commonName, cn, domain, domainName.
+# The real orders report API uses domainName as the primary field (not commonName).
+# Statuses from sandbox: orderStatus "Order Fulfilled", certificateStatus "Certificate Downloaded".
 SAMPLE_ORDER: dict = {
     "orderNumber": "ORD-001",
     "requestNumber": "REQ-001",
-    "productCode": "OV_SSL",
-    "orderStatus": "complete",
-    "certificateStatus": "issued",
-    "commonName": "maine.edu",
+    "productCode": "955",
+    "orderStatus": "Order Fulfilled",
+    "certificateStatus": "Certificate Downloaded",
+    "domainName": "maine.edu",
 }
 
 SAMPLE_ORDER_EXPIRED: dict = {
     "orderNumber": "ORD-002",
     "requestNumber": "REQ-002",
-    "productCode": "DV_SSL",
-    "orderStatus": "complete",
+    "productCode": "970",
+    "orderStatus": "Order Fulfilled",
     "certificateStatus": "expired",
-    "commonName": "sub.maine.edu",
+    "domainName": "sub.maine.edu",
 }
 
 SAMPLE_ORDER_NO_CN: dict = {
     "orderNumber": "ORD-003",
     "requestNumber": "REQ-003",
-    "productCode": "DV_SSL",
-    "orderStatus": "complete",
+    "productCode": "970",
+    "orderStatus": "Order Fulfilled",
     "certificateStatus": "issued",
 }
 
+# Legacy fallback: 'domain' field (not sent by real API but supported by the model).
 SAMPLE_ORDER_DOMAIN_FIELD: dict = {
     "orderNumber": "ORD-004",
     "requestNumber": "REQ-004",
-    "productCode": "DV_SSL",
-    "orderStatus": "complete",
+    "productCode": "970",
+    "orderStatus": "Order Fulfilled",
     "certificateStatus": "issued",
     "domain": "example.edu",
+}
+
+# Legacy fallback: 'commonName' field (older API versions; still supported).
+SAMPLE_ORDER_COMMON_NAME_FIELD: dict = {
+    "orderNumber": "ORD-005",
+    "requestNumber": "REQ-005",
+    "productCode": "943",
+    "orderStatus": "Order Fulfilled",
+    "certificateStatus": "issued",
+    "commonName": "legacy.maine.edu",
 }
 
 SAMPLE_DOMAIN_DATA: dict = {
@@ -128,22 +142,27 @@ class TestOrderRecordProperties:
 
     def test_product_code(self, order: OrderRecord):
         """product_code maps to the productCode field."""
-        assert order.product_code == "OV_SSL"
+        assert order.product_code == "955"
 
     def test_order_status(self, order: OrderRecord):
         """order_status maps to the orderStatus field."""
-        assert order.order_status == "complete"
+        assert order.order_status == "Order Fulfilled"
 
     def test_certificate_status(self, order: OrderRecord):
         """certificate_status maps to the certificateStatus field."""
-        assert order.certificate_status == "issued"
+        assert order.certificate_status == "Certificate Downloaded"
 
-    def test_common_name_from_common_name_field(self, order: OrderRecord):
-        """common_name reads the commonName field when present."""
+    def test_common_name_from_domain_name_field(self, order: OrderRecord):
+        """common_name reads domainName — the primary field in the real orders report API."""
         assert order.common_name == "maine.edu"
 
+    def test_common_name_from_common_name_field(self):
+        """common_name falls back to commonName (legacy field, still supported)."""
+        rec = OrderRecord(dict(SAMPLE_ORDER_COMMON_NAME_FIELD))
+        assert rec.common_name == "legacy.maine.edu"
+
     def test_common_name_from_domain_field(self):
-        """common_name falls back to the domain field when commonName is absent."""
+        """common_name falls back to the domain field when domainName and commonName are absent."""
         rec = OrderRecord(dict(SAMPLE_ORDER_DOMAIN_FIELD))
         assert rec.common_name == "example.edu"
 
@@ -153,8 +172,9 @@ class TestOrderRecordProperties:
         assert rec.common_name is None
 
     def test_as_dict_returns_raw_data(self, order: OrderRecord):
-        """as_dict() returns the original raw data dict."""
-        assert order.as_dict() == SAMPLE_ORDER
+        """as_dict() returns the original raw data dict (identity, not a copy)."""
+        raw = dict(SAMPLE_ORDER)
+        assert OrderRecord(raw).as_dict() is raw
 
     def test_to_row_returns_string_values(self, order: OrderRecord):
         """to_row() returns a dict where all values are strings."""

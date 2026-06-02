@@ -69,7 +69,7 @@ class TestGetToken:
         with patch("certinext.auth.requests.post", return_value=_mock_token_response()) as mock_post:
             auth.get_token()
             # Wind the expiry back so the token appears about to expire.
-            auth._expires_at = time.time() + 30
+            auth._expires_at = time.monotonic() + 30
             auth.get_token()
         assert mock_post.call_count == 2
 

@@ -26,6 +26,15 @@ from certinext.domains import Domain, DomainAccessor
 _FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 
+# Two sentinel dates used across fixtures:
+#   FAR_FUTURE_VALID_TILL  — reliably "not expiring soon" for centuries
+#   PAST_VALID_TILL        — reliably already-expired for any future test run
+FAR_FUTURE_VALID_TILL = "2099-12-31T00:00:00Z"
+PAST_VALID_TILL = "2020-01-01T00:00:00Z"
+
+# List-endpoint response shape. validTill is present for VERIFIED domains;
+# absent for PENDING/EXPIRED. organizationId is present in the list response
+# but omitted from the detail response (see SAMPLE_DOMAIN_DETAIL_DATA below).
 SAMPLE_DOMAIN_DATA = {
     "domainId": "vuxwZgEXWWFXQQWC-3zElI5VlhinKlE8xyYJqfeYNtFE0SAP",
     "domainName": "umaine.edu",
@@ -33,7 +42,22 @@ SAMPLE_DOMAIN_DATA = {
     "organizationName": "University of Maine System",
     "status": "ACTIVE",
     "dcvStatus": "VERIFIED",
+    "validTill": FAR_FUTURE_VALID_TILL,
     "createdAt": "2026-05-04T21:27:14Z",
+}
+
+# Detail-endpoint response shape (after refresh()). Differences from the list
+# response: organizationId is absent; dcv sub-object and verifiedAt are present.
+SAMPLE_DOMAIN_DETAIL_DATA = {
+    "domainId": "vuxwZgEXWWFXQQWC-3zElI5VlhinKlE8xyYJqfeYNtFE0SAP",
+    "domainName": "umaine.edu",
+    "organizationName": "University of Maine System",
+    "status": "ACTIVE",
+    "dcvStatus": "VERIFIED",
+    "dcv": {"method": "dns-txt"},
+    "validTill": FAR_FUTURE_VALID_TILL,
+    "createdAt": "2026-05-04T21:27:14Z",
+    "verifiedAt": "2026-05-29T18:59:00Z",
 }
 
 SAMPLE_DOMAIN_DATA_2 = {
@@ -45,6 +69,14 @@ SAMPLE_DOMAIN_DATA_2 = {
     "dcvStatus": "PENDING",
     "createdAt": "2026-05-04T21:27:14Z",
 }
+
+# Real GET /domains/{id}/dcv response shapes observed from the sandbox API.
+# VERIFIED domain: returns the method but no token (challenge has been consumed).
+SAMPLE_DCV_VERIFIED = {"method": "dns-txt"}
+# PENDING domain with an active challenge: method + txtToken (hex token value).
+SAMPLE_DCV_PENDING_WITH_TOKEN = {"method": "dns-txt", "txtToken": "9B2CA888948836F803ECEA19F0AAEE0B"}
+# PENDING domain with no method set yet (freshly created, never had change_dcv_method called).
+SAMPLE_DCV_UNSET = {}
 
 TOKEN_RESPONSE = {
     "access_token": "test-bearer-token-abc123",
