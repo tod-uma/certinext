@@ -93,13 +93,13 @@ integration-test:
 
 sast:
   stage: security
-  needs: [lint, typecheck]
+  needs: []
   variables:
     GIT_DEPTH: 0
 
 semgrep-sast:
   stage: security
-  needs: [lint, typecheck]
+  needs: []
   allow_failure: false
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
@@ -107,7 +107,7 @@ semgrep-sast:
 
 secret_detection:
   stage: security
-  needs: [lint, typecheck]
+  needs: []
   allow_failure: false
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
