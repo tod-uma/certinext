@@ -154,6 +154,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--order-id", metavar="ID", default=None,
         help="Resume polling an existing order rather than creating a new one",
     )
+    ctl.add_argument(
+        "--no-domain-check", action="store_true", default=False,
+        help=(
+            "Skip the pre-creation check for existing orders on the same domain. "
+            "By default the script queries issued and in-progress orders and "
+            "prompts before creating a new one. Set this flag in automated pipelines."
+        ),
+    )
     return parser
 
 
@@ -205,6 +213,100 @@ def _parse_csr(pem: str) -> CsrInfo:
     except (ImportError, ValueError) as exc:
         log.error("%s", exc)
         raise SystemExit(1) from exc
+
+
+def _check_existing_and_prompt(
+    sess: CertiNextSession, args: argparse.Namespace
+) -> SslOrder | None:
+    """Check for existing orders on the same domain and prompt the user how to proceed.
+
+    Skips immediately when ``args.no_domain_check`` is set. Otherwise fetches
+    all orders (any status) whose CN matches ``args.domain`` and:
+
+    - If an in-progress order is found (any ``pending-*`` status), logs a
+      warning and prompts the user to resume it instead of creating a new one.
+      Returns the fetched :class:`~certinext.ssl_certificates.SslOrder` if the
+      user answers ``y``.
+    - If an issued certificate is found, logs a warning and prompts the user to
+      confirm creating a new one. Raises :exc:`SystemExit(0)` if the user
+      declines.
+
+    API errors during the check are logged at DEBUG level and ignored so they
+    never block order creation.
+
+    Args:
+        sess: Active CertiNext session.
+        args: Parsed CLI arguments. Reads ``args.domain`` and
+            ``args.no_domain_check``.
+
+    Returns:
+        An :class:`~certinext.ssl_certificates.SslOrder` to resume, or ``None``
+        to proceed with creating a new order.
+
+    Raises:
+        SystemExit: With code 0 if the user declines to create a new
+            certificate over an existing issued one.
+    """
+    if args.no_domain_check:
+        return None
+    try:
+        all_matches = sess.orders.find_by_domain(args.domain, status=None)
+    except CertiNextAPIError as exc:
+        log.debug("Domain existence check failed (skipping): HTTP %s", exc.status_code)
+        return None
+
+    log.debug(
+        "Domain check: %d order(s) found matching %r", len(all_matches), args.domain
+    )
+    for r in all_matches:
+        log.debug("  order %s status=%r cn=%r", r.order_number, r.certificate_status, r.common_name)
+
+    pending = next(
+        (r for r in all_matches if (r.certificate_status or "").lower().startswith("pending")),
+        None,
+    )
+    issued = next(
+        (r for r in all_matches if (r.order_status or "").lower() == "order fulfilled"),
+        None,
+    )
+
+    if pending and pending.order_number:
+        pending_order = sess.ssl.get(pending.order_number)
+        if pending_order.csr_submitted:
+            log.warning(
+                "An in-progress order exists for %s (order %s, status: %s). "
+                "It already has a CSR on file. If it was created with the "
+                "current CSR, resuming will work — the API does not expose "
+                "CSR content for comparison.",
+                args.domain, pending.order_number, pending.certificate_status,
+            )
+        else:
+            log.warning(
+                "An in-progress order exists for %s (order %s, status: %s). "
+                "No CSR has been submitted yet — resuming will use the current CSR.",
+                args.domain, pending.order_number, pending.certificate_status,
+            )
+        try:
+            answer = input("Resume it instead of creating a new one? [y/N]: ").strip().lower()
+        except EOFError:
+            answer = ""
+        if answer == "y":
+            log.info("Resuming order %s (status: %s)", pending_order.order_id, pending_order.status)
+            return pending_order
+
+    if issued and issued.order_number:
+        log.warning(
+            "An issued certificate already exists for %s (order %s).",
+            args.domain, issued.order_number,
+        )
+        try:
+            answer = input("Create a new certificate anyway? [y/N]: ").strip().lower()
+        except EOFError:
+            answer = ""
+        if answer != "y":
+            raise SystemExit(0)
+
+    return None
 
 
 def _create_order(sess: CertiNextSession, args: argparse.Namespace, csr: str = "") -> SslOrder:
@@ -382,13 +484,15 @@ def main() -> None:
                 args.signer_place = csr_info.signer_place   # "Orono, Maine"
                 signer_place = csr_info.signer_place
 
-            log.info(
-                "Ordering certificate for %s%s",
-                args.domain,
-                f" + {len(args.sans)} SAN(s)" if args.sans else "",
-            )
-            order = _create_order(sess, args, csr=csr)
-            log.info("Created order %s (status: %s)", order.order_id, order.status)
+            order = _check_existing_and_prompt(sess, args)
+            if order is None:
+                log.info(
+                    "Ordering certificate for %s%s",
+                    args.domain,
+                    f" + {len(args.sans)} SAN(s)" if args.sans else "",
+                )
+                order = _create_order(sess, args, csr=csr)
+                log.info("Created order %s (status: %s)", order.order_id, order.status)
 
         # ------------------------------------------------------------------
         # Phase 3: Workflow execution

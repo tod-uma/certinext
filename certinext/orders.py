@@ -12,10 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import logging
 from typing import Any, Literal
 
 from .client import CertiNextClient
 from .exceptions import CertiNextAPIError  # noqa: F401 — referenced in Raises docstrings
+
+log = logging.getLogger(__name__)
 
 _BASE = "/api/certinext/v2/reports/orders"
 
@@ -33,7 +36,16 @@ CertificateStatus = Literal[
     "expired",
     "unknown",
 ]
-"""Valid ``certificateStatus`` values returned by :attr:`OrderRecord.certificate_status`."""
+"""Valid ``certificateStatus`` values returned by :attr:`OrderRecord.certificate_status`.
+
+.. note::
+    The orders report API returns human-readable display strings (e.g.
+    ``"Pending for Approver"``, ``"Certificate Downloaded"``) rather than these
+    enum values. :attr:`OrderRecord.certificate_status` passes them through as-is;
+    do not compare against this ``Literal`` type at runtime. Use
+    :attr:`OrderRecord.order_status` (``"Order Fulfilled"`` / ``"Order Accepted"``)
+    for reliable programmatic checks.
+"""
 
 
 class OrderRecord:
@@ -225,3 +237,48 @@ class OrderAccessor:
                 break
             page += 1
         return records
+
+    def find_by_domain(
+        self,
+        domain: str,
+        status: str | None = "issued",
+        page_size: int = 100,
+    ) -> list[OrderRecord]:
+        """Return orders whose CN matches ``domain`` (case-insensitive).
+
+        The orders report API has no server-side domain filter, so this
+        fetches all pages for the given ``status`` and filters client-side.
+        Call with ``status=None`` to search across all certificate statuses.
+
+        This method does not run automatically — callers must invoke it
+        explicitly. The ``certinext-issue-cert`` CLI calls it before creating
+        an order (disable with ``--no-domain-check``).
+
+        Args:
+            domain: Primary domain name to match against order CNs.
+            status: Certificate status to filter by (default: ``"issued"``).
+                Pass ``None`` to include all statuses.
+            page_size: Records per page; maximum 100 (default: 100).
+
+        Returns:
+            List of :class:`OrderRecord` objects whose
+            :attr:`~OrderRecord.common_name` matches ``domain``
+            case-insensitively.
+
+        Raises:
+            CertiNextAPIError: On a non-2xx API response. Provides ``.status_code`` and ``.body``.
+
+        Example::
+
+            matches = sess.orders.find_by_domain("example.maine.edu")
+            if matches:
+                print(f"Active cert: order {matches[0].order_number}")
+        """
+        domain_lower = domain.lower()
+        all_records = self.get_list(status=status, page_size=page_size)
+        log.debug(
+            "find_by_domain: %d total order(s) returned; first raw record: %s",
+            len(all_records),
+            all_records[0].as_dict() if all_records else "(none)",
+        )
+        return [r for r in all_records if (r.common_name or "").lower() == domain_lower]
