@@ -52,6 +52,11 @@ def _resolve(
     env_value = os.environ.get(env_var)
     if env_value:
         return env_value
+    if not sys.stdin.isatty():
+        raise RuntimeError(
+            f"{prompt} is required but stdin is not a TTY. "
+            f"Set {env_var} or store the credential in the keyring."
+        )
     if secret:
         return getpass.getpass(f"{prompt}: ")
     return input(f"{prompt}: ")

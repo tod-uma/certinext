@@ -49,7 +49,7 @@ class OAuth2ClientCredentials:
         Raises:
             RuntimeError: If the token endpoint returns an error or non-JSON response.
         """
-        if self._access_token and time.time() < self._expires_at - 60:
+        if self._access_token and time.monotonic() < self._expires_at - 60:
             return self._access_token
         self._fetch_token()
         assert self._access_token is not None
@@ -86,4 +86,4 @@ class OAuth2ClientCredentials:
                 f"Body: {resp.text!r}"
             ) from exc
         self._access_token = payload["access_token"]
-        self._expires_at = time.time() + payload.get("expires_in", 3600)
+        self._expires_at = time.monotonic() + payload.get("expires_in", 3600)
