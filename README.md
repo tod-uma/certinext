@@ -4,8 +4,6 @@
 
 Python library and CLI scripts for managing your [CertiNext](https://us.certinext.io) environment via the REST API.
 
-> **Work in progress:** `list`, `get`, `get_dcv`, `verify`, and `change_dcv_method` have been tested against the live API. `create`, `deactivate`, `last_dcv_attempt`, and `dcv_attempt_history` are implemented based on the API documentation but remain untested against the live API.
-
 ## Contents
 
 - [Requirements](#requirements)
@@ -32,23 +30,35 @@ Python library and CLI scripts for managing your [CertiNext](https://us.certinex
 
 ## Installation
 
-### From the package registry
+### From PyPI
 
 ```bash
-pip install certinext \
-  --extra-index-url https://gitlab.its.maine.edu/api/v4/groups/2236/-/packages/pypi/simple
+pip install certinext
 ```
 
 Or with `uv`:
 
 ```bash
-uv add certinext --index https://gitlab.its.maine.edu/api/v4/groups/2236/-/packages/pypi/simple
+uv add certinext
 ```
 
 To use `certinext-issue-cert` (CSR parsing), also install the `csr` optional extra:
 
 ```bash
-pip install "certinext[csr]" \
+pip install "certinext[csr]"
+```
+
+To install the latest pre-release (alpha, beta, or release candidate):
+
+```bash
+pip install --pre certinext
+uv add certinext --prerelease=allow
+```
+
+### From the UMS GitLab package registry
+
+```bash
+pip install certinext \
   --extra-index-url https://gitlab.its.maine.edu/api/v4/groups/2236/-/packages/pypi/simple
 ```
 
@@ -578,13 +588,18 @@ sess = certinext.session(
 
 ```python
 sess = certinext.session(
-    base_url="https://us-api.certinext.io",
-    token_url="https://us-api.certinext.io/oauth/token",
     client_id="YOUR_ACCOUNT_NUMBER",
     client_secret="YOUR_CLIENT_SECRET",
-    scope="",                              # optional
+    scope="",           # optional
+    sandbox=False,      # True → use sandbox endpoints automatically
+    base_url="",        # override; defaults to production (or sandbox when sandbox=True)
+    token_url="",       # override; defaults to match base_url
 )
 ```
+
+When `sandbox=True`, `base_url` and `token_url` default to the sandbox endpoints
+(`https://sandbox-us-api.certinext.io`). Explicit `base_url` / `token_url` values
+always take precedence over the `sandbox` flag.
 
 </details>
 
@@ -871,6 +886,19 @@ automatically from the catalog — you never hardcode a product code.
 
 #### Create a certificate
 
+Use `sess.ssl.create()` when the validation level is a runtime value (e.g. read
+from configuration). It dispatches to the appropriate `create_*` method and
+validates that `organization_id` is provided for OV and EV orders:
+
+```python
+# Product determined at runtime (e.g. from config)
+order = sess.ssl.create("dv", "example.com", validity_years=1)
+order = sess.ssl.create("ov", "example.com", organization_id="8921215", validity_years=1)
+order = sess.ssl.create("ev", "example.com", organization_id="8921215", validity_years=1)
+```
+
+Or call the specific variant directly:
+
 ```python
 # DV single-domain
 order = sess.ssl.create_dv("example.com", validity_years=1)
@@ -914,9 +942,10 @@ order.refresh()
 print(order.status)  # "pending-approval" or "issued"
 
 # 6. Download once issued
-cert = order.download_certificate()        # JSON — cert + chain PEM strings
-pem  = order.download_certificate_pem()   # raw PEM text
-der  = order.download_certificate_der()   # raw DER bytes
+cert = order.download_certificate()           # JSON — cert + chain PEM strings
+pem  = order.download_certificate_pem()      # raw PEM bundle (ordering not guaranteed)
+chain = order.download_certificate().as_pem_chain()  # leaf-first fullchain, normalised newline
+der  = order.download_certificate_der()      # raw DER bytes
 ```
 
 **Complete end-to-end DV example:**
@@ -956,6 +985,31 @@ order = sess.ssl.get("ORDER-ID")
 print(order.status, order.domain, order.created_at)
 order.refresh()   # re-fetch current state from the API
 ```
+
+#### OrderWorkflow helpers
+
+`OrderWorkflow` drives an order through its full lifecycle automatically.
+Three helpers simplify common patterns:
+
+```python
+from certinext import OrderWorkflow
+
+# Drive a new order to issuance (blocking)
+wf = OrderWorkflow.from_csr(order, csr_pem, signer_name="Jane Doe")
+pem = wf.run()   # blocks until issued or timeout
+
+# Resume from a persisted order ID (e.g. after a restart)
+wf = OrderWorkflow.from_order_id(sess, "ORDER-ID", signer_name="Jane Doe")
+wf.advance(csr_pem)   # one non-blocking step
+
+# Download the issued certificate as a deterministic leaf-first fullchain
+chain = wf.download_chain()   # retries HTTP 422 ("not ready yet") automatically
+```
+
+`download_chain()` uses `CertificateDownload.as_pem_chain()` internally — the
+end-entity certificate followed by its intermediates, with a single trailing
+newline. Use this instead of `download()` when the bundle order matters (e.g.
+when writing a `fullchain.pem` for an ACME server).
 
 #### Other lifecycle operations
 
@@ -1055,7 +1109,11 @@ certinext/
     pending_dcv_cli.py            # certinext-pending-dcv CLI entry point
     session.py                    # CertiNextSession (accounts, catalog, domain, ledger, orders, ssl)
     setup_keyring_cli.py          # certinext-setup-keyring CLI entry point
-    ssl_certificates.py           # SslOrder, DcvChallenge, CertificateDownload, SslAccessor
+    ssl_certificates.py           # SslOrder, DcvChallenge, CertificateDownload, SslAccessor, OrderWorkflow
+                                  #   SslAccessor.create() — DV/OV/EV dispatcher
+                                  #   CertificateDownload.as_pem_chain() — leaf-first fullchain
+                                  #   OrderWorkflow.download_chain() — 422-retry + normalised chain
+                                  #   OrderWorkflow.from_order_id() — resume from persisted order ID
 tests/
     test_integration.py           # integration tests against the sandbox API (pytest -m integration)
 examples/
