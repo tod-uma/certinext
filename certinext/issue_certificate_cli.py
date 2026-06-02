@@ -378,8 +378,9 @@ def main() -> None:
                 args.sans = csr_info.sans                   # SAN extension
             if not args.requestor_email and csr_info.email:
                 args.requestor_email = csr_info.email       # emailAddress OID
-            if not signer_place and csr_info.signer_place:
-                signer_place = csr_info.signer_place        # "Orono, Maine"
+            if not args.signer_place and csr_info.signer_place:
+                args.signer_place = csr_info.signer_place   # "Orono, Maine"
+                signer_place = csr_info.signer_place
 
             log.info(
                 "Ordering certificate for %s%s",
