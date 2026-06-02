@@ -14,7 +14,7 @@
 
 import re
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
 
 from .client import CertiNextClient
@@ -181,6 +181,25 @@ class Domain:
         except (ValueError, TypeError):
             return None
 
+    @property
+    def dcv_expires(self) -> datetime | None:
+        """DCV token expiry as a timezone-aware UTC ``datetime``, or ``None``.
+
+        The API returns this as ``tokenExpiry`` — either at the top level of
+        the domain object or nested inside a ``dcv`` sub-object depending on
+        the endpoint.  Both locations are checked.
+
+        Returns ``None`` when the field is absent, null, or not a parseable
+        ISO 8601 string.
+        """
+        raw = self._data.get("tokenExpiry") or (self._data.get("dcv") or {}).get("tokenExpiry")
+        if not raw:
+            return None
+        try:
+            return datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        except (ValueError, TypeError):
+            return None
+
     # --- dunder methods ---
 
     def __str__(self) -> str:
@@ -191,6 +210,8 @@ class Domain:
         lines.append(row("id:", self.id))
         lines.append(row("status:", self.status))
         lines.append(row("dcv_status:", self.dcv_status))
+        if self.dcv_expires:
+            lines.append(row("dcv_expires:", self.dcv_expires))
         lines.append(row("organization:", self.organization_name))
         if self.created_at:
             lines.append(row("created:", self.created_at))
@@ -207,6 +228,26 @@ class Domain:
         """Return True if this domain is active and not yet DCV-verified."""
         return self.status == "ACTIVE" and self.dcv_status != "VERIFIED"
 
+    def dcv_expires_soon(self, days: int = 30) -> bool:
+        """Return True if the DCV token expires within ``days`` days.
+
+        Useful for building proactive renewal workflows — call this before
+        :meth:`verify` to avoid letting DCV lapse.  Returns ``False`` when
+        :attr:`dcv_expires` is ``None`` (field not present in the API
+        response or domain has no active DCV token).
+
+        Args:
+            days: Number of days ahead to check. Default is 30.
+
+        Returns:
+            ``True`` if the DCV expiry is known and within ``days`` days
+            from now (including already-expired tokens).
+        """
+        exp = self.dcv_expires
+        if exp is None:
+            return False
+        return exp <= datetime.now(timezone.utc) + timedelta(days=days)
+
     def as_dict(self) -> dict[str, Any]:
         """Return the raw API response dict for this domain."""
         return self._data
@@ -219,6 +260,7 @@ class Domain:
             "name": _s(self.name),
             "status": _s(self.status),
             "dcv_status": _s(self.dcv_status),
+            "dcv_expires": self.dcv_expires.isoformat() if self.dcv_expires else "",
             "organization": _s(self.organization_name),
             "created_at": self.created_at.isoformat() if self.created_at else "",
             "id": _s(self.id),
