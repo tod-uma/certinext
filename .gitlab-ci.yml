@@ -84,7 +84,7 @@ integration-test:
   image: python:3.12-slim
   script:
     - pip install -e .[dev]
-    - pytest -m integration -v --junitxml=integration-report.xml
+    - pytest -m integration tests/test_integration.py -v --junitxml=integration-report.xml
   artifacts:
     when: always
     reports:
@@ -154,11 +154,6 @@ integration-cert-issuance:
     - if: '$CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/ && $CERTINEXT_SANDBOX_CLIENT_ID'
     - if: '$CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+rc\d+$/ && $CERTINEXT_SANDBOX_CLIENT_ID'
   image: python:3.12-slim
-  variables:
-    CERTINEXT_SANDBOX_CLIENT_ID: $CERTINEXT_SANDBOX_CLIENT_ID
-    CERTINEXT_SANDBOX_CLIENT_SECRET: $CERTINEXT_SANDBOX_CLIENT_SECRET
-    CERTINEXT_SANDBOX_ORG_ID: $CERTINEXT_SANDBOX_ORG_ID
-    CERTINEXT_SANDBOX_PREVETTING_TOKEN: $CERTINEXT_SANDBOX_PREVETTING_TOKEN
   script:
     - pip install -e .[dev]
     - pytest -m integration tests/test_sandbox_integration.py -v --junitxml=cert-issuance-report.xml
