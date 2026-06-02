@@ -23,12 +23,12 @@ from certinext.domains import DcvInfo, Domain, DomainAccessor
 from tests.conftest import (
     FAR_FUTURE_VALID_TILL,
     PAST_VALID_TILL,
+    SAMPLE_DCV_PENDING_WITH_TOKEN,
+    SAMPLE_DCV_UNSET,
+    SAMPLE_DCV_VERIFIED,
     SAMPLE_DOMAIN_DATA,
     SAMPLE_DOMAIN_DATA_2,
     SAMPLE_DOMAIN_DETAIL_DATA,
-    SAMPLE_DCV_VERIFIED,
-    SAMPLE_DCV_PENDING_WITH_TOKEN,
-    SAMPLE_DCV_UNSET,
 )
 
 
