@@ -213,6 +213,21 @@ class Domain:
             return None
 
     @property
+    def verified_at(self) -> datetime | None:
+        """Timestamp when DCV was last completed, as a timezone-aware UTC datetime.
+
+        Returns ``None`` when the field is absent (domain not yet verified) or
+        not a parseable ISO 8601 string.
+        """
+        raw = self._data.get("verifiedAt")
+        if not raw:
+            return None
+        try:
+            return datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        except (ValueError, TypeError):
+            return None
+
+    @property
     def dcv_expires(self) -> datetime | None:
         """DCV token expiry as a timezone-aware UTC ``datetime``, or ``None``.
 
