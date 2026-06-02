@@ -20,7 +20,16 @@ from unittest.mock import MagicMock
 import pytest
 
 from certinext.domains import DcvInfo, Domain, DomainAccessor
-from tests.conftest import SAMPLE_DOMAIN_DATA, SAMPLE_DOMAIN_DATA_2
+from tests.conftest import (
+    FAR_FUTURE_VALID_TILL,
+    PAST_VALID_TILL,
+    SAMPLE_DOMAIN_DATA,
+    SAMPLE_DOMAIN_DATA_2,
+    SAMPLE_DOMAIN_DETAIL_DATA,
+    SAMPLE_DCV_VERIFIED,
+    SAMPLE_DCV_PENDING_WITH_TOKEN,
+    SAMPLE_DCV_UNSET,
+)
 
 
 class TestDomainProperties:
@@ -69,6 +78,46 @@ class TestDomainProperties:
         domain.name = "new.example.edu"
         assert domain.name == "new.example.edu"
 
+    def test_dcv_expires_from_valid_till(self, mock_client: MagicMock):
+        """dcv_expires reads validTill and returns a UTC-aware datetime."""
+        d = Domain(mock_client, dict(SAMPLE_DOMAIN_DATA))
+        exp = d.dcv_expires
+        assert exp is not None
+        assert exp == datetime(2099, 12, 31, 0, 0, 0, tzinfo=timezone.utc)
+
+    def test_dcv_expires_none_when_missing(self, mock_client: MagicMock):
+        """dcv_expires returns None when validTill is absent (e.g. PENDING domain)."""
+        d = Domain(mock_client, dict(SAMPLE_DOMAIN_DATA_2))
+        assert d.dcv_expires is None
+
+    def test_verified_at_from_detail_response(self, mock_client: MagicMock):
+        """verified_at reads verifiedAt from the detail-endpoint response shape."""
+        d = Domain(mock_client, dict(SAMPLE_DOMAIN_DETAIL_DATA))
+        vat = d.verified_at
+        assert vat is not None
+        assert vat == datetime(2026, 5, 29, 18, 59, 0, tzinfo=timezone.utc)
+
+    def test_verified_at_none_when_missing(self, mock_client: MagicMock):
+        """verified_at returns None when verifiedAt is absent (e.g. PENDING domain)."""
+        d = Domain(mock_client, dict(SAMPLE_DOMAIN_DATA_2))
+        assert d.verified_at is None
+
+    def test_dcv_expires_soon_true_within_threshold(self, mock_client: MagicMock):
+        """dcv_expires_soon returns True when expiry is within the given days."""
+        # PAST_VALID_TILL is always in the past, so always within any positive threshold.
+        d = Domain(mock_client, {"validTill": PAST_VALID_TILL})
+        assert d.dcv_expires_soon(30) is True
+
+    def test_dcv_expires_soon_false_far_future(self, mock_client: MagicMock):
+        """dcv_expires_soon returns False when expiry is far in the future."""
+        d = Domain(mock_client, {"validTill": FAR_FUTURE_VALID_TILL})
+        assert d.dcv_expires_soon(30) is False
+
+    def test_dcv_expires_soon_false_when_no_expiry(self, mock_client: MagicMock):
+        """dcv_expires_soon returns False when dcv_expires is None."""
+        d = Domain(mock_client, dict(SAMPLE_DOMAIN_DATA_2))
+        assert d.dcv_expires_soon(30) is False
+
     def test_missing_fields_return_none(self, mock_client: MagicMock):
         """All properties return None when constructed with an empty dict."""
         d = Domain(mock_client, {})
@@ -79,6 +128,8 @@ class TestDomainProperties:
         assert d.status is None
         assert d.dcv_status is None
         assert d.created_at is None
+        assert d.dcv_expires is None
+        assert d.verified_at is None
 
 
 class TestDomainDunderMethods:
@@ -195,21 +246,34 @@ class TestDomainAPIMethods:
 
     def test_get_dcv_calls_get(self, domain: Domain, mock_client: MagicMock):
         """get_dcv() calls GET /domains/{id}/dcv and returns a DcvInfo."""
-        mock_client.get.return_value = {"dcvMethod": "DNS-TXT", "txtToken": "abc123"}
+        mock_client.get.return_value = dict(SAMPLE_DCV_PENDING_WITH_TOKEN)
         result = domain.get_dcv()
         mock_client.get.assert_called_once_with(f"/api/certinext/v2/domains/{domain.id}/dcv")
         assert isinstance(result, DcvInfo)
         assert result.method == "DNS-TXT"
-        assert result.token == "abc123"
+        assert result.token == "9B2CA888948836F803ECEA19F0AAEE0B"
         assert result.host == ""
 
-    def test_get_dcv_normalises_alternate_field_names(self, domain: Domain, mock_client: MagicMock):
-        """get_dcv() handles the 'method'/'token'/'host' field name variants."""
-        mock_client.get.return_value = {"method": "dns-txt", "token": "xyz", "host": ""}
+    def test_get_dcv_verified_domain_returns_method_no_token(self, domain: Domain, mock_client: MagicMock):
+        """VERIFIED domain: GET /dcv returns the method but no token (challenge consumed)."""
+        mock_client.get.return_value = dict(SAMPLE_DCV_VERIFIED)
         result = domain.get_dcv()
         assert result.method == "DNS-TXT"
-        assert result.token == "xyz"
-        assert result.host == ""
+        assert result.token == ""
+
+    def test_get_dcv_unset_returns_empty_dcvinfo(self, domain: Domain, mock_client: MagicMock):
+        """Freshly created domain with no DCV method: GET /dcv returns empty dict."""
+        mock_client.get.return_value = dict(SAMPLE_DCV_UNSET)
+        result = domain.get_dcv()
+        assert result.method == ""
+        assert result.token == ""
+
+    def test_get_dcv_handles_fallback_dcvmethod_field(self, domain: Domain, mock_client: MagicMock):
+        """get_dcv() also accepts the legacy dcvMethod field name."""
+        mock_client.get.return_value = {"dcvMethod": "DNS-TXT", "txtToken": "abc123"}
+        result = domain.get_dcv()
+        assert result.method == "DNS-TXT"
+        assert result.token == "abc123"
 
     def test_get_dcv_returns_empty_dcvinfo_on_bad_response(self, domain: Domain, mock_client: MagicMock):
         """get_dcv() returns a DcvInfo with empty strings when the API returns a non-dict."""
@@ -219,6 +283,28 @@ class TestDomainAPIMethods:
         assert result.method == ""
         assert result.token == ""
         assert result.host == ""
+
+    def test_reinitiate_dcv_calls_change_then_get(self, domain: Domain, mock_client: MagicMock):
+        """reinitiate_dcv() calls change_dcv_method then get_dcv and returns fresh DcvInfo."""
+        # First call is get_dcv() inside reinitiate_dcv to discover the current method
+        mock_client.get.side_effect = [
+            dict(SAMPLE_DCV_VERIFIED),           # get_dcv() → method=dns-txt, no token
+            dict(SAMPLE_DCV_PENDING_WITH_TOKEN),  # get_dcv() after reset → fresh token
+        ]
+        mock_client.patch.return_value = dict(SAMPLE_DCV_PENDING_WITH_TOKEN)
+        result = domain.reinitiate_dcv()
+        assert result.method == "DNS-TXT"
+        assert result.token == "9B2CA888948836F803ECEA19F0AAEE0B"
+        mock_client.patch.assert_called_once_with(
+            f"/api/certinext/v2/domains/{domain.id}/dcv/method",
+            json={"dcvMethod": "dns-txt"},
+        )
+
+    def test_reinitiate_dcv_raises_when_method_unknown(self, domain: Domain, mock_client: MagicMock):
+        """reinitiate_dcv() raises ValueError when the current DCV method cannot be determined."""
+        mock_client.get.return_value = dict(SAMPLE_DCV_UNSET)
+        with pytest.raises(ValueError, match="current method"):
+            domain.reinitiate_dcv()
 
     def test_verify_calls_post(self, domain: Domain, mock_client: MagicMock):
         """verify() calls POST /domains/{id}/dcv/verify."""
