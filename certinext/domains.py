@@ -216,14 +216,14 @@ class Domain:
     def dcv_expires(self) -> datetime | None:
         """DCV token expiry as a timezone-aware UTC ``datetime``, or ``None``.
 
-        The API returns this as ``tokenExpiry`` — either at the top level of
-        the domain object or nested inside a ``dcv`` sub-object depending on
-        the endpoint.  Both locations are checked.
+        The API returns this as ``validTill`` at the top level of the domain
+        detail response.  Only present after DCV has been completed; ``None``
+        for domains in PENDING or REJECTED state.
 
         Returns ``None`` when the field is absent, null, or not a parseable
         ISO 8601 string.
         """
-        raw = self._data.get("tokenExpiry") or (self._data.get("dcv") or {}).get("tokenExpiry")
+        raw = self._data.get("validTill")
         if not raw:
             return None
         try:
