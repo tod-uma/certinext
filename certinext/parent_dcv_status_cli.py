@@ -37,16 +37,16 @@ Usage::
 
 import argparse
 import json
-import logging
 import sys
 from datetime import datetime, timezone
 
+import structlog
 from tabulate import tabulate
 
 from certinext._cli import _setup_logging, add_connection_args, apply_sandbox, build_session
 from certinext.domains import Domain
 
-log = logging.getLogger(__name__)
+log = structlog.get_logger()
 
 _STATUS_CHOICES = ("all", "verified", "expiring", "pending", "expired")
 
@@ -190,9 +190,9 @@ def main() -> None:
         apply_sandbox(args)
         sess = build_session(args)
 
-        log.info("Fetching domain list...")
+        log.info("Fetching domain list")
         domains = sess.domain.get_list(pattern=args.pattern)
-        log.info("Fetched %d domain(s)", len(domains))
+        log.info("Fetched domains", count=len(domains))
 
         all_names = {d.name for d in domains if d.name}
 
@@ -208,23 +208,20 @@ def main() -> None:
             key=lambda d: d.name or "",
         )
         log.info(
-            "Found %d domain(s) requiring direct DCV%s",
-            len(parents),
-            " (including zone-boundary subdomains)" if check_ns else " (account-level parents only)",
+            "Found domains requiring direct DCV",
+            count=len(parents),
+            scope="including zone-boundary subdomains" if check_ns else "account-level parents only",
         )
 
         # Only VERIFIED domains have a validTill expiry date — skip the detail
         # fetch for PENDING/EXPIRED/REJECTED domains to avoid unnecessary API calls.
         verified = [d for d in parents if d.dcv_status == "VERIFIED"]
-        log.info(
-            "Fetching details for %d VERIFIED domain(s) to retrieve expiry dates...",
-            len(verified),
-        )
+        log.info("Fetching details for expiry dates", count=len(verified))
         use_dots = args.verbose < 3 and sys.stderr.isatty() and len(verified) > 0
         if use_dots:
             print("  ", end="", file=sys.stderr, flush=True)
         for i, d in enumerate(verified, 1):
-            log.debug("  [%d/%d] %s", i, len(verified), d.name)
+            log.debug("Fetching domain details", index=i, total=len(verified), domain=d.name)
             d.refresh()
             if use_dots:
                 print(".", end="", file=sys.stderr, flush=True)

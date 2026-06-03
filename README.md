@@ -18,6 +18,8 @@ Python library and CLI scripts for managing your [CertiNext](https://us.certinex
   - [certinext-pending-dcv](#certinext-pending-dcv)
   - [certinext-domain-cert-count](#certinext-domain-cert-count)
   - [certinext-issue-cert](#certinext-issue-cert)
+  - [certinext-parent-dcv-status](#certinext-parent-dcv-status)
+- [Log output](#log-output)
 - [Python library](#python-library)
 - [Examples](#examples)
 - [API documentation](#api-documentation)
@@ -27,6 +29,8 @@ Python library and CLI scripts for managing your [CertiNext](https://us.certinex
 
 - Python 3.10+
 - A CertiNext account with OAuth API credentials (account number + client secret)
+
+**Runtime dependencies** (`requests`, `tabulate`, `python-dotenv`, `structlog`) are installed automatically. `structlog` provides structured logging for the CLI tools and library internals — in cron or redirected contexts all output is emitted as JSON; in a terminal it uses a human-readable format. If you use certinext purely as a library and have a strong reason to exclude `structlog`, open an issue and we'll consider making it optional.
 
 ## Installation
 
@@ -74,7 +78,7 @@ uv venv
 uv pip install -e .
 ```
 
-This installs the `certinext` package and its dependencies (`requests`, `tabulate`, `python-dotenv`).
+This installs the `certinext` package and its dependencies (`requests`, `tabulate`, `python-dotenv`, `structlog`).
 
 To use `certinext-issue-cert` (CSR parsing), also install the `csr` optional extra:
 
@@ -567,6 +571,77 @@ The tool handles the full CertiNext order lifecycle automatically:
 
 If the order does not reach `issued` within `--wait` seconds, the tool exits
 with code 1 and prints the order ID so you can resume with `--order-id`.
+
+### certinext-parent-dcv-status
+
+`certinext-parent-dcv-status` shows DCV status and expiry for every domain
+that requires direct DCV validation — either because it has no registered
+ancestor in the account, or because its own NS records form a DNS zone
+boundary that blocks DCV inheritance from a parent.
+
+By default an NS lookup is performed for each domain to detect zone
+boundaries (requires `certinext[dns]`). Use `--no-ns-check` to skip DNS
+lookups and list only account-level parents.
+
+#### Arguments
+
+```
+--pattern REGEX         Filter domains by regex before identifying parents (re.fullmatch)
+--status STATUS         Filter by DCV status: all (default), verified, expiring, pending, expired
+--expiring-days DAYS    Days ahead to flag as expiring soon (default: 30)
+--json                  Output raw JSON instead of tabular format
+--no-ns-check           Skip DNS NS lookups; list account-level parents only
+-v, --verbose           Increase verbosity (-v shows progress, -vvv enables debug logging)
+```
+
+#### Examples
+
+```bash
+# All parent domains with DCV status
+certinext-parent-dcv-status --sandbox
+
+# Only domains expiring within 60 days
+certinext-parent-dcv-status --status expiring --expiring-days 60
+
+# Skip DNS NS checks (faster, account-level parents only)
+certinext-parent-dcv-status --no-ns-check
+
+# Raw JSON for scripting
+certinext-parent-dcv-status --json | jq '.[] | select(.dcv_status != "VERIFIED")'
+```
+
+---
+
+## Log output
+
+All CLI scripts write diagnostic messages to **stderr**. The format adapts to
+the environment automatically:
+
+| Context | Format |
+|---|---|
+| Interactive terminal (TTY) | `HH:MM:SS [level] event  field=value …` — human-readable, local time |
+| Non-TTY (cron, redirected stderr) | One JSON object per line — suitable for log aggregators and `jq` |
+
+**Verbosity flags** (cumulative, same for all scripts):
+
+| Flag | Effect |
+|---|---|
+| `-v` | Show extra context fields (`correlation_id`, `pid`, credential profile, domain filters) |
+| `-vvv` | Enable DEBUG logging |
+| `-vvvv` | Also enable third-party DEBUG output (urllib3, keyring) |
+
+**Cron example** — capture JSON logs to a file:
+
+```bash
+certinext-parent-dcv-status --sandbox 2>> /var/log/certinext.log
+```
+
+Each line is a self-contained JSON object:
+
+```json
+{"timestamp": "2026-06-03T14:00:01.234Z", "level": "info", "event": "Connecting", "account": "5912517854", "profile": "default", "url": "https://us-api.certinext.io"}
+{"timestamp": "2026-06-03T14:00:02.456Z", "level": "info", "event": "Fetched domains", "count": 234}
+```
 
 ---
 
