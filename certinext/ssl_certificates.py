@@ -444,6 +444,24 @@ class SslOrder:
         val = self._data.get("subscriberAgreement")
         return val if isinstance(val, dict) else None
 
+    @property
+    def remarks(self) -> str | None:
+        """Free-text remarks stored with the order, or ``None`` if not set.
+
+        Corresponds to the ``remarks`` field sent at order creation.
+        """
+        return self._data.get("remarks")
+
+    @property
+    def tags(self) -> list[str]:
+        """Tag strings attached to the order for filtering and reporting.
+
+        Returns an empty list when no tags are set. Corresponds to the
+        ``tags`` field sent at order creation.
+        """
+        val = self._data.get("tags")
+        return val if isinstance(val, list) else []
+
     # --- helpers ---
 
     def as_dict(self) -> dict[str, Any]:
