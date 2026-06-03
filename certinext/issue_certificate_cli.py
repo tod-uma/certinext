@@ -53,8 +53,9 @@ Usage::
 """
 
 import argparse
-import logging
 import sys
+
+import structlog
 
 from certinext._cli import (
     _setup_logging,
@@ -69,7 +70,7 @@ from certinext.exceptions import CertiNextAPIError, CertiNextTimeoutError
 from certinext.session import CertiNextSession
 from certinext.ssl_certificates import DcvChallenge, OrderWorkflow, SslOrder
 
-log = logging.getLogger(__name__)
+log = structlog.get_logger()
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -185,7 +186,7 @@ def _read_csr(path: str | None) -> str:
         with open(path) as f:
             return f.read()
     except OSError as exc:
-        log.error("Error reading CSR: %s", exc)
+        log.error("Error reading CSR", error=str(exc))
         raise SystemExit(1) from exc
 
 
@@ -211,7 +212,7 @@ def _parse_csr(pem: str) -> CsrInfo:
     try:
         return parse_csr(pem)
     except (ImportError, ValueError) as exc:
-        log.error("%s", exc)
+        log.error(str(exc))
         raise SystemExit(1) from exc
 
 
@@ -252,14 +253,12 @@ def _check_existing_and_prompt(
     try:
         all_matches = sess.orders.find_by_domain(args.domain, status=None)
     except CertiNextAPIError as exc:
-        log.debug("Domain existence check failed (skipping): HTTP %s", exc.status_code)
+        log.debug("Domain existence check failed — skipping", status_code=exc.status_code)
         return None
 
-    log.debug(
-        "Domain check: %d order(s) found matching %r", len(all_matches), args.domain
-    )
+    log.debug("Domain check: orders found", count=len(all_matches), domain=args.domain)
     for r in all_matches:
-        log.debug("  order %s status=%r cn=%r", r.order_number, r.certificate_status, r.common_name)
+        log.debug("domain check order", order_number=r.order_number, status=r.certificate_status, cn=r.common_name)
 
     pending = next(
         (r for r in all_matches if (r.certificate_status or "").lower().startswith("pending")),
@@ -274,30 +273,26 @@ def _check_existing_and_prompt(
         pending_order = sess.ssl.get(pending.order_number)
         if pending_order.csr_submitted:
             log.warning(
-                "An in-progress order exists for %s (order %s, status: %s). "
-                "It already has a CSR on file. If it was created with the "
-                "current CSR, resuming will work — the API does not expose "
-                "CSR content for comparison.",
-                args.domain, pending.order_number, pending.certificate_status,
+                "In-progress order exists with CSR on file — resuming may work",
+                domain=args.domain, order_id=pending.order_number, status=pending.certificate_status,
             )
         else:
             log.warning(
-                "An in-progress order exists for %s (order %s, status: %s). "
-                "No CSR has been submitted yet — resuming will use the current CSR.",
-                args.domain, pending.order_number, pending.certificate_status,
+                "In-progress order exists without CSR — resuming will submit current CSR",
+                domain=args.domain, order_id=pending.order_number, status=pending.certificate_status,
             )
         try:
             answer = input("Resume it instead of creating a new one? [y/N]: ").strip().lower()
         except EOFError:
             answer = ""
         if answer == "y":
-            log.info("Resuming order %s (status: %s)", pending_order.order_id, pending_order.status)
+            log.info("Resuming order", order_id=pending_order.order_id, status=pending_order.status)
             return pending_order
 
     if issued and issued.order_number:
         log.warning(
-            "An issued certificate already exists for %s (order %s).",
-            args.domain, issued.order_number,
+            "An issued certificate already exists",
+            domain=args.domain, order_number=issued.order_number,
         )
         try:
             answer = input("Create a new certificate anyway? [y/N]: ").strip().lower()
@@ -455,9 +450,9 @@ def main() -> None:
             try:
                 order = sess.ssl.get(args.order_id)
             except CertiNextAPIError as exc:
-                log.error("Error fetching order %s: HTTP %s", args.order_id, exc.status_code)
+                log.error("Error fetching order", order_id=args.order_id, status_code=exc.status_code)
                 raise SystemExit(1) from exc
-            log.info("Resuming order %s (status: %s)", order.order_id, order.status)
+            log.info("Resuming order", order_id=order.order_id, status=order.status)
             csr_path = getattr(args, "csr_file", None)
             csr = _read_csr(csr_path) if csr_path is not None else ""
 
@@ -487,12 +482,12 @@ def main() -> None:
             order = _check_existing_and_prompt(sess, args)
             if order is None:
                 log.info(
-                    "Ordering certificate for %s%s",
-                    args.domain,
-                    f" + {len(args.sans)} SAN(s)" if args.sans else "",
+                    "Ordering certificate",
+                    domain=args.domain,
+                    sans_count=len(args.sans) if args.sans else 0,
                 )
                 order = _create_order(sess, args, csr=csr)
-                log.info("Created order %s (status: %s)", order.order_id, order.status)
+                log.info("Created order", order_id=order.order_id, status=order.status)
 
         # ------------------------------------------------------------------
         # Phase 3: Workflow execution
@@ -507,8 +502,8 @@ def main() -> None:
             if not dcv_logged:
                 for c in challenges:
                     log.info(
-                        "DCV challenge for %s: %s %s = %s",
-                        c.domain, c.method, c.host, c.token,
+                        "DCV challenge",
+                        domain=c.domain, method=c.method, host=c.host, token=c.token,
                     )
                 dcv_logged = True
 
@@ -518,13 +513,13 @@ def main() -> None:
         wf = (
             OrderWorkflow(order, signer_name=signer_name, signer_place=signer_place)
             .on("status_change", lambda old, new: log.debug(
-                "Order %s: %s -> %s", order.order_id, old, new,
+                "Order status change", order_id=order.order_id, old_status=old, new_status=new,
             ))
             .on("poll", lambda o: log.debug(
-                "Order %s status: %s (polling)", o.order_id, o.status,
+                "Polling order", order_id=o.order_id, status=o.status,
             ))
             .on("dcv_available", _on_dcv)
-            .on("issued", lambda o: log.info("Order %s issued.", o.order_id))
+            .on("issued", lambda o: log.info("Order issued", order_id=o.order_id))
         )
 
         if args.wait == 0:
@@ -532,8 +527,8 @@ def main() -> None:
             # exit so the caller can schedule a later resume run.
             wf.submit_csr(csr, force=True)
             wf.advance(csr)
-            log.info("Order %s submitted (status: %s)", order.order_id, order.status)
-            log.info("Re-run with --order-id %s to resume polling.", order.order_id)
+            log.info("Order submitted", order_id=order.order_id, status=order.status)
+            log.info("Re-run with --order-id to resume polling", order_id=order.order_id)
             return
 
         # wf.run() submits the CSR (force=True), drives all state transitions,
@@ -543,15 +538,15 @@ def main() -> None:
             pem = wf.run(csr=csr, wait=args.wait)
         except CertiNextTimeoutError as exc:
             log.error(
-                "Timed out after %ds waiting for issuance (order %s, status: %s).",
-                exc.wait, order.order_id, order.status,
+                "Timed out waiting for issuance",
+                wait_seconds=exc.wait, order_id=order.order_id, status=order.status,
             )
             raise SystemExit(1) from exc
 
         if order.status != "issued":
             log.error(
-                "Order %s ended with status '%s' — certificate was not issued.",
-                order.order_id, order.status,
+                "Order ended without issuance",
+                order_id=order.order_id, status=order.status,
             )
             raise SystemExit(1)
 
@@ -562,9 +557,9 @@ def main() -> None:
             try:
                 with open(args.output, "w") as f:
                     f.write(pem)
-                log.info("Certificate written to %s", args.output)
+                log.info("Certificate written", path=args.output)
             except OSError as exc:
-                log.error("Error writing certificate: %s", exc)
+                log.error("Error writing certificate", error=str(exc))
                 raise SystemExit(1) from exc
         else:
             print(pem, end="")
@@ -574,7 +569,7 @@ def main() -> None:
         # the operator knows how to continue after any unexpected failure.
         if exc.code not in (0, 130) and order is not None and order.order_id:
             if order.status not in ("cancelled", "rejected", "revoked"):
-                log.error("Re-run with --order-id %s to resume.", order.order_id)
+                log.error("Re-run with --order-id to resume", order_id=order.order_id)
         raise
     except KeyboardInterrupt:
         print("\nAborted.", file=sys.stderr)
