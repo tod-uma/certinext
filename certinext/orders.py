@@ -12,13 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import logging
 from typing import Any, Literal
+
+import structlog
 
 from .client import CertiNextClient
 from .exceptions import CertiNextAPIError  # noqa: F401 — referenced in Raises docstrings
 
-log = logging.getLogger(__name__)
+log = structlog.get_logger()
 
 _BASE = "/api/certinext/v2/reports/orders"
 
@@ -276,9 +277,5 @@ class OrderAccessor:
         """
         domain_lower = domain.lower()
         all_records = self.get_list(status=status, page_size=page_size)
-        log.debug(
-            "find_by_domain: %d total order(s) returned; first raw record: %s",
-            len(all_records),
-            all_records[0].as_dict() if all_records else "(none)",
-        )
+        log.debug("find_by_domain total orders", count=len(all_records))
         return [r for r in all_records if (r.common_name or "").lower() == domain_lower]

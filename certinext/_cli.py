@@ -12,11 +12,13 @@ import os
 import sys
 from typing import Any, NoReturn
 
+import structlog
+
 import certinext
 from certinext._keyring import keyring_get, keyring_service
 from certinext.exceptions import CertiNextAPIError
 
-log = logging.getLogger(__name__)
+log = structlog.get_logger()
 
 
 def _resolve(
@@ -118,19 +120,88 @@ def apply_sandbox(args: argparse.Namespace) -> None:
             args.profile = "sandbox"
 
 
-def _setup_logging(verbose: int) -> None:
-    """Configure logging level and format based on verbosity count.
+def _reorder_log_keys(_logger: Any, _method: str, event_dict: structlog.typing.EventDict) -> structlog.typing.EventDict:
+    """Reorder event dict keys for consistent JSON output regardless of log source.
 
-    Sets the root logger to INFO (verbose 0–2) or DEBUG (verbose 3+).
-    Suppresses noisy third-party loggers below verbose 4.
+    Puts fixed fields first so every line reads: timestamp → level → event → logger
+    (foreign only) → remaining fields.
+
+    Args:
+        _logger: Unused — required by the structlog processor protocol.
+        _method: Unused — required by the structlog processor protocol.
+        event_dict: The current log event dictionary to reorder.
+
+    Returns:
+        A new dict with priority keys first, remaining keys appended in original order.
+    """
+    priority = ["timestamp", "level", "logger", "event"]
+    reordered: dict[str, Any] = {k: event_dict[k] for k in priority if k in event_dict}
+    reordered.update({k: v for k, v in event_dict.items() if k not in priority})
+    return reordered
+
+
+def _setup_logging(verbose: int) -> None:
+    """Route all output — structlog and third-party stdlib — through a shared renderer.
+
+    Uses structlog.stdlib.ProcessorFormatter as the single stdlib handler formatter so
+    native structlog calls and foreign stdlib records (urllib3, requests, keyring) both
+    pass through the same renderer.
+
+    TTY (interactive): ConsoleRenderer with local HH:MM:SS timestamps.
+    Non-TTY (cron/redirect): JSONRenderer with full ISO UTC timestamps, consistent
+    key order (timestamp → level → logger → event → ...).
 
     Args:
         verbose: Verbosity count from -v flags (0=INFO, 3+=DEBUG, 4+=third-party DEBUG).
     """
-    logging.basicConfig(
-        level=logging.DEBUG if verbose >= 3 else logging.INFO,
-        format="%(message)s" if sys.stderr.isatty() else "%(asctime)s %(levelname)-8s %(message)s",
+    level = logging.DEBUG if verbose >= 3 else logging.INFO
+    interactive = sys.stderr.isatty()
+
+    ts_fmt = "%H:%M:%S" if interactive else "iso"
+    pre_chain: list[Any] = [
+        structlog.contextvars.merge_contextvars,
+        structlog.processors.add_log_level,
+        structlog.processors.TimeStamper(fmt=ts_fmt, utc=not interactive),
+    ]
+    foreign_pre_chain: list[Any] = [
+        structlog.stdlib.add_log_level,
+        structlog.stdlib.add_logger_name,
+        structlog.contextvars.merge_contextvars,
+        structlog.processors.TimeStamper(fmt=ts_fmt, utc=not interactive),
+    ]
+
+    if interactive:
+        renderer: Any = structlog.dev.ConsoleRenderer()
+        final_processors: list[Any] = [
+            structlog.stdlib.ProcessorFormatter.remove_processors_meta,
+            structlog.processors.format_exc_info,
+            renderer,
+        ]
+    else:
+        renderer = structlog.processors.JSONRenderer()
+        final_processors = [
+            structlog.stdlib.ProcessorFormatter.remove_processors_meta,
+            structlog.processors.format_exc_info,
+            _reorder_log_keys,
+            renderer,
+        ]
+
+    structlog.configure(
+        processors=pre_chain + [structlog.stdlib.ProcessorFormatter.wrap_for_formatter],
+        wrapper_class=structlog.make_filtering_bound_logger(level),
+        context_class=dict,
+        logger_factory=structlog.stdlib.LoggerFactory(),
+        cache_logger_on_first_use=True,
     )
+
+    formatter = structlog.stdlib.ProcessorFormatter(
+        foreign_pre_chain=foreign_pre_chain,
+        processors=final_processors,
+    )
+    handler = logging.StreamHandler(sys.stderr)
+    handler.setFormatter(formatter)
+    logging.basicConfig(handlers=[handler], level=level, force=True)
+
     if verbose < 4:
         logging.getLogger("urllib3").setLevel(logging.WARNING)
         logging.getLogger("keyring").setLevel(logging.WARNING)
@@ -162,10 +233,7 @@ def build_session(args: argparse.Namespace) -> certinext.CertiNextSession:
         args.client_secret, "CERTINEXT_CLIENT_SECRET", "CertiNext client secret", secret=True,
         kr_service=svc, kr_key="CERTINEXT_CLIENT_SECRET",
     )
-    log.info(
-        "Connecting to %s as account %s (profile: %s)",
-        args.base_url, client_id, profile or "default",
-    )
+    log.info("Connecting", url=args.base_url, account=client_id, profile=profile or "default")
     return certinext.session(
         base_url=args.base_url,
         token_url=args.token_url,
@@ -245,8 +313,8 @@ def fatal_api_error(exc: CertiNextAPIError, message: str) -> NoReturn:
         message: Short description of the failed operation, e.g.
             ``"Error creating order"``.
     """
-    log.error("%s: %s", message, exc)
+    log.error(message, error=str(exc))
     for field_err in exc.field_errors:
-        log.error("  Field error: %s", field_err)
-    log.debug("  Full response body: %s", exc.body)
+        log.error("Field error", field_error=str(field_err))
+    log.debug("Full response body", body=exc.body)
     raise SystemExit(1) from exc

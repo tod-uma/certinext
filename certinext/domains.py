@@ -12,16 +12,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import logging
 import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Literal, cast
 
+import structlog
+
 from .client import CertiNextClient
 from .exceptions import CertiNextAPIError  # noqa: F401 — referenced in Raises docstrings
 
-log = logging.getLogger(__name__)
+log = structlog.get_logger()
 
 _BASE = "/api/certinext/v2/domains"
 
@@ -117,9 +118,8 @@ def _has_ns_records(name: str) -> bool:
         return True
     except ImportError:
         log.debug(
-            "%s: dnspython not installed; skipping NS check "
-            "(pip install certinext[dns] to enable zone-boundary detection)",
-            name,
+            "dnspython not installed — skipping NS check",
+            domain=name,
         )
         return False
     except Exception:
@@ -343,8 +343,8 @@ class Domain:
         """
         if check_ns and _has_ns_records(self.name or ""):
             log.debug(
-                "%s: has NS records (DNS zone boundary) — DCV will not propagate from parent",
-                self.name,
+                "has NS records (DNS zone boundary) — DCV will not propagate from parent",
+                domain=self.name,
             )
             return None
         labels = (self.name or "").split(".")

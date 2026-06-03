@@ -64,10 +64,11 @@ with the initial order or separately via ``PUT /ssl-certificates/{orderId}/csr``
     the request body.
 """
 
-import logging
 import time
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Literal
+
+import structlog
 
 from .client import CertiNextClient
 from .exceptions import CertiNextAPIError, CertiNextTimeoutError  # noqa: F401 — referenced in Raises docstrings
@@ -75,7 +76,7 @@ from .exceptions import CertiNextAPIError, CertiNextTimeoutError  # noqa: F401 �
 if TYPE_CHECKING:
     from .session import CertiNextSession
 
-log = logging.getLogger(__name__)
+log = structlog.get_logger()
 
 _SSL_BASE = "/api/certinext/v2/ssl-certificates"
 _WORKFLOW_TERMINAL = frozenset({"issued", "revoked", "cancelled", "rejected", "expired"})
@@ -835,7 +836,7 @@ class SslAccessor:
         Returns:
             :class:`SslOrder` wrapping the API response.
         """
-        log.debug("POST %s body: %s", _SSL_BASE, body)
+        log.debug("POST ssl-certificates", body=body)
         data = self._client.post(_SSL_BASE, json=body)
         return SslOrder(self._client, data)
 
@@ -2123,9 +2124,8 @@ class OrderWorkflow:
                     self._emit("status_change", current, self._order.status)
             except CertiNextAPIError as exc:
                 log.debug(
-                    "accept_agreement returned HTTP %s for order %s — "
-                    "order may advance on its own",
-                    exc.status_code, self._order.order_id,
+                    "accept_agreement returned HTTP error — order may advance on its own",
+                    status_code=exc.status_code, order_id=self._order.order_id,
                 )
             return "accepted-agreement"
 
@@ -2147,8 +2147,8 @@ class OrderWorkflow:
                 challenges = self._order.get_dcv()
             except CertiNextAPIError as exc:
                 log.debug(
-                    "get_dcv returned HTTP %s for order %s",
-                    exc.status_code, self._order.order_id,
+                    "get_dcv returned HTTP error",
+                    status_code=exc.status_code, order_id=self._order.order_id,
                 )
             if challenges:
                 self._emit("dcv_available", challenges)
@@ -2159,8 +2159,8 @@ class OrderWorkflow:
                             self._order.verify_dcv(c.domain, c.method)
                         except CertiNextAPIError as exc:
                             log.debug(
-                                "verify_dcv returned HTTP %s for %s on order %s",
-                                exc.status_code, c.domain, self._order.order_id,
+                                "verify_dcv returned HTTP error",
+                                status_code=exc.status_code, domain=c.domain, order_id=self._order.order_id,
                             )
                 self._order.refresh()
                 if self._order.status != current:
@@ -2244,9 +2244,8 @@ class OrderWorkflow:
             except CertiNextAPIError as exc:
                 if exc.status_code == 422 and attempt < retries:
                     log.debug(
-                        "Certificate not ready yet (HTTP 422), retrying in %ds "
-                        "(attempt %d/%d)",
-                        retry_delay, attempt, retries,
+                        "Certificate not ready yet, retrying",
+                        retry_delay=retry_delay, attempt=attempt, retries=retries,
                     )
                     time.sleep(retry_delay)
                 else:
@@ -2278,9 +2277,8 @@ class OrderWorkflow:
             except CertiNextAPIError as exc:
                 if exc.status_code == 422 and attempt < retries:
                     log.debug(
-                        "Certificate not ready yet (HTTP 422), retrying in %ds "
-                        "(attempt %d/%d)",
-                        retry_delay, attempt, retries,
+                        "Certificate not ready yet, retrying",
+                        retry_delay=retry_delay, attempt=attempt, retries=retries,
                     )
                     time.sleep(retry_delay)
                 else:
