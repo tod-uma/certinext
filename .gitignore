@@ -34,8 +34,11 @@ report.xml
 .env
 .env.*
 
-# Claude Code
-.claude/
+# Claude Code — ignore local session data, but share team config
+.claude/*
+!.claude/commands/
+!.claude/settings.json
+!.claude/pre-commit-check.py
 
 # VS Code
 .vscode/
