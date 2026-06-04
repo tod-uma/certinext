@@ -133,7 +133,22 @@ jobs:
           python-version: "3.12"
       - run: pip install build
       - run: python -m build
+      # Read the release notes from the annotated tag message so GitLab and
+      # GitHub show identical, curated notes. The tag is pushed to GitHub by
+      # the GitLab→GitHub mirror, so the annotated tag object is available.
+      - name: Read tag message
+        id: tag_message
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          MSG=$(gh api repos/${{ github.repository }}/git/refs/tags/${{ github.ref_name }} \
+            --jq '.object.sha' | \
+            xargs -I{} gh api repos/${{ github.repository }}/git/tags/{} \
+            --jq '.message // ""')
+          echo "body<<EOF" >> $GITHUB_OUTPUT
+          echo "$MSG" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
       - uses: softprops/action-gh-release@v3
         with:
-          generate_release_notes: true
+          body: ${{ steps.tag_message.outputs.body }}
           files: dist/*
