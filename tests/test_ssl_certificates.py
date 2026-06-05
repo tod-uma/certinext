@@ -69,6 +69,8 @@ _ORDER_DATA = {
     "domain": "example.com",
     "additionalDomains": ["www.example.com"],
     "createdAt": "2026-05-27T12:00:00Z",
+    "tags": ["foo", "bar"],
+    "remarks": "some note",
 }
 
 
@@ -281,6 +283,26 @@ class TestSslOrderProperties:
         """created_at reads createdAt."""
         order = SslOrder(MagicMock(), _ORDER_DATA)
         assert order.created_at == "2026-05-27T12:00:00Z"
+
+    def test_tags(self):
+        """tags reads the tags list."""
+        order = SslOrder(MagicMock(), _ORDER_DATA)
+        assert order.tags == ["foo", "bar"]
+
+    def test_tags_empty_when_missing(self):
+        """tags returns [] when the field is absent."""
+        order = SslOrder(MagicMock(), {})
+        assert order.tags == []
+
+    def test_remarks(self):
+        """remarks reads the remarks string."""
+        order = SslOrder(MagicMock(), _ORDER_DATA)
+        assert order.remarks == "some note"
+
+    def test_remarks_none_when_missing(self):
+        """remarks returns None when the field is absent."""
+        order = SslOrder(MagicMock(), {})
+        assert order.remarks is None
 
     def test_as_dict_returns_raw_data(self):
         """as_dict() returns the exact dict passed at construction."""
