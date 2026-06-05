@@ -28,9 +28,9 @@ Typical usage::
 
 Known API limitations (vendor bugs, pending fix):
     - The ``search`` parameter to :meth:`~certinext.domains.DomainAccessor.get_list`
-      remains broken (re-tested 2026-05-27): FQDN searches (any value containing
-      ``"."``) return all domains; substring searches return 0. Use ``pattern`` for
-      client-side filtering.
+      is partially fixed (re-tested 2026-06-05): exact FQDN matches now work, but
+      substring searches (values without ``"."``) return 0 results. Use ``pattern``
+      for client-side filtering.
     - Passing both ``domain_status`` and ``dcv_status`` to
       :meth:`~certinext.domains.DomainAccessor.get_list` returns a 400 error.
       :meth:`~certinext.domains.DomainAccessor.get_pending_dcv` works around this
