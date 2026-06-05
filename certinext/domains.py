@@ -597,12 +597,11 @@ class DomainAccessor:
             limit: Page size (API default 50; keep ≤200 for performance).
             search: Full FQDN for exact match (``maine.edu``) or a substring
                 for LIKE matching (``maine``). Maps to the API ``search`` param.
-                **Warning:** the API ``search`` parameter remains broken after
-                the vendor's claimed fix (re-tested 2026-05-27 with confirmed-
-                correct usage per API docs). FQDN searches (any value containing
-                ``"."``) still return all domains; substring searches (no ``"."``)
-                now return 0 results. Use ``pattern`` for reliable client-side
-                filtering.
+                **Warning:** the API ``search`` parameter is partially fixed
+                (re-tested 2026-06-05): exact FQDN matches now work correctly,
+                but substring searches (values without ``"."``) return 0 results
+                instead of matching domains. Use ``pattern`` for reliable
+                client-side filtering.
             domain_status: Comma-separated status filter, e.g.
                 ``"ACTIVE,INACTIVE"``. Values: ACTIVE, INACTIVE, EXPIRED,
                 REVOKED.

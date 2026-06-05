@@ -703,10 +703,10 @@ Filter by status server-side (reduces data transferred):
 domains = sess.domain.get_list(domain_status="ACTIVE", dcv_status="PENDING,REJECTED,EXPIRED")
 ```
 
-> **Note:** The API `search` parameter remains broken after the vendor's
-> claimed fix (re-tested 2026-05-27). FQDN searches (any value containing `.`)
-> still return all domains; substring searches (no `.`) return 0 results. Use
-> `pattern` (below) for reliable filtering.
+> **Note:** The API `search` parameter is partially fixed (re-tested 2026-06-05):
+> exact FQDN matches now work, but substring searches (values without `.`) return
+> 0 results instead of matching domains. Use `pattern` (below) for reliable
+> filtering.
 
 Filter by name with a regex (applied client-side after the API response):
 

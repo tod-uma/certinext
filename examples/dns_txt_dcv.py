@@ -471,8 +471,9 @@ def main() -> None:
             elif effective_pattern:
                 log.info("Domain filter: pattern %s", effective_pattern)
 
-        # NOTE: The API search parameter is a confirmed vendor bug — all domains are
-        # returned regardless of the value passed. Use pattern for client-side filtering.
+        # NOTE: The API search parameter is partially fixed (re-tested 2026-06-05) — exact
+        # FQDN matches work but substring searches return 0 results. Use pattern for reliable
+        # client-side filtering.
         if args.domain:
             domains = sess.domain.get_list(pattern="|".join(re.escape(d) for d in args.domain))
         else:
