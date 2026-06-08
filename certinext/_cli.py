@@ -213,7 +213,10 @@ def build_session(args: argparse.Namespace) -> certinext.CertiNextSession:
     """Resolve credentials and return a configured :class:`~certinext.CertiNextSession`.
 
     Reads credentials in priority order: explicit CLI argument → keyring →
-    environment variable → interactive prompt.
+    environment variable → interactive prompt.  When ``--account-number`` is
+    provided explicitly the keyring is **not** consulted for the client secret,
+    because the stored secret belongs to the previously configured account and
+    would cause an authentication failure if used with a different client ID.
 
     Args:
         args: Parsed CLI arguments. Must have ``profile``, ``base_url``,
@@ -229,9 +232,14 @@ def build_session(args: argparse.Namespace) -> certinext.CertiNextSession:
         args.account_number, "CERTINEXT_CLIENT_ID", "CertiNext account number",
         kr_service=svc, kr_key="CERTINEXT_CLIENT_ID",
     )
+    # Skip keyring for secret when account number was explicitly overridden — the
+    # stored secret belongs to a different account and would cause a 401.
+    secret_kr_service = None if args.account_number else svc
+    secret_kr_key = None if args.account_number else "CERTINEXT_CLIENT_SECRET"
     client_secret = _resolve(
         args.client_secret, "CERTINEXT_CLIENT_SECRET", "CertiNext client secret", secret=True,
-        kr_service=svc, kr_key="CERTINEXT_CLIENT_SECRET",
+        kr_service=secret_kr_service,
+        kr_key=secret_kr_key,
     )
     log.info("Connecting", url=args.base_url, account=client_id, profile=profile or "default")
     return certinext.session(
