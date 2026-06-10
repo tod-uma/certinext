@@ -15,7 +15,7 @@ from typing import Any, NoReturn
 import structlog
 
 import certinext
-from certinext._keyring import keyring_get, keyring_service
+from certinext._keyring import keyring_available, keyring_get, keyring_service, no_keyring_help
 from certinext.exceptions import CertiNextAPIError
 
 log = structlog.get_logger()
@@ -44,6 +44,10 @@ def _resolve(
 
     Returns:
         The resolved credential string.
+
+    Raises:
+        RuntimeError: If the credential is unset and stdin is not a TTY, so
+            no interactive prompt is possible.
     """
     if arg_value:
         return arg_value
@@ -55,9 +59,14 @@ def _resolve(
     if env_value:
         return env_value
     if not sys.stdin.isatty():
+        if keyring_available():
+            raise RuntimeError(
+                f"{prompt} is required but stdin is not a TTY. "
+                f"Set {env_var} or store the credential in the keyring."
+            )
         raise RuntimeError(
-            f"{prompt} is required but stdin is not a TTY. "
-            f"Set {env_var} or store the credential in the keyring."
+            f"{prompt} is required but stdin is not a TTY, and no usable "
+            f"OS keyring backend was found. Set {env_var}.\n\n" + no_keyring_help()
         )
     if secret:
         return getpass.getpass(f"{prompt}: ")

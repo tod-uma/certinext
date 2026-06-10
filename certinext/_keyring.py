@@ -4,6 +4,8 @@ Provides lightweight wrappers around the optional ``keyring`` package.
 All functions silently degrade when keyring is not installed rather than
 raising an ImportError, so callers do not need to guard the import.
 """
+import os
+import platform
 
 
 def keyring_service(base: str, profile: str | None) -> str:
@@ -17,6 +19,72 @@ def keyring_service(base: str, profile: str | None) -> str:
         ``'base-profile'`` when profile is set, otherwise ``'base'``.
     """
     return f"{base}-{profile}" if profile else base
+
+
+def in_wsl() -> bool:
+    """Return True when running inside Windows Subsystem for Linux.
+
+    Detection uses the WSL_DISTRO_NAME environment variable (set by WSL) and
+    falls back to checking for 'microsoft' in the kernel release string.
+
+    Returns:
+        True if running under WSL, False otherwise.
+    """
+    return bool(os.environ.get("WSL_DISTRO_NAME")) or "microsoft" in platform.uname().release.lower()
+
+
+def keyring_available() -> bool:
+    """Return True when keyring is installed and a usable backend is configured.
+
+    A "usable backend" means anything other than keyring's ``fail`` backend,
+    which is what keyring falls back to when no OS keychain is reachable
+    (e.g. WSL or headless Linux without a Secret Service daemon).
+
+    Returns:
+        True if keyring calls can succeed, False otherwise.
+    """
+    try:
+        import keyring
+        import keyring.backends.fail
+        return not isinstance(keyring.get_keyring(), keyring.backends.fail.Keyring)
+    except Exception:
+        return False
+
+
+def no_keyring_help() -> str:
+    """Return guidance for running without a usable OS keyring backend.
+
+    The advice is tailored to the runtime environment: under WSL it suggests
+    bridging to the Windows Credential Manager with keyring-pybridge; on other
+    hosts it suggests starting a Secret Service daemon.
+
+    Returns:
+        A multi-line, human-readable help string (no trailing newline).
+    """
+    lines = [
+        "This is common in WSL and headless Linux, where no Secret Service",
+        "daemon (gnome-keyring or KWallet) is running.",
+        "",
+        "Options:",
+        "  - Skip the keyring entirely: certinext scripts also read credentials",
+        "    from the CERTINEXT_CLIENT_ID and CERTINEXT_CLIENT_SECRET",
+        "    environment variables.",
+    ]
+    if in_wsl():
+        lines += [
+            "  - Use the Windows Credential Manager from WSL via keyring-pybridge:",
+            "      1. On Windows, install Python with the keyring package.",
+            "      2. In this environment: pip install keyring-pybridge",
+            "      3. export PYTHON_KEYRING_BACKEND=keyring_pybridge.PyBridgeKeyring",
+            r"      4. export KEYRING_PROPERTY_PYTHON='C:\path\to\python.exe'",
+            "    Credentials are then shared between Windows and WSL.",
+        ]
+    else:
+        lines += [
+            "  - Install and start a Secret Service daemon (e.g. gnome-keyring),",
+            "    then try again.",
+        ]
+    return "\n".join(lines)
 
 
 def keyring_get(service: str, key: str) -> str | None:

@@ -142,6 +142,39 @@ All scripts resolve credentials in this priority order:
 
 </details>
 
+<details>
+<summary>WSL and headless Linux (no keyring backend)</summary>
+
+#### WSL and headless Linux
+
+On Linux, `keyring` needs a running Secret Service daemon (gnome-keyring or
+KWallet). WSL and headless servers usually have none, so `certinext-setup-keyring`
+reports that no usable OS keyring backend was found. Options:
+
+- **Skip the keyring.** All scripts fall back to the `CERTINEXT_CLIENT_ID` and
+  `CERTINEXT_CLIENT_SECRET` environment variables (see the resolution order
+  above).
+
+- **WSL: bridge to the Windows Credential Manager** with
+  [keyring-pybridge](https://pypi.org/project/keyring-pybridge/), which
+  forwards keyring calls to a Python interpreter on the Windows host.
+  Credentials are then shared between Windows and WSL.
+
+  ```bash
+  # Prerequisite: a Windows-side Python with the keyring package installed
+  pip install keyring-pybridge
+  export PYTHON_KEYRING_BACKEND=keyring_pybridge.PyBridgeKeyring
+  export KEYRING_PROPERTY_PYTHON='C:\path\to\python.exe'
+  certinext-setup-keyring
+  ```
+
+  Add the two `export` lines to your shell profile so every session uses the
+  bridge.
+
+- **Headless Linux: start a Secret Service daemon** such as gnome-keyring.
+
+</details>
+
 ### Sandbox environment
 
 A sandbox environment is available at `https://sandbox-us-api.certinext.io` for
@@ -1165,7 +1198,7 @@ The Swagger spec is the most authoritative source — it exposes fields not pres
 certinext/
     __init__.py                   # session() factory, top-level exports, URL constants
     _cli.py                       # shared CLI utilities (add_connection_args, add_requestor_args, fatal_api_error, build_session)
-    _keyring.py                   # shared keyring helpers (keyring_service, keyring_get)
+    _keyring.py                   # shared keyring helpers (keyring_service, keyring_get, keyring_available, no_keyring_help)
     accounts.py                   # AccountInfo, Group, Organization, AccountAccessor
     accounts_cli.py               # certinext-accounts CLI entry point
     auth.py                       # OAuth 2.0 client credentials token management

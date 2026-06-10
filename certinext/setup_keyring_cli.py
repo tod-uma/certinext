@@ -21,8 +21,11 @@ import argparse
 import getpass
 import sys
 
+from certinext._keyring import no_keyring_help
+
 try:
     import keyring
+    from keyring.errors import NoKeyringError
 except ImportError:
     sys.exit("keyring is not installed. Run: uv pip install certinext[keyring]")
 
@@ -109,6 +112,12 @@ def main() -> None:
             print(f"Run scripts with '--profile {args.profile}' or set CERTINEXT_PROFILE={args.profile}.")
         else:
             print("Credentials will be used automatically by any script that reads the certinext keyring service.")
+    except NoKeyringError:
+        print(
+            "Error: no usable OS keyring backend was found.\n\n" + no_keyring_help(),
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
     except KeyboardInterrupt:
         print("\nAborted.", file=sys.stderr)
         raise SystemExit(130)
