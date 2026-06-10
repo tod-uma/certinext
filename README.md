@@ -11,6 +11,7 @@ Python library and CLI scripts for managing your [CertiNext](https://us.certinex
 - [Credentials](#credentials)
 - [CLI commands](#cli-commands)
   - [certinext-setup-keyring](#certinext-setup-keyring)
+  - [certinext-setup-defaults](#certinext-setup-defaults)
   - [certinext-accounts](#certinext-accounts)
   - [certinext-domains](#certinext-domains)
   - [certinext-ledger](#certinext-ledger)
@@ -30,7 +31,7 @@ Python library and CLI scripts for managing your [CertiNext](https://us.certinex
 - Python 3.10+
 - A CertiNext account with OAuth API credentials (account number + client secret)
 
-**Runtime dependencies** (`requests`, `tabulate`, `python-dotenv`, `structlog`) are installed automatically. `structlog` provides structured logging for the CLI tools and library internals — in cron or redirected contexts all output is emitted as JSON; in a terminal it uses a human-readable format. If you use certinext purely as a library and have a strong reason to exclude `structlog`, open an issue and we'll consider making it optional.
+**Runtime dependencies** (`requests`, `tabulate`, `structlog`) are installed automatically. `structlog` provides structured logging for the CLI tools and library internals — in cron or redirected contexts all output is emitted as JSON; in a terminal it uses a human-readable format. If you use certinext purely as a library and have a strong reason to exclude `structlog`, open an issue and we'll consider making it optional.
 
 ## Installation
 
@@ -175,6 +176,48 @@ reports that no usable OS keyring backend was found. Options:
 
 </details>
 
+### Storing issue-cert defaults (optional)
+
+Store the values `certinext-issue-cert` needs on every run — requestor
+identity, certificate type, org ID, validity — so that issuing a certificate
+is just:
+
+```bash
+certinext-issue-cert new.csr
+```
+
+Run the interactive setup once:
+
+```bash
+certinext-setup-defaults
+```
+
+Or pass `--save-defaults` on any `certinext-issue-cert` run to capture the
+values you used. Or hand-edit the config file
+(`~/.config/certinext/config.toml` on Linux/macOS,
+`%APPDATA%\certinext\config.toml` on Windows, override with
+`CERTINEXT_CONFIG`):
+
+```toml
+[defaults]
+requestor_name  = "Jane Doe"
+requestor_email = "jane@maine.edu"
+requestor_phone = "+12075551234"
+signer_place    = "Orono, ME"
+type            = "ov"
+org_id          = "12345"
+validity        = 1
+
+[profiles.sandbox]
+# overrides applied when --sandbox / --profile sandbox is active
+type = "dv"
+```
+
+Values resolve in priority order: explicit CLI argument → environment
+variable → `[profiles.NAME]` → `[defaults]` → built-in default. Secrets
+(client secret, prevetting token) are never stored here — use
+`certinext-setup-keyring` for credentials.
+
 ### Sandbox environment
 
 A sandbox environment is available at `https://sandbox-us-api.certinext.io` for
@@ -245,6 +288,28 @@ certinext-setup-keyring --sandbox
 The script prompts for your account number and client secret, shows any
 currently stored value as a default so you can keep it by pressing Enter, and
 masks the secret with asterisks on confirmation.
+
+### certinext-setup-defaults
+
+`certinext-setup-defaults` interactively stores defaults for
+`certinext-issue-cert` (requestor identity, certificate type, org ID,
+validity) in the config file, so future issuance runs only need the CSR. See
+[Storing issue-cert defaults](#storing-issue-cert-defaults-optional) for the
+file format and resolution order.
+
+```bash
+# Edit the [defaults] section
+certinext-setup-defaults
+
+# Edit a profile section ([profiles.prod])
+certinext-setup-defaults --profile prod
+
+# Edit the sandbox profile
+certinext-setup-defaults --sandbox
+```
+
+Each prompt shows the currently stored value — press Enter to keep it, or
+enter `-` to clear it.
 
 ### certinext-accounts
 
@@ -547,8 +612,12 @@ csr_file                    PEM-encoded CSR file (positional; omit to read from 
 -o FILE, --output FILE      Write the certificate PEM to FILE (default: stdout)
 --wait SECONDS              Seconds to wait for issuance (default: 300; 0 = submit and exit)
 --order-id ID               Resume polling an existing order instead of creating a new one
+--save-defaults             Store the effective requestor/certificate values as config defaults
 -v, --verbose               Increase verbosity (-vvv for debug logging)
 ```
+
+Requestor and certificate values can also come from stored defaults — see
+[Storing issue-cert defaults](#storing-issue-cert-defaults-optional).
 
 #### Examples
 
@@ -576,9 +645,14 @@ certinext-issue-cert --order-id ORDER-ID --wait 600
 
 # Resume and supply the CSR (in case the order is still in pending-csr)
 certinext-issue-cert --order-id ORDER-ID --csr example.com.csr
+
+# Capture the values used on this run as defaults for future runs
+certinext-issue-cert example.com.csr --type ov --org-id 8921215 --save-defaults
 ```
 
-Set requestor environment variables once to avoid repeating them on every call:
+To avoid repeating requestor flags on every call, store them once with
+`certinext-setup-defaults` (or `--save-defaults` above), or set environment
+variables (which take precedence over stored defaults):
 
 ```bash
 export CERTINEXT_REQUESTOR_NAME="Jane Doe"
@@ -1198,6 +1272,7 @@ The Swagger spec is the most authoritative source — it exposes fields not pres
 certinext/
     __init__.py                   # session() factory, top-level exports, URL constants
     _cli.py                       # shared CLI utilities (add_connection_args, add_requestor_args, fatal_api_error, build_session)
+    _config.py                    # stored issue-cert defaults (config.toml load/merge/save)
     _keyring.py                   # shared keyring helpers (keyring_service, keyring_get, keyring_available, no_keyring_help)
     accounts.py                   # AccountInfo, Group, Organization, AccountAccessor
     accounts_cli.py               # certinext-accounts CLI entry point
@@ -1216,6 +1291,7 @@ certinext/
     orders.py                     # OrderRecord and OrderAccessor
     pending_dcv_cli.py            # certinext-pending-dcv CLI entry point
     session.py                    # CertiNextSession (accounts, catalog, domain, ledger, orders, ssl)
+    setup_defaults_cli.py         # certinext-setup-defaults CLI entry point
     setup_keyring_cli.py          # certinext-setup-keyring CLI entry point
     ssl_certificates.py           # SslOrder, DcvChallenge, CertificateDownload, SslAccessor, OrderWorkflow
                                   #   SslAccessor.create() — DV/OV/EV dispatcher
