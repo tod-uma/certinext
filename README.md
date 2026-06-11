@@ -9,7 +9,7 @@ Python library and CLI scripts for managing your [CertiNext](https://us.certinex
 - [Requirements](#requirements)
 - [Installation](#installation)
 - [Credentials](#credentials)
-- [CLI commands](#cli-commands)
+- [Using the CLI tools](#using-the-cli-tools)
   - [certinext-setup-keyring](#certinext-setup-keyring)
   - [certinext-setup-defaults](#certinext-setup-defaults)
   - [certinext-accounts](#certinext-accounts)
@@ -28,73 +28,165 @@ Python library and CLI scripts for managing your [CertiNext](https://us.certinex
 
 ## Requirements
 
-- Python 3.10+
+- Python 3.10+ (installed automatically when using uv — see [Installation](#installation))
 - A CertiNext account with OAuth API credentials (account number + client secret)
 
 **Runtime dependencies** (`requests`, `tabulate`, `structlog`) are installed automatically. `structlog` provides structured logging for the CLI tools and library internals — in cron or redirected contexts all output is emitted as JSON; in a terminal it uses a human-readable format. If you use certinext purely as a library and have a strong reason to exclude `structlog`, open an issue and we'll consider making it optional.
 
 ## Installation
 
-### From PyPI
+All instructions use [uv](https://docs.astral.sh/uv/). You don't need
+Python installed first — uv downloads and manages Python for you.
+
+To install the `certinext-*` CLI tools (issuing certificates, listing
+domains, etc.):
 
 ```bash
-pip install certinext
+uv tool install "certinext[csr,keyring]"
 ```
 
-Or with `uv`:
+That's the whole install — the commands now work from any terminal. (If a
+command isn't found, run `uv tool update-shell` and open a new terminal.)
+The two extras are recommended for CLI use: `csr` enables CSR parsing for
+`certinext-issue-cert`, and `keyring` lets the commands store and read
+credentials in the OS keychain.
+
+Everything else — installing uv itself, library use, pre-releases, the UMS
+GitLab registry, development installs, and pip/pipx equivalents — is in the
+collapsible sections below.
+
+<details>
+<summary>Install uv (one-time, Windows / macOS / Linux)</summary>
+
+**Windows** (PowerShell):
+
+```powershell
+winget install --id=astral-sh.uv -e
+```
+
+**macOS / Linux**:
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+(On macOS, `brew install uv` also works.)
+
+Then open a **new** terminal so `uv` is on your PATH. The first time a
+command needs Python, uv downloads a suitable version automatically.
+
+</details>
+
+<details>
+<summary>All uv install variants (library use, pre-releases, UMS GitLab registry, development)</summary>
+
+**Library in your project** — if you want `import certinext` in your own
+code, add it as a dependency of your uv-managed project:
 
 ```bash
 uv add certinext
 ```
 
-To use `certinext-issue-cert` (CSR parsing), also install the `csr` optional extra:
+Add extras only if your code uses them: `certinext[csr]` (CSR parsing),
+`certinext[keyring]` (OS keychain credential lookup), `certinext[dns]`
+(DNS lookups).
+
+**Pre-releases** — to get the latest alpha, beta, or release candidate:
 
 ```bash
-pip install "certinext[csr]"
+uv tool install --prerelease=allow "certinext[csr,keyring]"   # CLI tools
+uv add certinext --prerelease=allow                           # library
 ```
 
-To install the latest pre-release (alpha, beta, or release candidate):
+**From the UMS GitLab package registry** — releases are also published to
+the UMS GitLab package registry:
 
 ```bash
-pip install --pre certinext
-uv add certinext --prerelease=allow
-```
-
-### From the UMS GitLab package registry
-
-```bash
-pip install certinext \
+uv tool install certinext \
   --extra-index-url https://gitlab.its.maine.edu/api/v4/groups/2236/-/packages/pypi/simple
 ```
 
-### Development install
-
-Clone the repository, then install in editable mode:
+**Development install** — clone the repository, then create a venv and
+install in editable mode with the `dev` extra (test and lint toolchain plus
+all runtime extras):
 
 ```bash
 uv venv
 .venv\Scripts\activate        # Windows
 # source .venv/bin/activate   # macOS / Linux
 
-uv pip install -e .
+uv pip install -e ".[dev]"
 ```
 
-This installs the `certinext` package and its dependencies (`requests`, `tabulate`, `python-dotenv`, `structlog`).
+</details>
 
-To use `certinext-issue-cert` (CSR parsing), also install the `csr` optional extra:
+<details>
+<summary>Using pip or pipx instead of uv</summary>
+
+All of the above with pip or pipx (both require Python 3.10+ already
+installed).
+
+**CLI tools** — with [pipx](https://pipx.pypa.io/) (isolated install, like
+`uv tool`):
 
 ```bash
-uv pip install -e .[csr]
+pipx install "certinext[csr,keyring]"
+pipx install --pip-args=--pre "certinext[csr,keyring]"   # pre-release
 ```
+
+Or with plain pip (installs into the active Python environment, not
+isolated):
+
+```bash
+pip install "certinext[csr,keyring]"
+pip install --pre "certinext[csr,keyring]"               # pre-release
+```
+
+**Library in your project**:
+
+```bash
+pip install certinext
+pip install --pre certinext        # pre-release
+```
+
+**Optional extras** — add any of `csr`, `keyring`, or `dns` after the fact,
+e.g. the `keyring` extra needed by `certinext-setup-keyring`:
+
+```bash
+pip install "certinext[keyring]"
+```
+
+**From the UMS GitLab package registry**:
+
+```bash
+pip install certinext \
+  --extra-index-url https://gitlab.its.maine.edu/api/v4/groups/2236/-/packages/pypi/simple
+```
+
+**Development install**:
+
+```bash
+python -m venv .venv
+.venv\Scripts\activate        # Windows
+# source .venv/bin/activate   # macOS / Linux
+
+pip install -e ".[dev]"
+```
+
+</details>
 
 ## Credentials
 
-You need two values from the CertiNext portal (Integrations → APIs → OAuth mode):
+The CLI tools and Python library both talk to the CertiNext **REST API**,
+so you need REST API (OAuth) credentials — your portal username and
+password won't work. Generate the two required values in the CertiNext
+portal under **Integrations → APIs → OAuth mode**:
 
 | Value | Description |
 |---|---|
 | Account number | Your CertiNext account number (used as the OAuth `client_id`) |
 | Client secret | The OAuth access key generated in the portal |
+| Prevetting token | Optional, for auto-approving OV/EV orders — see [Prevetting token](#prevetting-token-optional-ovev-orders) |
 
 The token endpoint defaults to `https://us-api.certinext.io/oauth/token`. Override with `--token-url` if yours differs.
 
@@ -105,9 +197,13 @@ keychain (Windows Credential Manager on Windows, Keychain on macOS,
 libsecret/SecretService on Linux):
 
 ```bash
-uv pip install certinext[keyring]
 certinext-setup-keyring
 ```
+
+This needs the `keyring` extra. It's included in the recommended
+`uv tool install "certinext[csr,keyring]"` from
+[Installation](#installation); pip users can add it with
+`pip install "certinext[keyring]"`.
 
 Scripts read credentials from the keychain automatically — no CLI flags or
 environment variables needed for day-to-day use.
@@ -175,6 +271,26 @@ reports that no usable OS keyring backend was found. Options:
 - **Headless Linux: start a Secret Service daemon** such as gnome-keyring.
 
 </details>
+
+### Prevetting token (optional, OV/EV orders)
+
+OV and EV certificate orders normally pause at a manual approval step at
+the CA before issuance. If your organization has consent configured, an
+**Organization Consent Token** (prevetting token) lets the CA auto-approve
+the order — useful when you want `certinext-issue-cert` to run end-to-end
+without a human approving each order.
+
+Find it in the CertiNext portal under **Organization Management →
+Organization Consent / Consent Tokens** for the target organization, and
+pass it per run:
+
+```bash
+certinext-issue-cert example.com.csr --type ov --org-id 8921215 \
+  --prevetting-token TOKEN
+```
+
+The token is a secret — it is never written to the config file by
+`--save-defaults` or `certinext-setup-defaults`.
 
 ### Storing issue-cert defaults (optional)
 
@@ -267,7 +383,21 @@ automatically whenever these variables are defined.
 
 ---
 
-## CLI commands
+## Using the CLI tools
+
+The complete copy-paste path from nothing to an issued certificate
+([Installation](#installation) covers the install command and uv itself;
+[Credentials](#credentials) covers where the two credential values come
+from):
+
+```bash
+uv tool install "certinext[csr,keyring]"
+certinext-setup-keyring      # store API credentials in the OS keychain (once)
+certinext-setup-defaults     # store requestor/cert defaults (once, optional)
+certinext-issue-cert example.com.csr --cert-out cert.pem --fullchain-out fullchain.pem
+```
+
+Each command is documented below.
 
 ### certinext-setup-keyring
 
@@ -576,11 +706,9 @@ certificate order, handles the full lifecycle (agreement, DCV if needed, CSR
 submission), and writes the signed PEM to stdout or a file once the CA has
 issued it.
 
-Requires the `csr` optional extra:
-
-```bash
-pip install "certinext[csr]"
-```
+Requires the `csr` optional extra — included in the recommended
+`uv tool install "certinext[csr,keyring]"` from
+[Installation](#installation).
 
 #### Arguments
 
