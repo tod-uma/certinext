@@ -54,6 +54,7 @@ Usage::
 
 import argparse
 import sys
+from typing import Any
 
 import structlog
 
@@ -65,6 +66,7 @@ from certinext._cli import (
     build_session,
     fatal_api_error,
 )
+from certinext._config import ConfigError, config_defaults, profile_from_argv, save_defaults
 from certinext.csr import CsrInfo
 from certinext.exceptions import CertiNextAPIError, CertiNextTimeoutError
 from certinext.session import CertiNextSession
@@ -73,12 +75,18 @@ from certinext.ssl_certificates import DcvChallenge, OrderWorkflow, SslOrder
 log = structlog.get_logger()
 
 
-def build_parser() -> argparse.ArgumentParser:
+def build_parser(config: dict[str, Any] | None = None) -> argparse.ArgumentParser:
     """Return the argument parser for certinext-issue-cert.
+
+    Args:
+        config: Stored defaults keyed by argparse dest name, as returned by
+            :func:`certinext._config.config_defaults`. Values become argparse
+            defaults, so explicit CLI arguments always win.
 
     Returns:
         A configured ArgumentParser instance.
     """
+    cfg = config or {}
     parser = argparse.ArgumentParser(
         description=(
             "Submit a CSR to CertiNext and download the issued certificate. "
@@ -111,15 +119,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Override SANs (default: extracted from CSR SAN extension; repeatable)",
     )
     cert.add_argument(
-        "--validity", type=int, default=1, metavar="YEARS", choices=[1, 2, 3],
+        "--validity", type=int, default=cfg.get("validity", 1), metavar="YEARS", choices=[1, 2, 3],
         help="Certificate validity in years (1, 2, or 3; default: 1)",
     )
     cert.add_argument(
-        "--type", dest="cert_type", choices=["dv", "ov", "ev"], default="dv",
+        "--type", dest="cert_type", choices=["dv", "ov", "ev"], default=cfg.get("cert_type", "dv"),
         help="Certificate validation type (default: dv)",
     )
     cert.add_argument(
-        "--org-id", metavar="ID", default=None,
+        "--org-id", metavar="ID", default=cfg.get("org_id"),
         help="Organization ID, required for OV and EV certificates",
     )
     cert.add_argument(
@@ -140,7 +148,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     req = parser.add_argument_group("requestor")
-    add_requestor_args(req)
+    add_requestor_args(req, config=cfg)
 
     ctl = parser.add_argument_group("output")
     ctl.add_argument(
@@ -154,6 +162,14 @@ def build_parser() -> argparse.ArgumentParser:
     ctl.add_argument(
         "--order-id", metavar="ID", default=None,
         help="Resume polling an existing order rather than creating a new one",
+    )
+    ctl.add_argument(
+        "--save-defaults", action="store_true", default=False,
+        help=(
+            "Store the effective requestor/certificate values as defaults for "
+            "future runs (in the config file; interactively confirms before "
+            "the order is created)"
+        ),
     )
     ctl.add_argument(
         "--no-domain-check", action="store_true", default=False,
@@ -384,6 +400,47 @@ def _create_order(sess: CertiNextSession, args: argparse.Namespace, csr: str = "
         fatal_api_error(exc, "Error creating order")
 
 
+def _maybe_save_defaults(args: argparse.Namespace) -> None:
+    """Store the effective requestor/certificate values as config defaults.
+
+    Called before the order is created so a failed or timed-out issuance never
+    loses the entered values. When stdin is a TTY, asks for confirmation first
+    (prompt on stderr so piped stdout stays clean); in non-interactive runs the
+    ``--save-defaults`` flag itself is the consent and the save happens
+    silently. Only non-empty values are stored.
+
+    Args:
+        args: Parsed CLI arguments (after ``apply_sandbox``, so ``args.profile``
+            reflects the active profile section to write).
+    """
+    values = {
+        "requestor_name": args.requestor_name,
+        "requestor_email": args.requestor_email,
+        "requestor_phone": args.requestor_phone,
+        "requestor_designation": args.requestor_designation,
+        "signer_place": args.signer_place,
+        "cert_type": args.cert_type,
+        "org_id": args.org_id,
+        "validity": args.validity,
+    }
+    section = f"profile {args.profile!r}" if args.profile else "the default profile"
+    if sys.stdin.isatty():
+        print(f"Save these values as defaults for {section}?", file=sys.stderr)
+        for key, value in values.items():
+            if value not in (None, ""):
+                print(f"  {key} = {value}", file=sys.stderr)
+        print("Save? [Y/n]: ", end="", file=sys.stderr, flush=True)
+        if input().strip().lower() in ("n", "no"):
+            log.info("Defaults not saved")
+            return
+    try:
+        path = save_defaults(values, args.profile)
+    except ConfigError as exc:
+        log.error("Error saving defaults", error=str(exc))
+        raise SystemExit(1) from exc
+    log.info("Defaults saved", path=str(path), profile=args.profile or "default")
+
+
 def main() -> None:
     """Entry point for certinext-issue-cert.
 
@@ -416,10 +473,19 @@ def main() -> None:
         # ------------------------------------------------------------------
         # Phase 1: Argument parsing and validation
         # ------------------------------------------------------------------
-        parser = build_parser()
+        # The active profile must be known before parsing so stored config
+        # defaults can seed the parser; explicit CLI arguments still win.
+        try:
+            cfg, cfg_warnings = config_defaults(profile_from_argv(sys.argv[1:]))
+        except ConfigError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            raise SystemExit(2) from exc
+        parser = build_parser(cfg)
         args = parser.parse_intermixed_args()
 
         _setup_logging(args.verbose)
+        for warning in cfg_warnings:
+            log.warning("Ignored config entry", detail=warning)
 
         # Cross-argument validation that argparse can't express natively.
         if args.cert_type in ("ov", "ev") and not args.org_id:
@@ -435,6 +501,12 @@ def main() -> None:
         # build_session() loads credentials from the keyring (or env vars) and
         # returns an authenticated CertiNextSession.
         apply_sandbox(args)
+
+        # Save defaults before any network work so a failed issuance never
+        # loses the entered values.
+        if args.save_defaults:
+            _maybe_save_defaults(args)
+
         sess = build_session(args)
 
         # Capture signer fields early; they may be overridden by CSR defaults.

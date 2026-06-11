@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "certinext"
-version = "0.2.2rc2"
+version = "0.3.0rc1"
 description = "Python client library for the CertiNext certificate management API"
 readme = "README.md"
 license = "Apache-2.0"
@@ -26,13 +26,14 @@ classifiers = [
 requires-python = ">=3.10"
 dependencies = [
     "requests>=2.31.0",
-    "python-dotenv>=1.0.0",
     "tabulate>=0.9.0",
     "structlog",
+    "tomli>=2.0; python_version < '3.11'",
 ]
 
 [project.scripts]
 certinext-setup-keyring = "certinext.setup_keyring_cli:main"
+certinext-setup-defaults = "certinext.setup_defaults_cli:main"
 certinext-accounts = "certinext.accounts_cli:main"
 certinext-domains = "certinext.domains_cli:main"
 certinext-ledger = "certinext.ledger_cli:main"

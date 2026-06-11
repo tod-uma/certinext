@@ -261,21 +261,30 @@ def build_session(args: argparse.Namespace) -> certinext.CertiNextSession:
     )
 
 
-def add_requestor_args(target: Any) -> None:
+def add_requestor_args(target: Any, config: dict[str, Any] | None = None) -> None:
     """Add standard certificate requestor arguments to a parser or argument group.
 
     Registers ``--requestor-name``, ``--requestor-email``, ``--requestor-phone``,
-    ``--requestor-designation``, and ``--signer-place``. All are read from the
-    corresponding ``CERTINEXT_REQUESTOR_*`` environment variables when not
-    supplied on the command line.
+    ``--requestor-designation``, and ``--signer-place``. When not supplied on
+    the command line, values fall back to the corresponding
+    ``CERTINEXT_REQUESTOR_*`` environment variable, then to the stored config
+    defaults (see :mod:`certinext._config`).
 
     Args:
         target: An :class:`argparse.ArgumentParser` or argument group that
             accepts ``add_argument`` calls.
+        config: Stored defaults keyed by argparse dest name, as returned by
+            :func:`certinext._config.config_defaults`. Optional.
     """
-    _rname = os.environ.get("CERTINEXT_REQUESTOR_NAME", "")
-    _remail = os.environ.get("CERTINEXT_REQUESTOR_EMAIL", "")
-    _rphone = os.environ.get("CERTINEXT_REQUESTOR_PHONE", "")
+    cfg = config or {}
+
+    def _default(env_var: str, dest: str) -> str:
+        """Resolve a fallback value: environment variable, then stored config."""
+        return os.environ.get(env_var, "") or str(cfg.get(dest, "") or "")
+
+    _rname = _default("CERTINEXT_REQUESTOR_NAME", "requestor_name")
+    _remail = _default("CERTINEXT_REQUESTOR_EMAIL", "requestor_email")
+    _rphone = _default("CERTINEXT_REQUESTOR_PHONE", "requestor_phone")
     target.add_argument(
         "--requestor-name", metavar="NAME",
         default=_rname or None, required=not _rname,
@@ -293,12 +302,12 @@ def add_requestor_args(target: Any) -> None:
     )
     target.add_argument(
         "--requestor-designation", metavar="TITLE",
-        default=os.environ.get("CERTINEXT_REQUESTOR_DESIGNATION", ""),
+        default=_default("CERTINEXT_REQUESTOR_DESIGNATION", "requestor_designation"),
         help="Job title or designation of the requestor (env: CERTINEXT_REQUESTOR_DESIGNATION)",
     )
     target.add_argument(
         "--signer-place", metavar="PLACE",
-        default=os.environ.get("CERTINEXT_SIGNER_PLACE", ""),
+        default=_default("CERTINEXT_SIGNER_PLACE", "signer_place"),
         help="City/location for the subscriber agreement signature (env: CERTINEXT_SIGNER_PLACE)",
     )
 
