@@ -50,7 +50,6 @@ from cryptography import x509
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.serialization import Encoding
-from cryptography.hazmat.primitives.serialization import pkcs7 as pkcs7_mod
 from cryptography.x509.oid import NameOID
 
 import certinext
@@ -303,9 +302,7 @@ class TestCertIssuance:
           matches the CSR.
         - :meth:`~certinext.ssl_certificates.SslOrder.download_certificate_der`
           returns valid DER for the leaf certificate with a matching CN.
-        - :meth:`~certinext.ssl_certificates.SslOrder.download_certificate_pkcs7`
-          returns a valid PKCS#7 bundle containing at least one certificate.
-        - ``--all-formats-out`` writes all three formats to a directory and each
+        - ``--all-formats-out`` writes PEM and DER to a directory and each
           file is parseable.
 
         Args:
@@ -405,47 +402,20 @@ class TestCertIssuance:
         )
 
         # ------------------------------------------------------------------
-        # PKCS#7 download — full bundle; verify chain signatures
-        # ------------------------------------------------------------------
-        p7b = order.download_certificate_pkcs7()
-        assert isinstance(p7b, bytes) and len(p7b) > 0, "PKCS#7 download returned empty bytes"
-        p7b_certs = pkcs7_mod.load_der_pkcs7_certificates(p7b)
-        assert len(p7b_certs) >= 1, "PKCS#7 bundle contains no certificates"
-        # Verify chain signatures using the same logic applied to the PEM bundle above.
-        for p7b_cert in p7b_certs:
-            if p7b_cert.issuer == p7b_cert.subject:
-                continue  # self-signed root
-            issuer = next((c for c in p7b_certs if c.subject == p7b_cert.issuer), None)
-            if issuer is None:
-                continue  # issuer not included in bundle
-            try:
-                p7b_cert.verify_directly_issued_by(issuer)
-            except Exception as exc:
-                pytest.fail(
-                    f"PKCS#7 signature verification failed: "
-                    f"{p7b_cert.subject.rfc4514_string()!r} not signed by "
-                    f"{issuer.subject.rfc4514_string()!r}: {exc}"
-                )
-
-        # ------------------------------------------------------------------
-        # --all-formats-out: three files written and parseable
+        # --all-formats-out: PEM and DER written and parseable
         # ------------------------------------------------------------------
         from certinext.issue_certificate_cli import _stem_from_domain, _write_outputs
 
         _write_outputs(order, type("_Args", (), {  # type: ignore[arg-type]
             "cert_out": None, "chain_out": None, "fullchain_out": None,
-            "der_out": None, "pkcs7_out": None,
-            "all_formats_out": str(tmp_path), "output": None,
+            "der_out": None, "all_formats_out": str(tmp_path), "output": None,
         })(), pem)
 
         stem = _stem_from_domain(order.domain)
         pem_file = tmp_path / f"{stem}.pem"
         der_file = tmp_path / f"{stem}.der"
-        p7b_file = tmp_path / f"{stem}.p7b"
 
         assert pem_file.exists(), f"--all-formats-out did not write {pem_file.name}"
         assert der_file.exists(), f"--all-formats-out did not write {der_file.name}"
-        assert p7b_file.exists(), f"--all-formats-out did not write {p7b_file.name}"
 
         x509.load_der_x509_certificate(der_file.read_bytes())
-        assert len(pkcs7_mod.load_der_pkcs7_certificates(p7b_file.read_bytes())) >= 1

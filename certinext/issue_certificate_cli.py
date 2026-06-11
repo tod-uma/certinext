@@ -50,7 +50,6 @@ Usage::
     certinext-issue-cert --csr example.com.csr --cert-out cert.pem --chain-out chain.pem
     certinext-issue-cert --csr example.com.csr --fullchain-out fullchain.pem
     certinext-issue-cert --csr example.com.csr --der-out cert.der
-    certinext-issue-cert --csr example.com.csr --pkcs7-out cert.p7b
     certinext-issue-cert --csr example.com.csr --sandbox
     certinext-issue-cert < example.com.csr
     certinext-issue-cert --order-id <ID> --wait 300  # resume polling
@@ -58,6 +57,7 @@ Usage::
 
 import argparse
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -178,14 +178,10 @@ def build_parser(config: dict[str, Any] | None = None) -> argparse.ArgumentParse
         help="Write the end-entity certificate in DER (binary) format to FILE",
     )
     ctl.add_argument(
-        "--pkcs7-out", metavar="FILE", default=None,
-        help="Write the full certificate bundle in PKCS#7 / P7B (binary) format to FILE",
-    )
-    ctl.add_argument(
         "--all-formats-out", metavar="DIR", default=None,
         help=(
-            "Write all certificate formats to DIR: {domain}.pem (PEM bundle), "
-            "{domain}.der (DER), and {domain}.p7b (PKCS#7). "
+            "Write all certificate formats to DIR: {domain}.pem (PEM bundle) "
+            "and {domain}.der (DER). "
             "The domain stem comes from the order's CN."
         ),
     )
@@ -470,25 +466,46 @@ def _write_file(path: str, content: str, label: str) -> None:
     log.info("Output written", output=label, path=path)
 
 
-def _write_file_binary(path: str, content: bytes, label: str) -> None:
-    """Write binary data to a file, exiting with an error log on failure.
+
+def _try_download_write_binary(
+    label: str,
+    path: str,
+    download_fn: Callable[[], bytes],
+) -> bool:
+    """Attempt to download and write a binary certificate format.
+
+    Logs a warning and returns ``False`` on any download or write failure
+    rather than exiting, so callers can continue writing other formats.
 
     Args:
+        label: Human-readable description for log messages
+            (e.g. ``"certificate (DER)"``).
         path: Destination file path.
-        content: Binary data to write.
-        label: Human-readable description of the content for log messages,
-            e.g. ``"certificate (DER)"`` or ``"certificate (PKCS#7)"``.
+        download_fn: Zero-argument callable that fetches the raw bytes.
 
-    Raises:
-        SystemExit: With code 1 if the file cannot be written.
+    Returns:
+        ``True`` if both the download and the write succeeded, ``False``
+        otherwise.
     """
     try:
+        data = download_fn()
+    except CertiNextAPIError as exc:
+        log.warning(
+            "Skipping format — download failed",
+            output=label, path=path, status_code=exc.status_code,
+        )
+        return False
+    try:
         with open(path, "wb") as f:
-            f.write(content)
+            f.write(data)
     except OSError as exc:
-        log.error("Error writing output", output=label, path=path, error=str(exc))
-        raise SystemExit(1) from exc
+        log.warning(
+            "Skipping format — write failed",
+            output=label, path=path, error=str(exc),
+        )
+        return False
     log.info("Output written", output=label, path=path)
+    return True
 
 
 def _write_outputs(order: SslOrder, args: argparse.Namespace, pem: str) -> None:
@@ -507,16 +524,15 @@ def _write_outputs(order: SslOrder, args: argparse.Namespace, pem: str) -> None:
       (:meth:`~certinext.ssl_certificates.CertificateDownload.as_pem_chain`)
 
     Each PEM file is normalised to end with exactly one trailing newline.
-    Binary formats use ``--der-out`` (DER, single end-entity certificate) and
-    ``--pkcs7-out`` (PKCS#7 / P7B bundle). These cannot be written to stdout.
-    ``--all-formats-out DIR`` writes ``{domain}.pem``, ``{domain}.der``, and
-    ``{domain}.p7b`` to *DIR* in one call, deriving the stem from the order's
-    CN via :func:`_stem_from_domain`.
+    The binary format ``--der-out`` writes a DER-encoded end-entity certificate
+    and cannot be written to stdout.  ``--all-formats-out DIR`` writes
+    ``{domain}.pem`` and ``{domain}.der`` to *DIR* in one call, deriving the
+    stem from the order's CN via :func:`_stem_from_domain`.
 
     Args:
         order: The issued order to download certificate parts from.
         args: Parsed CLI arguments (reads ``output``, ``cert_out``,
-            ``chain_out``, ``fullchain_out``, ``der_out``, ``pkcs7_out``,
+            ``chain_out``, ``fullchain_out``, ``der_out``,
             and ``all_formats_out``).
         pem: Raw PEM bundle already downloaded by the workflow.
 
@@ -551,38 +567,20 @@ def _write_outputs(order: SslOrder, args: argparse.Namespace, pem: str) -> None:
             _write_file(args.fullchain_out, fullchain, "fullchain")
 
     if args.der_out:
-        try:
-            der = order.download_certificate_der()
-        except CertiNextAPIError as exc:
-            fatal_api_error(exc, "Error downloading DER certificate")
-        _write_file_binary(args.der_out, der, "certificate (DER)")
-
-    if args.pkcs7_out:
-        try:
-            pkcs7 = order.download_certificate_pkcs7()
-        except CertiNextAPIError as exc:
-            fatal_api_error(exc, "Error downloading PKCS#7 certificate")
-        _write_file_binary(args.pkcs7_out, pkcs7, "certificate (PKCS#7)")
+        _try_download_write_binary("certificate (DER)", args.der_out, order.download_certificate_der)
 
     if args.all_formats_out:
         stem = _stem_from_domain(order.domain)
         out_dir = Path(args.all_formats_out)
         _write_file(str(out_dir / f"{stem}.pem"), pem, "certificate bundle (PEM)")
-        try:
-            der = order.download_certificate_der()
-        except CertiNextAPIError as exc:
-            fatal_api_error(exc, "Error downloading DER certificate")
-        _write_file_binary(str(out_dir / f"{stem}.der"), der, "certificate (DER)")
-        try:
-            pkcs7_all = order.download_certificate_pkcs7()
-        except CertiNextAPIError as exc:
-            fatal_api_error(exc, "Error downloading PKCS#7 certificate")
-        _write_file_binary(str(out_dir / f"{stem}.p7b"), pkcs7_all, "certificate (PKCS#7)")
+        _try_download_write_binary(
+            "certificate (DER)", str(out_dir / f"{stem}.der"), order.download_certificate_der,
+        )
 
     if args.output:
         _write_file(args.output, pem, "certificate bundle")
     elif not (args.cert_out or args.chain_out or args.fullchain_out
-              or args.der_out or args.pkcs7_out or args.all_formats_out):
+              or args.der_out or args.all_formats_out):
         print(pem, end="")
 
 

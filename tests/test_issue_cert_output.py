@@ -15,15 +15,15 @@
 """Tests for certinext-issue-cert output flags and stderr prompting.
 
 Covers the ``--cert-out`` / ``--chain-out`` / ``--fullchain-out`` /
-``--der-out`` / ``--pkcs7-out`` / ``--all-formats-out`` flags
+``--der-out`` / ``--all-formats-out`` flags
 (:func:`certinext.issue_certificate_cli._write_outputs`) and the
 :func:`certinext._cli.prompt_stderr` helper that keeps interactive prompts
 off stdout so piped certificate output stays clean.
 
 Test certificate data is generated at module load time using the
-``cryptography`` library so that binary-format round-trips (DER parse,
-PKCS#7 parse) serve as real structural assertions, not just byte-equality
-checks against hand-crafted blobs.
+``cryptography`` library so that binary-format round-trips (DER parse)
+serve as real structural assertions, not just byte-equality checks against
+hand-crafted blobs.
 """
 
 import argparse
@@ -36,7 +36,6 @@ import pytest
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
-from cryptography.hazmat.primitives.serialization import pkcs7
 from cryptography.x509.oid import NameOID
 
 from certinext._cli import prompt_stderr
@@ -52,14 +51,13 @@ _NOT_BEFORE = datetime.datetime(2025, 1, 1, tzinfo=datetime.timezone.utc)
 _NOT_AFTER = datetime.datetime(2027, 1, 1, tzinfo=datetime.timezone.utc)
 
 
-def _make_test_chain() -> tuple[str, str, str, bytes, bytes]:
+def _make_test_chain() -> tuple[str, str, str, bytes]:
     """Generate a 3-level test cert chain (root CA → intermediate → leaf).
 
     Returns:
-        Tuple of ``(leaf_pem, int_pem, root_pem, leaf_der, pkcs7_bundle)``
-        where all PEM strings are stripped (no trailing newline) and the
-        binary values are a DER-encoded leaf certificate and a DER PKCS#7
-        bundle containing the leaf + intermediate, respectively.
+        Tuple of ``(leaf_pem, int_pem, root_pem, leaf_der)``
+        where all PEM strings are stripped (no trailing newline) and
+        ``leaf_der`` is the DER-encoded leaf certificate.
     """
     root_key = ec.generate_private_key(ec.SECP256R1())
     root_name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "Test Root CA")])
@@ -106,12 +104,10 @@ def _make_test_chain() -> tuple[str, str, str, bytes, bytes]:
     int_pem = int_cert.public_bytes(serialization.Encoding.PEM).decode().strip()
     root_pem = root_cert.public_bytes(serialization.Encoding.PEM).decode().strip()
     leaf_der = leaf_cert.public_bytes(serialization.Encoding.DER)
-    # PKCS#7 bundle: leaf + intermediate (omitting root, matching typical P7B convention).
-    p7b = pkcs7.serialize_certificates([leaf_cert, int_cert], serialization.Encoding.DER)
-    return leaf_pem, int_pem, root_pem, leaf_der, p7b
+    return leaf_pem, int_pem, root_pem, leaf_der
 
 
-_LEAF_PEM, _INT_PEM, _ROOT_PEM, _LEAF_DER, _P7B = _make_test_chain()
+_LEAF_PEM, _INT_PEM, _ROOT_PEM, _LEAF_DER = _make_test_chain()
 
 # Public constants used directly in test assertions.  Stripped PEM strings
 # (no trailing newline) so that LEAF + "\n" equals the normalised single-cert
@@ -122,7 +118,6 @@ INT2 = _ROOT_PEM
 BUNDLE = LEAF + "\n" + INT1 + "\n" + INT2 + "\n"
 
 FAKE_DER: bytes = _LEAF_DER
-FAKE_PKCS7: bytes = _P7B
 
 
 # ---------------------------------------------------------------------------
@@ -131,8 +126,7 @@ FAKE_PKCS7: bytes = _P7B
 
 
 class FakeOrder:
-    """Stand-in for SslOrder exposing download_certificate(), download_certificate_der(),
-    and download_certificate_pkcs7().
+    """Stand-in for SslOrder exposing download_certificate() and download_certificate_der().
 
     Returns canned values supplied at construction time, so tests control
     exactly which parts are present and can inject real cryptographic bytes.
@@ -142,20 +136,17 @@ class FakeOrder:
         self,
         data: dict[str, Any],
         der: bytes = FAKE_DER,
-        pkcs7_bytes: bytes = FAKE_PKCS7,
         domain: str | None = _TEST_DOMAIN,
     ) -> None:
         """
         Args:
             data: Raw dict passed through to :class:`CertificateDownload`.
             der: Bytes returned by :meth:`download_certificate_der`.
-            pkcs7_bytes: Bytes returned by :meth:`download_certificate_pkcs7`.
             domain: Value exposed as the ``domain`` attribute (used by
                 ``--all-formats-out`` to derive the output filename stem).
         """
         self._data = data
         self._der = der
-        self._pkcs7 = pkcs7_bytes
         self.domain = domain
 
     def download_certificate(self) -> CertificateDownload:
@@ -165,10 +156,6 @@ class FakeOrder:
     def download_certificate_der(self) -> bytes:
         """Return the canned DER bytes."""
         return self._der
-
-    def download_certificate_pkcs7(self) -> bytes:
-        """Return the canned PKCS#7 bytes."""
-        return self._pkcs7
 
 
 # ---------------------------------------------------------------------------
@@ -189,7 +176,7 @@ def _args(**overrides: Any) -> argparse.Namespace:
     """
     ns = argparse.Namespace(
         output=None, cert_out=None, chain_out=None, fullchain_out=None,
-        der_out=None, pkcs7_out=None, all_formats_out=None,
+        der_out=None, all_formats_out=None,
     )
     for key, value in overrides.items():
         setattr(ns, key, value)
@@ -247,20 +234,18 @@ def test_parser_output_part_flags_default_to_none() -> None:
     assert args.fullchain_out is None
 
 
-def test_parser_accepts_der_pkcs7_flags() -> None:
-    """--der-out and --pkcs7-out parse into the expected dests."""
+def test_parser_accepts_der_flag() -> None:
+    """--der-out parses into the expected dest."""
     cfg = {"requestor_name": "Jane", "requestor_phone": "+12075551234"}
-    args = build_parser(cfg).parse_args(["--der-out", "cert.der", "--pkcs7-out", "cert.p7b"])
+    args = build_parser(cfg).parse_args(["--der-out", "cert.der"])
     assert args.der_out == "cert.der"
-    assert args.pkcs7_out == "cert.p7b"
 
 
-def test_parser_der_pkcs7_flags_default_to_none() -> None:
-    """Binary output flags default to None so existing stdout behavior is unchanged."""
+def test_parser_der_flag_defaults_to_none() -> None:
+    """--der-out defaults to None so existing stdout behavior is unchanged."""
     cfg = {"requestor_name": "Jane", "requestor_phone": "+12075551234"}
     args = build_parser(cfg).parse_args([])
     assert args.der_out is None
-    assert args.pkcs7_out is None
 
 
 def test_parser_accepts_all_formats_out_flag() -> None:
@@ -380,7 +365,7 @@ def test_write_outputs_unwritable_path_is_fatal(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# _write_outputs — binary paths: --der-out / --pkcs7-out
+# _write_outputs — binary path: --der-out
 # ---------------------------------------------------------------------------
 
 
@@ -393,16 +378,6 @@ def test_write_outputs_der_out_writes_parseable_der(tmp_path: Path) -> None:
     cert = x509.load_der_x509_certificate(written)
     assert cert.subject.get_attributes_for_oid(NameOID.COMMON_NAME)[0].value == _TEST_DOMAIN
 
-
-def test_write_outputs_pkcs7_out_writes_parseable_pkcs7(tmp_path: Path) -> None:
-    """--pkcs7-out writes valid PKCS#7: the file round-trips through load_der_pkcs7_certificates."""
-    p7b_file = tmp_path / "cert.p7b"
-    _write_outputs(FakeOrder({}), _args(pkcs7_out=str(p7b_file)), BUNDLE)  # type: ignore[arg-type]
-    written = p7b_file.read_bytes()
-    assert written == FAKE_PKCS7
-    certs = pkcs7.load_der_pkcs7_certificates(written)
-    assert len(certs) >= 1
-    assert certs[0].subject.get_attributes_for_oid(NameOID.COMMON_NAME)[0].value == _TEST_DOMAIN
 
 
 def test_write_outputs_binary_suppresses_stdout(
@@ -427,12 +402,11 @@ def test_write_outputs_binary_and_pem_combine(
     assert "-----BEGIN CERTIFICATE-----" not in capsys.readouterr().out
 
 
-def test_write_outputs_binary_unwritable_path_is_fatal(tmp_path: Path) -> None:
-    """An unwritable --der-out path exits 1 instead of raising OSError."""
+def test_write_outputs_binary_unwritable_path_warns_and_continues(tmp_path: Path) -> None:
+    """An unwritable --der-out path logs a warning but does not raise or exit."""
     missing_dir = tmp_path / "no-such-dir" / "cert.der"
-    with pytest.raises(SystemExit) as excinfo:
-        _write_outputs(FakeOrder({}), _args(der_out=str(missing_dir)), BUNDLE)  # type: ignore[arg-type]
-    assert excinfo.value.code == 1
+    _write_outputs(FakeOrder({}), _args(der_out=str(missing_dir)), BUNDLE)  # type: ignore[arg-type]
+    assert not missing_dir.exists()
 
 
 # ---------------------------------------------------------------------------
@@ -440,12 +414,11 @@ def test_write_outputs_binary_unwritable_path_is_fatal(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_write_outputs_all_formats_out_writes_three_files(tmp_path: Path) -> None:
-    """--all-formats-out writes .pem, .der, and .p7b files named by domain."""
+def test_write_outputs_all_formats_out_writes_pem_and_der(tmp_path: Path) -> None:
+    """--all-formats-out writes .pem and .der files named by domain."""
     _write_outputs(FakeOrder({}), _args(all_formats_out=str(tmp_path)), BUNDLE)  # type: ignore[arg-type]
     assert (tmp_path / f"{_TEST_DOMAIN}.pem").exists()
     assert (tmp_path / f"{_TEST_DOMAIN}.der").exists()
-    assert (tmp_path / f"{_TEST_DOMAIN}.p7b").exists()
 
 
 def test_write_outputs_all_formats_out_pem_content(tmp_path: Path) -> None:
@@ -462,13 +435,6 @@ def test_write_outputs_all_formats_out_der_is_parseable(tmp_path: Path) -> None:
     assert cert.subject.get_attributes_for_oid(NameOID.COMMON_NAME)[0].value == _TEST_DOMAIN
 
 
-def test_write_outputs_all_formats_out_pkcs7_is_parseable(tmp_path: Path) -> None:
-    """The .p7b file written by --all-formats-out round-trips through load_der_pkcs7_certificates."""
-    _write_outputs(FakeOrder({}), _args(all_formats_out=str(tmp_path)), BUNDLE)  # type: ignore[arg-type]
-    p7b_bytes = (tmp_path / f"{_TEST_DOMAIN}.p7b").read_bytes()
-    certs = pkcs7.load_der_pkcs7_certificates(p7b_bytes)
-    assert len(certs) >= 1
-
 
 def test_write_outputs_all_formats_out_wildcard_domain(tmp_path: Path) -> None:
     """--all-formats-out sanitises a wildcard domain in the filename stem."""
@@ -476,7 +442,6 @@ def test_write_outputs_all_formats_out_wildcard_domain(tmp_path: Path) -> None:
     _write_outputs(order, _args(all_formats_out=str(tmp_path)), BUNDLE)  # type: ignore[arg-type]
     assert (tmp_path / "wildcard.example.com.pem").exists()
     assert (tmp_path / "wildcard.example.com.der").exists()
-    assert (tmp_path / "wildcard.example.com.p7b").exists()
 
 
 def test_write_outputs_all_formats_out_suppresses_stdout(

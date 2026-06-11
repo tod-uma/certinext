@@ -199,8 +199,7 @@ class CertificateDownload:
     the PEM-encoded end-entity certificate and intermediate chain.
 
     For raw PEM text use :meth:`SslOrder.download_certificate_pem`; for binary
-    DER use :meth:`SslOrder.download_certificate_der`; for PKCS#7 use
-    :meth:`SslOrder.download_certificate_pkcs7`.
+    DER use :meth:`SslOrder.download_certificate_der`.
 
     Example::
 
@@ -306,8 +305,8 @@ class SslOrder:
     Lifecycle methods (:meth:`refresh`, :meth:`get_dcv`, :meth:`verify_dcv`,
     :meth:`submit_csr`, :meth:`accept_agreement`, :meth:`download_certificate`,
     :meth:`download_certificate_pem`, :meth:`download_certificate_der`,
-    :meth:`download_certificate_pkcs7`, :meth:`cancel`, :meth:`reject`,
-    :meth:`revoke`, :meth:`reissue`) call the API directly.
+    :meth:`cancel`, :meth:`reject`, :meth:`revoke`, :meth:`reissue`) call
+    the API directly.
 
     Typical DV flow::
 
@@ -673,20 +672,6 @@ class SslOrder:
         return self._client.get_bytes(
             f"{_SSL_BASE}/{self.order_id}/certificate",
             accept="application/pkix-cert",
-        )
-
-    def download_certificate_pkcs7(self) -> bytes:
-        """Download the issued certificate in PKCS#7 (P7B) format.
-
-        Returns:
-            PKCS#7-encoded certificate bundle as raw bytes.
-
-        Raises:
-            CertiNextAPIError: On a non-2xx API response. Provides ``.status_code`` and ``.body``.
-        """
-        return self._client.get_bytes(
-            f"{_SSL_BASE}/{self.order_id}/certificate",
-            accept="application/x-pkcs7-certificates",
         )
 
     def cancel(self) -> dict[str, Any]:
