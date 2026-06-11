@@ -21,6 +21,28 @@ from certinext.exceptions import CertiNextAPIError
 log = structlog.get_logger()
 
 
+def prompt_stderr(prompt: str) -> str:
+    """Prompt on stderr and read a line from stdin.
+
+    Built-in ``input()`` writes its prompt to stdout, which corrupts piped
+    output for CLIs that print certificates or JSON to stdout. This writes
+    the prompt to stderr instead, so ``certinext-issue-cert ... > cert.pem``
+    style redirection never captures prompt text.
+
+    Args:
+        prompt: Text to display, including any trailing punctuation/space
+            (e.g. ``"Continue? [y/N]: "``).
+
+    Returns:
+        The line read from stdin with the trailing newline stripped.
+
+    Raises:
+        EOFError: If stdin is closed before a line is read.
+    """
+    print(prompt, end="", file=sys.stderr, flush=True)
+    return input()
+
+
 def _resolve(
     arg_value: str | None,
     env_var: str,
@@ -70,7 +92,7 @@ def _resolve(
         )
     if secret:
         return getpass.getpass(f"{prompt}: ")
-    return input(f"{prompt}: ")
+    return prompt_stderr(f"{prompt}: ")
 
 
 def add_connection_args(target: Any, *, scope: bool = False) -> None:

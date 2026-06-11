@@ -610,6 +610,9 @@ csr_file                    PEM-encoded CSR file (positional; omit to read from 
 
 # Output / control
 -o FILE, --output FILE      Write the certificate PEM to FILE (default: stdout)
+--cert-out FILE             Write only the end-entity (leaf) certificate PEM to FILE
+--chain-out FILE            Write only the intermediate CA chain PEM to FILE
+--fullchain-out FILE        Write the leaf-first fullchain PEM (leaf + intermediates) to FILE
 --wait SECONDS              Seconds to wait for issuance (default: 300; 0 = submit and exit)
 --order-id ID               Resume polling an existing order instead of creating a new one
 --save-defaults             Store the effective requestor/certificate values as config defaults
@@ -630,6 +633,10 @@ certinext-issue-cert < example.com.csr
 
 # Save certificate to a file
 certinext-issue-cert example.com.csr --output example.com.pem
+
+# Write leaf, intermediate chain, and fullchain to separate files
+# (the layout nginx, Apache, and HAProxy configs typically expect)
+certinext-issue-cert example.com.csr --cert-out cert.pem --chain-out chain.pem --fullchain-out fullchain.pem
 
 # OV certificate with explicit org
 certinext-issue-cert example.com.csr --type ov --org-id 8921215
