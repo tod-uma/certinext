@@ -47,6 +47,8 @@ Usage::
 
     certinext-issue-cert --csr example.com.csr --requestor-name "Jane Doe"
     certinext-issue-cert --csr example.com.csr --output example.com.pem
+    certinext-issue-cert --csr example.com.csr --cert-out cert.pem --chain-out chain.pem
+    certinext-issue-cert --csr example.com.csr --fullchain-out fullchain.pem
     certinext-issue-cert --csr example.com.csr --sandbox
     certinext-issue-cert < example.com.csr
     certinext-issue-cert --order-id <ID> --wait 300  # resume polling
@@ -65,6 +67,7 @@ from certinext._cli import (
     apply_sandbox,
     build_session,
     fatal_api_error,
+    prompt_stderr,
 )
 from certinext._config import ConfigError, config_defaults, profile_from_argv, save_defaults
 from certinext.csr import CsrInfo
@@ -154,6 +157,18 @@ def build_parser(config: dict[str, Any] | None = None) -> argparse.ArgumentParse
     ctl.add_argument(
         "--output", "-o", metavar="FILE", default=None,
         help="Write certificate PEM to FILE instead of stdout",
+    )
+    ctl.add_argument(
+        "--cert-out", metavar="FILE", default=None,
+        help="Write only the end-entity (leaf) certificate PEM to FILE",
+    )
+    ctl.add_argument(
+        "--chain-out", metavar="FILE", default=None,
+        help="Write only the intermediate CA chain PEM to FILE",
+    )
+    ctl.add_argument(
+        "--fullchain-out", metavar="FILE", default=None,
+        help="Write the leaf-first fullchain PEM (certificate + intermediates) to FILE",
     )
     ctl.add_argument(
         "--wait", type=int, default=300, metavar="SECONDS",
@@ -298,7 +313,7 @@ def _check_existing_and_prompt(
                 domain=args.domain, order_id=pending.order_number, status=pending.certificate_status,
             )
         try:
-            answer = input("Resume it instead of creating a new one? [y/N]: ").strip().lower()
+            answer = prompt_stderr("Resume it instead of creating a new one? [y/N]: ").strip().lower()
         except EOFError:
             answer = ""
         if answer == "y":
@@ -311,7 +326,7 @@ def _check_existing_and_prompt(
             domain=args.domain, order_number=issued.order_number,
         )
         try:
-            answer = input("Create a new certificate anyway? [y/N]: ").strip().lower()
+            answer = prompt_stderr("Create a new certificate anyway? [y/N]: ").strip().lower()
         except EOFError:
             answer = ""
         if answer != "y":
@@ -400,6 +415,86 @@ def _create_order(sess: CertiNextSession, args: argparse.Namespace, csr: str = "
         fatal_api_error(exc, "Error creating order")
 
 
+def _write_file(path: str, content: str, label: str) -> None:
+    """Write text to a file, exiting with an error log on failure.
+
+    Args:
+        path: Destination file path.
+        content: Text to write.
+        label: Human-readable description of the content for log messages,
+            e.g. ``"certificate"`` or ``"fullchain"``.
+
+    Raises:
+        SystemExit: With code 1 if the file cannot be written.
+    """
+    try:
+        with open(path, "w") as f:
+            f.write(content)
+    except OSError as exc:
+        log.error("Error writing output", output=label, path=path, error=str(exc))
+        raise SystemExit(1) from exc
+    log.info("Output written", output=label, path=path)
+
+
+def _write_outputs(order: SslOrder, args: argparse.Namespace, pem: str) -> None:
+    """Write the issued certificate to the requested output destinations.
+
+    ``--output`` receives the raw PEM bundle returned by the workflow
+    (unchanged historical behavior); when no destination flag at all is given,
+    that bundle is printed to stdout. ``--cert-out``, ``--chain-out``, and
+    ``--fullchain-out`` are assembled from the JSON download
+    (:meth:`~certinext.ssl_certificates.SslOrder.download_certificate`), which
+    separates the end-entity certificate from its intermediates:
+
+    - ``--cert-out``: the end-entity (leaf) certificate only
+    - ``--chain-out``: the intermediate CA certificates only
+    - ``--fullchain-out``: leaf followed by intermediates
+      (:meth:`~certinext.ssl_certificates.CertificateDownload.as_pem_chain`)
+
+    Each written file is normalised to end with exactly one trailing newline.
+
+    Args:
+        order: The issued order to download certificate parts from.
+        args: Parsed CLI arguments (reads ``output``, ``cert_out``,
+            ``chain_out``, and ``fullchain_out``).
+        pem: Raw PEM bundle already downloaded by the workflow.
+
+    Raises:
+        SystemExit: With code 1 if the parts download fails, a requested part
+            is missing from the download, or a file cannot be written. An
+            empty intermediate chain with ``--chain-out`` is a warning, not an
+            error, because a leaf signed directly by a root has no
+            intermediates.
+    """
+    if args.cert_out or args.chain_out or args.fullchain_out:
+        try:
+            dl = order.download_certificate()
+        except CertiNextAPIError as exc:
+            fatal_api_error(exc, "Error downloading certificate parts")
+        if args.cert_out:
+            leaf = (dl.certificate_pem or "").strip()
+            if not leaf:
+                log.error("Download contained no end-entity certificate")
+                raise SystemExit(1)
+            _write_file(args.cert_out, leaf + "\n", "certificate")
+        if args.chain_out:
+            chain = [p.strip() for p in dl.chain_pem if p and p.strip()]
+            if not chain:
+                log.warning("Download contained no intermediate certificates")
+            _write_file(args.chain_out, "\n".join(chain) + "\n" if chain else "", "chain")
+        if args.fullchain_out:
+            fullchain = dl.as_pem_chain()
+            if not fullchain:
+                log.error("Download contained no certificates for the fullchain")
+                raise SystemExit(1)
+            _write_file(args.fullchain_out, fullchain, "fullchain")
+
+    if args.output:
+        _write_file(args.output, pem, "certificate bundle")
+    elif not (args.cert_out or args.chain_out or args.fullchain_out):
+        print(pem, end="")
+
+
 def _maybe_save_defaults(args: argparse.Namespace) -> None:
     """Store the effective requestor/certificate values as config defaults.
 
@@ -429,8 +524,7 @@ def _maybe_save_defaults(args: argparse.Namespace) -> None:
         for key, value in values.items():
             if value not in (None, ""):
                 print(f"  {key} = {value}", file=sys.stderr)
-        print("Save? [Y/n]: ", end="", file=sys.stderr, flush=True)
-        if input().strip().lower() in ("n", "no"):
+        if prompt_stderr("Save? [Y/n]: ").strip().lower() in ("n", "no"):
             log.info("Defaults not saved")
             return
     try:
@@ -623,18 +717,9 @@ def main() -> None:
             raise SystemExit(1)
 
         # ------------------------------------------------------------------
-        # Output: write the PEM to a file or print to stdout
+        # Output: write the PEM to files and/or stdout
         # ------------------------------------------------------------------
-        if args.output:
-            try:
-                with open(args.output, "w") as f:
-                    f.write(pem)
-                log.info("Certificate written", path=args.output)
-            except OSError as exc:
-                log.error("Error writing certificate", error=str(exc))
-                raise SystemExit(1) from exc
-        else:
-            print(pem, end="")
+        _write_outputs(order, args, pem)
 
     except SystemExit as exc:
         # If we have an order that can be resumed, always print the hint so
