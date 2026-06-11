@@ -17,6 +17,11 @@ that calls `sys.exit(1)`) for every format download, which meant a PKCS#7
 failure would crash the script even though the cert was already issued and the
 PEM written successfully.
 
+CertiNext support confirmed (2026-06-11) that PKCS#7 is not currently
+supported and will not be added without a documentation update.  As a result,
+`download_certificate_pkcs7()`, `--pkcs7-out`, and the `.p7b` output from
+`--all-formats-out` were removed from the codebase in the same release.
+
 ## Decision
 
 All binary format downloads use a non-fatal wrapper (`_try_download_write_binary`).

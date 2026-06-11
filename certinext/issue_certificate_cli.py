@@ -50,7 +50,6 @@ Usage::
     certinext-issue-cert --csr example.com.csr --cert-out cert.pem --chain-out chain.pem
     certinext-issue-cert --csr example.com.csr --fullchain-out fullchain.pem
     certinext-issue-cert --csr example.com.csr --der-out cert.der
-    certinext-issue-cert --csr example.com.csr --pkcs7-out cert.p7b
     certinext-issue-cert --csr example.com.csr --sandbox
     certinext-issue-cert < example.com.csr
     certinext-issue-cert --order-id <ID> --wait 300  # resume polling
@@ -179,21 +178,11 @@ def build_parser(config: dict[str, Any] | None = None) -> argparse.ArgumentParse
         help="Write the end-entity certificate in DER (binary) format to FILE",
     )
     ctl.add_argument(
-        "--pkcs7-out", metavar="FILE", default=None,
-        help=(
-            "Write the full certificate bundle in PKCS#7 / P7B (binary) format to FILE. "
-            "WARNING: likely to fail with HTTP 406 — the CertiNext API does not appear to "
-            "support PKCS#7 download (support ticket filed 2026-06-11; "
-            "TODO: remove this flag once the vendor responds)"
-        ),
-    )
-    ctl.add_argument(
         "--all-formats-out", metavar="DIR", default=None,
         help=(
-            "Write all certificate formats to DIR: {domain}.pem (PEM bundle), "
-            "{domain}.der (DER), and {domain}.p7b (PKCS#7). "
-            "The domain stem comes from the order's CN. "
-            "WARNING: the .p7b output is likely to fail — see --pkcs7-out"
+            "Write all certificate formats to DIR: {domain}.pem (PEM bundle) "
+            "and {domain}.der (DER). "
+            "The domain stem comes from the order's CN."
         ),
     )
     ctl.add_argument(
@@ -535,16 +524,15 @@ def _write_outputs(order: SslOrder, args: argparse.Namespace, pem: str) -> None:
       (:meth:`~certinext.ssl_certificates.CertificateDownload.as_pem_chain`)
 
     Each PEM file is normalised to end with exactly one trailing newline.
-    Binary formats use ``--der-out`` (DER, single end-entity certificate) and
-    ``--pkcs7-out`` (PKCS#7 / P7B bundle). These cannot be written to stdout.
-    ``--all-formats-out DIR`` writes ``{domain}.pem``, ``{domain}.der``, and
-    ``{domain}.p7b`` to *DIR* in one call, deriving the stem from the order's
-    CN via :func:`_stem_from_domain`.
+    The binary format ``--der-out`` writes a DER-encoded end-entity certificate
+    and cannot be written to stdout.  ``--all-formats-out DIR`` writes
+    ``{domain}.pem`` and ``{domain}.der`` to *DIR* in one call, deriving the
+    stem from the order's CN via :func:`_stem_from_domain`.
 
     Args:
         order: The issued order to download certificate parts from.
         args: Parsed CLI arguments (reads ``output``, ``cert_out``,
-            ``chain_out``, ``fullchain_out``, ``der_out``, ``pkcs7_out``,
+            ``chain_out``, ``fullchain_out``, ``der_out``,
             and ``all_formats_out``).
         pem: Raw PEM bundle already downloaded by the workflow.
 
@@ -581,15 +569,6 @@ def _write_outputs(order: SslOrder, args: argparse.Namespace, pem: str) -> None:
     if args.der_out:
         _try_download_write_binary("certificate (DER)", args.der_out, order.download_certificate_der)
 
-    if args.pkcs7_out:
-        # TODO: remove this warning (and --pkcs7-out) once CertiNext clarifies PKCS#7 support.
-        log.warning(
-            "PKCS#7 download is likely to fail",
-            reason="API returned HTTP 406 for this format as of 2026-06-11",
-            ticket="filed with CertiNext support",
-        )
-        _try_download_write_binary("certificate (PKCS#7)", args.pkcs7_out, order.download_certificate_pkcs7)
-
     if args.all_formats_out:
         stem = _stem_from_domain(order.domain)
         out_dir = Path(args.all_formats_out)
@@ -597,20 +576,11 @@ def _write_outputs(order: SslOrder, args: argparse.Namespace, pem: str) -> None:
         _try_download_write_binary(
             "certificate (DER)", str(out_dir / f"{stem}.der"), order.download_certificate_der,
         )
-        # TODO: remove this warning (and .p7b output) once CertiNext clarifies PKCS#7 support.
-        log.warning(
-            "PKCS#7 download is likely to fail",
-            reason="API returned HTTP 406 for this format as of 2026-06-11",
-            ticket="filed with CertiNext support",
-        )
-        _try_download_write_binary(
-            "certificate (PKCS#7)", str(out_dir / f"{stem}.p7b"), order.download_certificate_pkcs7,
-        )
 
     if args.output:
         _write_file(args.output, pem, "certificate bundle")
     elif not (args.cert_out or args.chain_out or args.fullchain_out
-              or args.der_out or args.pkcs7_out or args.all_formats_out):
+              or args.der_out or args.all_formats_out):
         print(pem, end="")
 
 

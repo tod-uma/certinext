@@ -439,15 +439,6 @@ class TestSslOrderLifecycleMethods:
         assert kwargs["headers"]["Accept"] == "application/pkix-cert"
         assert isinstance(result, bytes)
 
-    def test_download_certificate_pkcs7_uses_pkcs7_accept_header(self):
-        """download_certificate_pkcs7() requests application/x-pkcs7-certificates."""
-        order, mock_session = self._make_order()
-        mock_session.get.return_value = _ok_bytes_response(b"\x30\x82\x01\x02")
-        result = order.download_certificate_pkcs7()
-        _, kwargs = mock_session.get.call_args
-        assert kwargs["headers"]["Accept"] == "application/x-pkcs7-certificates"
-        assert isinstance(result, bytes)
-
     def test_cancel_posts_to_cancel_endpoint(self):
         """cancel() POSTs to /ssl-certificates/{orderId}/cancel."""
         order, mock_session = self._make_order()
