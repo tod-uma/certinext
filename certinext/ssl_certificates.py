@@ -678,11 +678,26 @@ class SslOrder:
     def download_certificate_pkcs7(self) -> bytes:
         """Download the issued certificate in PKCS#7 (P7B) format.
 
+        .. warning::
+            As of 2026-06-11, the CertiNext API returns **HTTP 406** for
+            ``Accept: application/x-pkcs7-certificates``.  The OpenAPI spec
+            only lists ``application/json``, ``application/x-pem-file``, and
+            ``application/pkix-cert`` as supported response types for this
+            endpoint.  A support ticket has been filed to clarify whether
+            PKCS#7 is supported and, if so, what the correct request format
+            is.  This method is likely to raise
+            :exc:`~certinext.exceptions.CertiNextAPIError` with status 406
+            until the vendor responds.
+
+        # TODO: once CertiNext clarifies PKCS#7 support, either fix this method
+        # or remove it along with --pkcs7-out and --all-formats-out from the CLI.
+
         Returns:
             PKCS#7-encoded certificate bundle as raw bytes.
 
         Raises:
-            CertiNextAPIError: On a non-2xx API response. Provides ``.status_code`` and ``.body``.
+            CertiNextAPIError: On a non-2xx API response. HTTP 406 is expected
+                until the vendor confirms support.
         """
         return self._client.get_bytes(
             f"{_SSL_BASE}/{self.order_id}/certificate",

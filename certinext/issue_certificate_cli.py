@@ -58,6 +58,7 @@ Usage::
 
 import argparse
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -179,14 +180,20 @@ def build_parser(config: dict[str, Any] | None = None) -> argparse.ArgumentParse
     )
     ctl.add_argument(
         "--pkcs7-out", metavar="FILE", default=None,
-        help="Write the full certificate bundle in PKCS#7 / P7B (binary) format to FILE",
+        help=(
+            "Write the full certificate bundle in PKCS#7 / P7B (binary) format to FILE. "
+            "WARNING: likely to fail with HTTP 406 — the CertiNext API does not appear to "
+            "support PKCS#7 download (support ticket filed 2026-06-11; "
+            "TODO: remove this flag once the vendor responds)"
+        ),
     )
     ctl.add_argument(
         "--all-formats-out", metavar="DIR", default=None,
         help=(
             "Write all certificate formats to DIR: {domain}.pem (PEM bundle), "
             "{domain}.der (DER), and {domain}.p7b (PKCS#7). "
-            "The domain stem comes from the order's CN."
+            "The domain stem comes from the order's CN. "
+            "WARNING: the .p7b output is likely to fail — see --pkcs7-out"
         ),
     )
     ctl.add_argument(
@@ -470,25 +477,46 @@ def _write_file(path: str, content: str, label: str) -> None:
     log.info("Output written", output=label, path=path)
 
 
-def _write_file_binary(path: str, content: bytes, label: str) -> None:
-    """Write binary data to a file, exiting with an error log on failure.
+
+def _try_download_write_binary(
+    label: str,
+    path: str,
+    download_fn: Callable[[], bytes],
+) -> bool:
+    """Attempt to download and write a binary certificate format.
+
+    Logs a warning and returns ``False`` on any download or write failure
+    rather than exiting, so callers can continue writing other formats.
 
     Args:
+        label: Human-readable description for log messages
+            (e.g. ``"certificate (DER)"``).
         path: Destination file path.
-        content: Binary data to write.
-        label: Human-readable description of the content for log messages,
-            e.g. ``"certificate (DER)"`` or ``"certificate (PKCS#7)"``.
+        download_fn: Zero-argument callable that fetches the raw bytes.
 
-    Raises:
-        SystemExit: With code 1 if the file cannot be written.
+    Returns:
+        ``True`` if both the download and the write succeeded, ``False``
+        otherwise.
     """
     try:
+        data = download_fn()
+    except CertiNextAPIError as exc:
+        log.warning(
+            "Skipping format — download failed",
+            output=label, path=path, status_code=exc.status_code,
+        )
+        return False
+    try:
         with open(path, "wb") as f:
-            f.write(content)
+            f.write(data)
     except OSError as exc:
-        log.error("Error writing output", output=label, path=path, error=str(exc))
-        raise SystemExit(1) from exc
+        log.warning(
+            "Skipping format — write failed",
+            output=label, path=path, error=str(exc),
+        )
+        return False
     log.info("Output written", output=label, path=path)
+    return True
 
 
 def _write_outputs(order: SslOrder, args: argparse.Namespace, pem: str) -> None:
@@ -551,33 +579,33 @@ def _write_outputs(order: SslOrder, args: argparse.Namespace, pem: str) -> None:
             _write_file(args.fullchain_out, fullchain, "fullchain")
 
     if args.der_out:
-        try:
-            der = order.download_certificate_der()
-        except CertiNextAPIError as exc:
-            fatal_api_error(exc, "Error downloading DER certificate")
-        _write_file_binary(args.der_out, der, "certificate (DER)")
+        _try_download_write_binary("certificate (DER)", args.der_out, order.download_certificate_der)
 
     if args.pkcs7_out:
-        try:
-            pkcs7 = order.download_certificate_pkcs7()
-        except CertiNextAPIError as exc:
-            fatal_api_error(exc, "Error downloading PKCS#7 certificate")
-        _write_file_binary(args.pkcs7_out, pkcs7, "certificate (PKCS#7)")
+        # TODO: remove this warning (and --pkcs7-out) once CertiNext clarifies PKCS#7 support.
+        log.warning(
+            "PKCS#7 download is likely to fail",
+            reason="API returned HTTP 406 for this format as of 2026-06-11",
+            ticket="filed with CertiNext support",
+        )
+        _try_download_write_binary("certificate (PKCS#7)", args.pkcs7_out, order.download_certificate_pkcs7)
 
     if args.all_formats_out:
         stem = _stem_from_domain(order.domain)
         out_dir = Path(args.all_formats_out)
         _write_file(str(out_dir / f"{stem}.pem"), pem, "certificate bundle (PEM)")
-        try:
-            der = order.download_certificate_der()
-        except CertiNextAPIError as exc:
-            fatal_api_error(exc, "Error downloading DER certificate")
-        _write_file_binary(str(out_dir / f"{stem}.der"), der, "certificate (DER)")
-        try:
-            pkcs7_all = order.download_certificate_pkcs7()
-        except CertiNextAPIError as exc:
-            fatal_api_error(exc, "Error downloading PKCS#7 certificate")
-        _write_file_binary(str(out_dir / f"{stem}.p7b"), pkcs7_all, "certificate (PKCS#7)")
+        _try_download_write_binary(
+            "certificate (DER)", str(out_dir / f"{stem}.der"), order.download_certificate_der,
+        )
+        # TODO: remove this warning (and .p7b output) once CertiNext clarifies PKCS#7 support.
+        log.warning(
+            "PKCS#7 download is likely to fail",
+            reason="API returned HTTP 406 for this format as of 2026-06-11",
+            ticket="filed with CertiNext support",
+        )
+        _try_download_write_binary(
+            "certificate (PKCS#7)", str(out_dir / f"{stem}.p7b"), order.download_certificate_pkcs7,
+        )
 
     if args.output:
         _write_file(args.output, pem, "certificate bundle")
