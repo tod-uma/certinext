@@ -43,12 +43,14 @@ Run all integration tests explicitly::
 import os
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 
 import pytest
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.serialization import Encoding
+from cryptography.hazmat.primitives.serialization import pkcs7 as pkcs7_mod
 from cryptography.x509.oid import NameOID
 
 import certinext
@@ -288,17 +290,28 @@ class TestCertIssuance:
         self,
         sandbox_session: certinext.CertiNextSession,
         sandbox_ov_creds: dict[str, str],
+        tmp_path: Path,
     ) -> None:
-        """Issue an OV certificate end-to-end and verify the returned PEM.
+        """Issue an OV certificate end-to-end and verify all download formats.
 
         Generates a fresh EC P-256 CSR with a CI-job-unique CN, creates an OV
         order with the prevetting token so the sandbox auto-approves it, drives
         the order to issuance via :class:`~certinext.ssl_certificates.OrderWorkflow`,
-        and asserts that the returned PEM leaf certificate's CN matches the CSR.
+        then verifies:
+
+        - The returned PEM bundle contains a parseable cert chain whose leaf CN
+          matches the CSR.
+        - :meth:`~certinext.ssl_certificates.SslOrder.download_certificate_der`
+          returns valid DER for the leaf certificate with a matching CN.
+        - :meth:`~certinext.ssl_certificates.SslOrder.download_certificate_pkcs7`
+          returns a valid PKCS#7 bundle containing at least one certificate.
+        - ``--all-formats-out`` writes all three formats to a directory and each
+          file is parseable.
 
         Args:
             sandbox_session: Authenticated sandbox session fixture.
             sandbox_ov_creds: OV org ID and prevetting token fixture.
+            tmp_path: Pytest temporary directory for ``--all-formats-out`` output.
         """
         job_id = os.environ.get("CI_JOB_ID", str(int(time.time())))
         cn = f"certinext-ci-{job_id}.maine.edu"
@@ -375,3 +388,64 @@ class TestCertIssuance:
         assert cn_attrs[0].value == cn, (
             f"CN mismatch: expected {cn!r}, got {cn_attrs[0].value!r}"
         )
+
+        # ------------------------------------------------------------------
+        # DER download — single end-entity cert
+        # ------------------------------------------------------------------
+        der = order.download_certificate_der()
+        assert isinstance(der, bytes) and len(der) > 0, "DER download returned empty bytes"
+        der_cert = x509.load_der_x509_certificate(der)
+        der_cn_attrs = der_cert.subject.get_attributes_for_oid(NameOID.COMMON_NAME)
+        assert der_cn_attrs, "DER certificate has no CN attribute"
+        assert der_cn_attrs[0].value == cn, (
+            f"DER CN mismatch: expected {cn!r}, got {der_cn_attrs[0].value!r}"
+        )
+        assert der_cert.not_valid_after_utc > now, (
+            f"DER certificate expired at {der_cert.not_valid_after_utc}"
+        )
+
+        # ------------------------------------------------------------------
+        # PKCS#7 download — full bundle; verify chain signatures
+        # ------------------------------------------------------------------
+        p7b = order.download_certificate_pkcs7()
+        assert isinstance(p7b, bytes) and len(p7b) > 0, "PKCS#7 download returned empty bytes"
+        p7b_certs = pkcs7_mod.load_der_pkcs7_certificates(p7b)
+        assert len(p7b_certs) >= 1, "PKCS#7 bundle contains no certificates"
+        # Verify chain signatures using the same logic applied to the PEM bundle above.
+        for p7b_cert in p7b_certs:
+            if p7b_cert.issuer == p7b_cert.subject:
+                continue  # self-signed root
+            issuer = next((c for c in p7b_certs if c.subject == p7b_cert.issuer), None)
+            if issuer is None:
+                continue  # issuer not included in bundle
+            try:
+                p7b_cert.verify_directly_issued_by(issuer)
+            except Exception as exc:
+                pytest.fail(
+                    f"PKCS#7 signature verification failed: "
+                    f"{p7b_cert.subject.rfc4514_string()!r} not signed by "
+                    f"{issuer.subject.rfc4514_string()!r}: {exc}"
+                )
+
+        # ------------------------------------------------------------------
+        # --all-formats-out: three files written and parseable
+        # ------------------------------------------------------------------
+        from certinext.issue_certificate_cli import _stem_from_domain, _write_outputs
+
+        _write_outputs(order, type("_Args", (), {  # type: ignore[arg-type]
+            "cert_out": None, "chain_out": None, "fullchain_out": None,
+            "der_out": None, "pkcs7_out": None,
+            "all_formats_out": str(tmp_path), "output": None,
+        })(), pem)
+
+        stem = _stem_from_domain(order.domain)
+        pem_file = tmp_path / f"{stem}.pem"
+        der_file = tmp_path / f"{stem}.der"
+        p7b_file = tmp_path / f"{stem}.p7b"
+
+        assert pem_file.exists(), f"--all-formats-out did not write {pem_file.name}"
+        assert der_file.exists(), f"--all-formats-out did not write {der_file.name}"
+        assert p7b_file.exists(), f"--all-formats-out did not write {p7b_file.name}"
+
+        x509.load_der_x509_certificate(der_file.read_bytes())
+        assert len(pkcs7_mod.load_der_pkcs7_certificates(p7b_file.read_bytes())) >= 1

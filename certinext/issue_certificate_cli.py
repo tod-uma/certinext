@@ -58,6 +58,7 @@ Usage::
 
 import argparse
 import sys
+from pathlib import Path
 from typing import Any
 
 import structlog
@@ -179,6 +180,14 @@ def build_parser(config: dict[str, Any] | None = None) -> argparse.ArgumentParse
     ctl.add_argument(
         "--pkcs7-out", metavar="FILE", default=None,
         help="Write the full certificate bundle in PKCS#7 / P7B (binary) format to FILE",
+    )
+    ctl.add_argument(
+        "--all-formats-out", metavar="DIR", default=None,
+        help=(
+            "Write all certificate formats to DIR: {domain}.pem (PEM bundle), "
+            "{domain}.der (DER), and {domain}.p7b (PKCS#7). "
+            "The domain stem comes from the order's CN."
+        ),
     )
     ctl.add_argument(
         "--wait", type=int, default=300, metavar="SECONDS",
@@ -425,6 +434,21 @@ def _create_order(sess: CertiNextSession, args: argparse.Namespace, csr: str = "
         fatal_api_error(exc, "Error creating order")
 
 
+def _stem_from_domain(domain: str | None) -> str:
+    """Return a filesystem-safe filename stem derived from a certificate domain.
+
+    Replaces ``*`` (wildcard) with the literal string ``wildcard`` so that
+    wildcard certificate filenames do not contain shell-glob characters.
+
+    Args:
+        domain: The primary domain (CN) of the certificate, or ``None``.
+
+    Returns:
+        A non-empty string safe to use as a filename stem.
+    """
+    return (domain or "certificate").replace("*", "wildcard")
+
+
 def _write_file(path: str, content: str, label: str) -> None:
     """Write text to a file, exiting with an error log on failure.
 
@@ -485,11 +509,15 @@ def _write_outputs(order: SslOrder, args: argparse.Namespace, pem: str) -> None:
     Each PEM file is normalised to end with exactly one trailing newline.
     Binary formats use ``--der-out`` (DER, single end-entity certificate) and
     ``--pkcs7-out`` (PKCS#7 / P7B bundle). These cannot be written to stdout.
+    ``--all-formats-out DIR`` writes ``{domain}.pem``, ``{domain}.der``, and
+    ``{domain}.p7b`` to *DIR* in one call, deriving the stem from the order's
+    CN via :func:`_stem_from_domain`.
 
     Args:
         order: The issued order to download certificate parts from.
         args: Parsed CLI arguments (reads ``output``, ``cert_out``,
-            ``chain_out``, ``fullchain_out``, ``der_out``, and ``pkcs7_out``).
+            ``chain_out``, ``fullchain_out``, ``der_out``, ``pkcs7_out``,
+            and ``all_formats_out``).
         pem: Raw PEM bundle already downloaded by the workflow.
 
     Raises:
@@ -536,9 +564,25 @@ def _write_outputs(order: SslOrder, args: argparse.Namespace, pem: str) -> None:
             fatal_api_error(exc, "Error downloading PKCS#7 certificate")
         _write_file_binary(args.pkcs7_out, pkcs7, "certificate (PKCS#7)")
 
+    if args.all_formats_out:
+        stem = _stem_from_domain(order.domain)
+        out_dir = Path(args.all_formats_out)
+        _write_file(str(out_dir / f"{stem}.pem"), pem, "certificate bundle (PEM)")
+        try:
+            der = order.download_certificate_der()
+        except CertiNextAPIError as exc:
+            fatal_api_error(exc, "Error downloading DER certificate")
+        _write_file_binary(str(out_dir / f"{stem}.der"), der, "certificate (DER)")
+        try:
+            pkcs7_all = order.download_certificate_pkcs7()
+        except CertiNextAPIError as exc:
+            fatal_api_error(exc, "Error downloading PKCS#7 certificate")
+        _write_file_binary(str(out_dir / f"{stem}.p7b"), pkcs7_all, "certificate (PKCS#7)")
+
     if args.output:
         _write_file(args.output, pem, "certificate bundle")
-    elif not (args.cert_out or args.chain_out or args.fullchain_out or args.der_out or args.pkcs7_out):
+    elif not (args.cert_out or args.chain_out or args.fullchain_out
+              or args.der_out or args.pkcs7_out or args.all_formats_out):
         print(pem, end="")
 
 
