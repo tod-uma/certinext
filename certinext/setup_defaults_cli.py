@@ -21,21 +21,37 @@ Usage:
     certinext-setup-defaults --sandbox        # sandbox profile shortcut
 """
 import argparse
+import subprocess
 import sys
 from typing import Any
 
 from certinext._config import ConfigError, config_path, load_config, save_defaults
+from certinext._keyring import keyring_available, keyring_get, keyring_service
 
-#: Prompted keys in display order: (TOML key, prompt label).
-_FIELDS: list[tuple[str, str]] = [
-    ("requestor_name", "Requestor full name"),
-    ("requestor_email", "Requestor email"),
-    ("requestor_phone", "Requestor phone (E.164, e.g. +12075551234)"),
-    ("requestor_designation", "Requestor job title/designation"),
-    ("signer_place", "Signer place (city/location, e.g. 'Orono, ME')"),
-    ("type", "Certificate type (dv/ov/ev)"),
-    ("org_id", "Organization ID (required for OV/EV)"),
-    ("validity", "Validity in years (1/2/3)"),
+# Post-type fields in display order:
+# (TOML key, base label, required for DV, required for OV/EV, note when optional)
+_POST_TYPE_FIELDS: list[tuple[str, str, bool, bool, str]] = [
+    ("requestor_name",
+     "Requestor full name",
+     True, True, ""),
+    ("requestor_email",
+     "Requestor email",
+     False, False, "read from CSR emailAddress field when present"),
+    ("requestor_phone",
+     "Requestor phone (E.164, e.g. +12075551234)",
+     True, True, ""),
+    ("requestor_designation",
+     "Requestor job title/designation",
+     False, False, ""),
+    ("signer_place",
+     "Signer place (city/location, e.g. 'Orono, ME')",
+     False, False, "read from CSR L and ST fields when present"),
+    ("org_id",
+     "Organization ID (from certinext-accounts)",
+     False, True, "not needed for DV"),
+    ("validity",
+     "Validity in years (1/2/3)",
+     False, False, "defaults to 1 year"),
 ]
 
 
@@ -88,6 +104,43 @@ def _validated(key: str, value: str) -> Any:
     return value
 
 
+def _maybe_setup_keyring(args: argparse.Namespace) -> None:
+    """Offer to run certinext-setup-keyring when no credentials are stored for this profile.
+
+    Silently returns when credentials are already present or when no usable
+    keyring backend is available.  Otherwise prompts the user and either runs
+    ``certinext-setup-keyring`` (forwarding ``--sandbox`` or ``--profile``) or
+    prints the manual command.
+
+    Args:
+        args: Parsed CLI arguments.  Reads ``args.profile`` and ``args.sandbox``.
+    """
+    service = keyring_service("certinext", args.profile)
+    if keyring_get(service, "CERTINEXT_CLIENT_ID") is not None:
+        return  # credentials already configured
+
+    if not keyring_available():
+        return  # no usable backend — don't offer what can't work
+
+    cmd = ["certinext-setup-keyring"]
+    if args.sandbox:
+        cmd.append("--sandbox")
+    elif args.profile:
+        cmd.extend(["--profile", args.profile])
+    cmd_str = " ".join(cmd)
+
+    profile_label = f"the {args.profile!r} profile" if args.profile else "the default profile"
+    print(f"\nNo API credentials are stored in the keyring for {profile_label}.")
+    try:
+        answer = input(f"Run '{cmd_str}' now? [Y/n]: ").strip().lower()
+    except EOFError:
+        answer = "n"
+    if answer in ("", "y", "yes"):
+        subprocess.run(cmd, check=False)
+    else:
+        print(f"\nWhen you're ready:\n  {cmd_str}")
+
+
 def main() -> None:
     """Interactively store issue-cert defaults in the config file."""
     try:
@@ -104,7 +157,10 @@ def main() -> None:
         section_label = f"[profiles.{args.profile}]" if args.profile else "[defaults]"
         print(f"Store certinext-issue-cert defaults in {path}")
         print(f"Section: {section_label}")
-        print("Press Enter to keep a shown value, or enter '-' to clear it.\n")
+        print()
+        print("The domain and SANs are always read from the CSR and are not stored here.")
+        print("Press Enter to keep a shown value, or enter '-' to clear it.")
+        print()
 
         try:
             doc = load_config(path)
@@ -119,7 +175,33 @@ def main() -> None:
 
         values: dict[str, Any] = {}
         cleared: list[str] = []
-        for key, label in _FIELDS:
+
+        # Ask certificate type first — determines which remaining fields are required.
+        while True:
+            entered = _prompt("Certificate type [required] (dv/ov/ev)", current.get("type"))
+            if entered is None:
+                cert_type = str(current.get("type", "dv"))
+                break
+            if entered == "":
+                cleared.append("type")
+                cert_type = "dv"
+                break
+            try:
+                values["type"] = _validated("type", entered)
+                cert_type = values["type"]
+                break
+            except ValueError as exc:
+                print(f"  {exc}", file=sys.stderr)
+        print()
+
+        is_ov_ev = cert_type in ("ov", "ev")
+
+        for key, base_label, req_dv, req_ov_ev, note in _POST_TYPE_FIELDS:
+            required = req_ov_ev if is_ov_ev else req_dv
+            tag = "[required]" if required else "[optional]"
+            label = f"{base_label} {tag}"
+            if note:
+                label += f" — {note}"
             while True:
                 entered = _prompt(label, current.get(key))
                 if entered is None:
@@ -135,20 +217,21 @@ def main() -> None:
 
         if not values and not cleared:
             print("\nNothing to change.")
-            return
+        else:
+            try:
+                save_defaults(values, args.profile, path, remove=tuple(cleared))
+            except ConfigError as exc:
+                sys.exit(f"Error: {exc}")
 
-        try:
-            save_defaults(values, args.profile, path, remove=tuple(cleared))
-        except ConfigError as exc:
-            sys.exit(f"Error: {exc}")
+            print(f"\nStored in {section_label}:")
+            for key, value in values.items():
+                print(f"  {key} = {value}")
+            for key in cleared:
+                print(f"  {key} (cleared)")
+            print(f"\nConfig file: {path}")
+            print("Precedence: CLI argument > environment variable > profile section > [defaults].")
 
-        print(f"\nStored in {section_label}:")
-        for key, value in values.items():
-            print(f"  {key} = {value}")
-        for key in cleared:
-            print(f"  {key} (cleared)")
-        print(f"\nConfig file: {path}")
-        print("Precedence: CLI argument > environment variable > profile section > [defaults].")
+        _maybe_setup_keyring(args)
     except KeyboardInterrupt:
         print("\nAborted.", file=sys.stderr)
         raise SystemExit(130)

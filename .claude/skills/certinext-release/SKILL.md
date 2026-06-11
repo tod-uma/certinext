@@ -23,6 +23,8 @@ Cut a release for certinext. The tag message is the source of truth — GitLab C
    ```
    Use `$ARGUMENTS` if provided. Otherwise use `AskUserQuestion` — see the `/version-scheme` skill for alpha/beta/rc/stable guidance.
 
+   **Never jump directly from one stable to the next.** Always go through at least one `rcN` first. The only exception is a trivially safe emergency hotfix already proven in production.
+
 3. **Draft the release notes.** Write a concise Markdown changelog:
    - Lead with a `## Highlights` section (2–4 sentences of prose on the most important user-facing changes).
    - Follow with grouped detail lists (`## Features`, `## Fixes`, etc.); merge closely related entries and drop noise.

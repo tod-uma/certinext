@@ -35,8 +35,9 @@ Python library and CLI scripts for managing your [CertiNext](https://us.certinex
 
 ## Installation
 
-All instructions use [uv](https://docs.astral.sh/uv/). You don't need
-Python installed first — uv downloads and manages Python for you.
+Instructions below default to [uv](https://docs.astral.sh/uv/)
+([Install uv](#install-uv) if you don't have it yet).
+You don't need Python installed first — uv downloads and manages Python for you.
 
 To install the `certinext-*` CLI tools (issuing certificates, listing
 domains, etc.):
@@ -55,6 +56,7 @@ Everything else — installing uv itself, library use, pre-releases, the UMS
 GitLab registry, development installs, and pip/pipx equivalents — is in the
 collapsible sections below.
 
+<a id="install-uv"></a>
 <details>
 <summary>Install uv (one-time, Windows / macOS / Linux)</summary>
 
@@ -316,18 +318,24 @@ values you used. Or hand-edit the config file
 
 ```toml
 [defaults]
-requestor_name  = "Jane Doe"
-requestor_email = "jane@maine.edu"
-requestor_phone = "+12075551234"
-signer_place    = "Orono, ME"
-type            = "ov"
-org_id          = "12345"
-validity        = 1
+requestor_name  = "Jane Doe"       # required — cannot be read from a CSR
+requestor_email = "jane@maine.edu" # optional if your CSR includes an emailAddress field
+requestor_phone = "+12075551234"   # required — cannot be read from a CSR (E.164 format)
+# requestor_designation = "Sys Admin"  # optional
+signer_place    = "Orono, ME"      # optional if your CSR includes L and/or ST fields
+type            = "ov"             # required (dv / ov / ev)
+org_id          = "12345"         # required for OV and EV; omit for DV
+validity        = 1                # optional; defaults to 1 year
 
 [profiles.sandbox]
 # overrides applied when --sandbox / --profile sandbox is active
 type = "dv"
 ```
+
+The primary domain and SANs are read directly from the CSR and are not stored
+here. `requestor_email` and `signer_place` are also read from the CSR when
+present (the `emailAddress`, `L`, and `ST` subject fields), so you only need
+to set them here if your CSRs don't include those fields.
 
 Values resolve in priority order: explicit CLI argument → environment
 variable → `[profiles.NAME]` → `[defaults]` → built-in default. Secrets
@@ -422,10 +430,19 @@ masks the secret with asterisks on confirmation.
 ### certinext-setup-defaults
 
 `certinext-setup-defaults` interactively stores defaults for
-`certinext-issue-cert` (requestor identity, certificate type, org ID,
-validity) in the config file, so future issuance runs only need the CSR. See
-[Storing issue-cert defaults](#storing-issue-cert-defaults-optional) for the
-file format and resolution order.
+`certinext-issue-cert` in the config file, so future issuance runs only need
+the CSR.
+
+The script asks for certificate type first (DV / OV / EV), then prompts for
+each field and labels it **[required]** or **[optional]** based on the type you
+chose. Fields the tool can already read from a CSR (`requestor_email`,
+`signer_place`) are labelled optional with a note — you only need to set them
+here if your CSRs don't include the corresponding subject fields
+(`emailAddress`, `L`, `ST`). The domain and SANs are never prompted — they
+always come from the CSR.
+
+See [Storing issue-cert defaults](#storing-issue-cert-defaults-optional) for
+the file format and resolution order.
 
 ```bash
 # Edit the [defaults] section
