@@ -306,7 +306,8 @@ def build_session(
         kr_key=secret_kr_key,
         allow_prompt=prompt,
     )
-    log.info("Connecting", url=args.base_url, account=client_id, profile=profile or "default")
+    if prompt:
+        log.info("Connecting", url=args.base_url, account=client_id, profile=profile or "default")
     return certinext.session(
         base_url=args.base_url,
         token_url=args.token_url,
