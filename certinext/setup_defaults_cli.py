@@ -181,18 +181,30 @@ def _pick_org(
     if not orgs:
         return None
 
+    def _org_detail(org: Organization) -> str:
+        """Return a parenthesised detail string for display."""
+        parts = [f"#{org.organization_number}"]
+        if org.locality:
+            loc = org.locality
+            if org.state_code:
+                loc += f", {org.state_code}"
+            parts.append(loc)
+        if org.validation_for:
+            parts.append(org.validation_for)
+        if org.validation_status:
+            parts.append(org.validation_status)
+        return ", ".join(parts)
+
     if len(orgs) == 1:
         org = orgs[0]
-        locality = f", {org.locality}" if org.locality else ""
-        print(f"  Auto-selected: {org.organization_name} (#{org.organization_number}{locality})")
+        print(f"  Auto-selected: {org.organization_name} ({_org_detail(org)})")
         return str(org.organization_number)
 
     current_str = str(current_org_id) if current_org_id not in (None, "") else None
     print("Available organizations:")
     for i, org in enumerate(orgs, 1):
-        locality = f", {org.locality}" if org.locality else ""
         marker = " [current]" if current_str and str(org.organization_number) == current_str else ""
-        print(f"  {i}. {org.organization_name} (#{org.organization_number}{locality}){marker}")
+        print(f"  {i}. {org.organization_name} ({_org_detail(org)}){marker}")
 
     default_idx = next(
         (i for i, o in enumerate(orgs, 1) if current_str and str(o.organization_number) == current_str),

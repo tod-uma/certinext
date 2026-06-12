@@ -119,19 +119,72 @@ class Organization:
     :meth:`AccountAccessor.get_organization`. Pass :attr:`organization_number`
     as the ``organization_id`` argument when creating OV or EV certificates.
 
+    **Lazy detail loading**: objects returned by :meth:`~AccountAccessor.list_organizations`
+    carry only the fields included in the list response (name, number, locality,
+    country, postal code, status, and pre-vetting flag). Properties that require
+    the detail endpoint — validation status, validation scope, subscriber
+    agreement, representatives, domains — trigger a single ``GET
+    /organizations/{id}`` call automatically on first access and cache the
+    result. Objects from :meth:`~AccountAccessor.get_organization` are fully
+    populated from construction and never make an additional call.
+
     Example::
 
         sess = certinext.session(client_id="...", client_secret="...")
         for org in sess.accounts.list_organizations():
-            print(org.organization_number, org.organization_name)
+            # These access the detail endpoint lazily on first call:
+            print(org.organization_number, org.validation_status, org.validation_for)
     """
 
-    def __init__(self, data: dict[str, Any]) -> None:
+    def __init__(
+        self,
+        data: dict[str, Any],
+        client: CertiNextClient | None = None,
+        *,
+        detail_loaded: bool = False,
+    ) -> None:
         """
         Args:
             data: Raw API response dict for this organization.
+            client: HTTP client used for lazy detail fetching. When ``None``
+                detail-only properties return ``None`` without making a request.
+            detail_loaded: Pass ``True`` when ``data`` already contains the
+                full detail response (e.g. when constructed by
+                :meth:`AccountAccessor.get_organization`) to suppress the
+                automatic detail fetch.
         """
         self._data = data
+        self._client = client
+        self._detail_loaded = detail_loaded
+
+    # ------------------------------------------------------------------
+    # Internal lazy loader
+    # ------------------------------------------------------------------
+
+    def _ensure_detail(self) -> None:
+        """Fetch the detail endpoint once and merge the result into ``_data``.
+
+        No-op when the client is absent, the detail was already loaded, or
+        ``organization_number`` is missing.  API errors are silently swallowed
+        so that a network failure degrades gracefully to ``None`` returns rather
+        than raising from a property accessor.
+        """
+        if self._detail_loaded or self._client is None:
+            return
+        self._detail_loaded = True  # set before the call so errors don't retry
+        org_num = self._data.get("organizationNumber")
+        if not org_num:
+            return
+        try:
+            detail = self._client.get(f"{_ORGS_BASE}/{org_num}")
+            if isinstance(detail, dict):
+                self._data.update(detail)
+        except Exception:
+            pass
+
+    # ------------------------------------------------------------------
+    # List-endpoint properties (always available)
+    # ------------------------------------------------------------------
 
     @property
     def organization_number(self) -> str | None:
@@ -168,8 +221,127 @@ class Organization:
         """``"1"`` if the organization has pre-vetting approval, otherwise ``"0"``."""
         return self._data.get("isPreVettingOrg")
 
+    # ------------------------------------------------------------------
+    # Detail-endpoint properties (lazy-loaded on first access)
+    # ------------------------------------------------------------------
+
+    @property
+    def state_code(self) -> str | None:
+        """ISO 3166-2 state/province code (e.g. ``"ME"``)."""
+        self._ensure_detail()
+        return self._data.get("organizationStateCode")
+
+    @property
+    def state_name(self) -> str | None:
+        """Full state or province name (e.g. ``"Maine"``)."""
+        self._ensure_detail()
+        return self._data.get("organizationStateName")
+
+    @property
+    def street_address_1(self) -> str | None:
+        """Primary street address line."""
+        self._ensure_detail()
+        return self._data.get("organizationStreetAddress1")
+
+    @property
+    def street_address_2(self) -> str | None:
+        """Secondary street address line."""
+        self._ensure_detail()
+        return self._data.get("organizationStreetAddress2")
+
+    @property
+    def business_category_id(self) -> str | None:
+        """Business category identifier (raw string from the API)."""
+        self._ensure_detail()
+        return self._data.get("businessCategoryId")
+
+    @property
+    def validation_status_id(self) -> str | None:
+        """Raw validation status: ``"1"`` = Validated, ``"0"`` = Pending."""
+        self._ensure_detail()
+        return self._data.get("validationStatusId")
+
+    @property
+    def validation_status(self) -> str | None:
+        """Human-readable validation status: ``"Validated"``, ``"Pending"``, or ``None``.
+
+        ``None`` is returned when the field is absent (no client configured)
+        rather than a default string, so callers can distinguish *unknown*
+        from *pending*.
+        """
+        self._ensure_detail()
+        _map = {"0": "Pending", "1": "Validated"}
+        raw = self._data.get("validationStatusId")
+        return _map.get(raw) if raw is not None else None
+
+    @property
+    def validation_for_id(self) -> str | None:
+        """Raw validation scope identifier.
+
+        Known values: ``"1"`` = OV, ``"2"`` = EV & OV, ``"3"`` = SMIME OV.
+        """
+        self._ensure_detail()
+        return self._data.get("validationFor")
+
+    @property
+    def validation_for(self) -> str | None:
+        """Human-readable validation scope (e.g. ``"OV"``, ``"EV & OV"``, ``"SMIME OV"``).
+
+        Returns the raw integer string for unrecognised values so that future
+        CA additions degrade to a number rather than ``None``.
+        """
+        self._ensure_detail()
+        _map = {"1": "OV", "2": "EV & OV", "3": "SMIME OV"}
+        raw = self._data.get("validationFor")
+        return _map.get(raw, raw) if raw is not None else None
+
+    @property
+    def subscriber_agreement_signed(self) -> bool | None:
+        """``True`` if the subscriber agreement has been signed, ``False`` if not, ``None`` if unknown."""
+        self._ensure_detail()
+        sa = self._data.get("subscriberAgreement")
+        if not isinstance(sa, dict):
+            return None
+        return bool(sa.get("signed"))
+
+    @property
+    def subscriber_agreement_signer(self) -> str | None:
+        """Name of the person who signed the subscriber agreement."""
+        self._ensure_detail()
+        sa = self._data.get("subscriberAgreement")
+        return sa.get("signerName") if isinstance(sa, dict) else None
+
+    @property
+    def subscriber_agreement_date(self) -> str | None:
+        """Date the subscriber agreement was signed (raw string from the API)."""
+        self._ensure_detail()
+        sa = self._data.get("subscriberAgreement")
+        return sa.get("signedDate") if isinstance(sa, dict) else None
+
+    @property
+    def org_representatives(self) -> list[dict[str, Any]]:
+        """List of organization representative records (raw dicts from the API)."""
+        self._ensure_detail()
+        reps = self._data.get("orgRepresentatives")
+        return reps if isinstance(reps, list) else []
+
+    @property
+    def domains(self) -> list[str]:
+        """List of domains authorized under this organization.
+
+        Returns an empty list when the field is absent or empty (the API
+        returns an empty string ``""`` rather than ``[]`` for orgs with no
+        domains).
+        """
+        self._ensure_detail()
+        raw = self._data.get("domains")
+        if isinstance(raw, list):
+            return raw
+        return []
+
     def as_dict(self) -> dict[str, Any]:
-        """Return the raw API response dict."""
+        """Return the raw API response dict (fetches detail data if not yet loaded)."""
+        self._ensure_detail()
         return self._data
 
     def __repr__(self) -> str:
@@ -237,6 +409,11 @@ class AccountAccessor:
     def list_organizations(self) -> list[Organization]:
         """Return all organizations available to this account.
 
+        The returned objects carry only the fields included in the list
+        response. Accessing a detail-only property (e.g.
+        :attr:`~Organization.validation_status`) on a returned object
+        automatically fetches the detail endpoint on first access.
+
         Returns:
             List of :class:`Organization` objects. Each
             :attr:`Organization.organization_number` can be used as
@@ -252,10 +429,13 @@ class AccountAccessor:
         elif isinstance(result, dict):
             orgs = result.get("organizations", [])
             raw = orgs if isinstance(orgs, list) else []
-        return [Organization(item) for item in raw]
+        return [Organization(item, client=self._client) for item in raw]
 
     def get_organization(self, organization_id: str) -> Organization:
-        """Return a single organization by its ID.
+        """Return a single organization by its ID, including all detail fields.
+
+        Unlike objects from :meth:`list_organizations`, the returned object is
+        fully populated and will never make an additional API call.
 
         Args:
             organization_id: The ``organizationNumber`` value returned by
@@ -269,4 +449,4 @@ class AccountAccessor:
                 Provides ``.status_code`` and ``.body``.
         """
         result = self._client.get(f"{_ORGS_BASE}/{organization_id}")
-        return Organization(result if isinstance(result, dict) else {})
+        return Organization(result if isinstance(result, dict) else {}, detail_loaded=True)
