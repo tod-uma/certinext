@@ -12,6 +12,10 @@ The default profile writes the ``[defaults]`` section. Named profiles write a
 ``[profiles.NAME]`` section that overrides ``[defaults]`` when that profile is
 active (``--profile`` / ``CERTINEXT_PROFILE`` / ``--sandbox``).
 
+If API credentials are already stored in the keyring (or can be set up first),
+organization IDs for OV/EV orders are fetched from the API and presented as a
+numbered menu rather than requiring the user to look them up manually.
+
 Secrets (client secret, prevetting token) are NOT stored here — use
 ``certinext-setup-keyring`` for credentials.
 
@@ -21,12 +25,19 @@ Usage:
     certinext-setup-defaults --sandbox        # sandbox profile shortcut
 """
 import argparse
-import subprocess
 import sys
 from typing import Any
 
+from certinext._cli import (
+    CredentialsNotFoundError,
+    add_connection_args,
+    apply_sandbox,
+    build_session,
+)
 from certinext._config import ConfigError, config_path, load_config, save_defaults
 from certinext._keyring import keyring_available, keyring_get, keyring_service
+from certinext.accounts import Organization
+from certinext.exceptions import CertiNextAPIError
 
 # Post-type fields in display order:
 # (TOML key, base label, required for DV, required for OV/EV, note when optional)
@@ -115,6 +126,8 @@ def _maybe_setup_keyring(args: argparse.Namespace) -> None:
     Args:
         args: Parsed CLI arguments.  Reads ``args.profile`` and ``args.sandbox``.
     """
+    import subprocess
+
     service = keyring_service("certinext", args.profile)
     if keyring_get(service, "CERTINEXT_CLIENT_ID") is not None:
         return  # credentials already configured
@@ -130,7 +143,8 @@ def _maybe_setup_keyring(args: argparse.Namespace) -> None:
     cmd_str = " ".join(cmd)
 
     profile_label = f"the {args.profile!r} profile" if args.profile else "the default profile"
-    print(f"\nNo API credentials are stored in the keyring for {profile_label}.")
+    print(f"No API credentials are stored in the keyring for {profile_label}.")
+    print("Credentials are needed to look up valid organization IDs for OV/EV orders.")
     try:
         answer = input(f"Run '{cmd_str}' now? [Y/n]: ").strip().lower()
     except EOFError:
@@ -139,19 +153,85 @@ def _maybe_setup_keyring(args: argparse.Namespace) -> None:
         subprocess.run(cmd, check=False)
     else:
         print(f"\nWhen you're ready:\n  {cmd_str}")
+    print()
+
+
+def _pick_org(
+    orgs: list[Organization],
+    cert_type: str,
+    current_org_id: Any,
+    sandbox: bool = False,
+) -> str | None:
+    """Present a numbered organization menu and return the chosen org number.
+
+    Filters to pre-vetted organizations for OV/EV orders. Auto-selects when
+    only one option is available. Returns ``None`` when the list is empty so
+    the caller falls back to free-text entry.
+
+    Args:
+        orgs: Organizations returned by the accounts API.
+        cert_type: ``"dv"``, ``"ov"``, or ``"ev"``.
+        current_org_id: Currently configured org_id value, or None.
+        sandbox: If ``True``, the portal hint links to the sandbox site.
+
+    Returns:
+        The chosen organization number as a string, or None if the list is
+        empty after filtering.
+    """
+    if cert_type in ("ov", "ev"):
+        orgs = [o for o in orgs if o.is_pre_vetting_org == "1"]
+    if not orgs:
+        return None
+
+    def _org_detail(org: Organization) -> str:
+        """Return a parenthesised detail string for display."""
+        parts = [f"#{org.organization_number}"]
+        if org.locality:
+            loc = org.locality
+            if org.state_code:
+                loc += f", {org.state_code}"
+            parts.append(loc)
+        if org.validation_for:
+            parts.append(org.validation_for)
+        if org.validation_status:
+            parts.append(org.validation_status)
+        return ", ".join(parts)
+
+    if len(orgs) == 1:
+        org = orgs[0]
+        print(f"  Auto-selected: {org.organization_name} ({_org_detail(org)})")
+        return str(org.organization_number)
+
+    portal = "sandbox-us.certinext.io" if sandbox else "us.certinext.io"
+    print(f"Available organizations (the default is marked with a 'D' badge at {portal}):")
+    current_str = str(current_org_id) if current_org_id not in (None, "") else None
+    for i, org in enumerate(orgs, 1):
+        marker = " [current]" if current_str and str(org.organization_number) == current_str else ""
+        print(f"  {i}. {org.organization_name} ({_org_detail(org)}){marker}")
+
+    default_idx = next(
+        (i for i, o in enumerate(orgs, 1) if current_str and str(o.organization_number) == current_str),
+        1,
+    )
+    while True:
+        choice = input(f"Choose organization [{default_idx}]: ").strip()
+        if not choice:
+            choice = str(default_idx)
+        if choice.isdigit() and 1 <= int(choice) <= len(orgs):
+            return str(orgs[int(choice) - 1].organization_number)
+        print(f"  Enter a number between 1 and {len(orgs)}", file=sys.stderr)
 
 
 def main() -> None:
     """Interactively store issue-cert defaults in the config file."""
     try:
-        parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-        parser.add_argument('--profile', metavar='NAME', default=None,
-                            help='Profile section to edit (default: the [defaults] section)')
-        parser.add_argument('--sandbox', action='store_true', default=False,
-                            help='Edit the sandbox profile (shortcut for --profile sandbox)')
+        parser = argparse.ArgumentParser(
+            description=__doc__,
+            formatter_class=argparse.RawDescriptionHelpFormatter,
+        )
+        add_connection_args(parser)
         args = parser.parse_args()
-        if args.sandbox and args.profile is None:
-            args.profile = "sandbox"
+        apply_sandbox(args)
 
         path = config_path()
         section_label = f"[profiles.{args.profile}]" if args.profile else "[defaults]"
@@ -161,6 +241,19 @@ def main() -> None:
         print("The domain and SANs are always read from the CSR and are not stored here.")
         print("Press Enter to keep a shown value, or enter '-' to clear it.")
         print()
+
+        # Offer keyring setup first — credentials are needed for the org picker.
+        _maybe_setup_keyring(args)
+
+        # Try to build a session for API-assisted lookups (org picker).
+        # prompt=False means we fall back silently rather than blocking.
+        sess = None
+        orgs: list[Organization] = []
+        try:
+            sess = build_session(args, prompt=False)
+            orgs = sess.accounts.list_organizations()
+        except (CredentialsNotFoundError, CertiNextAPIError, Exception):
+            pass
 
         try:
             doc = load_config(path)
@@ -202,6 +295,17 @@ def main() -> None:
             label = f"{base_label} {tag}"
             if note:
                 label += f" — {note}"
+
+            # For org_id on OV/EV orders, use the API picker when available.
+            if key == "org_id" and is_ov_ev and orgs:
+                print(f"{label}:")
+                chosen = _pick_org(orgs, cert_type, current.get("org_id"), sandbox=args.sandbox)
+                if chosen is not None:
+                    if chosen != str(current.get("org_id", "")):
+                        values["org_id"] = chosen
+                    continue
+                # Fall through to free-text if picker returned nothing.
+
             while True:
                 entered = _prompt(label, current.get(key))
                 if entered is None:
@@ -231,7 +335,6 @@ def main() -> None:
             print(f"\nConfig file: {path}")
             print("Precedence: CLI argument > environment variable > profile section > [defaults].")
 
-        _maybe_setup_keyring(args)
     except KeyboardInterrupt:
         print("\nAborted.", file=sys.stderr)
         raise SystemExit(130)
