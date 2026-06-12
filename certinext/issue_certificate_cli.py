@@ -56,6 +56,7 @@ Usage::
 """
 
 import argparse
+import os
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -73,6 +74,7 @@ from certinext._cli import (
     prompt_stderr,
 )
 from certinext._config import ConfigError, config_defaults, profile_from_argv, save_defaults
+from certinext._keyring import keyring_get, keyring_service
 from certinext.csr import CsrInfo
 from certinext.exceptions import CertiNextAPIError, CertiNextTimeoutError
 from certinext.session import CertiNextSession
@@ -393,6 +395,13 @@ def _create_order(sess: CertiNextSession, args: argparse.Namespace, csr: str = "
     signer_place: str = args.signer_place or ""
     auto_secure_www: bool = bool(args.auto_secure_www)
     prevetting_token: str | None = getattr(args, "prevetting_token", None)
+    if not prevetting_token:
+        svc = keyring_service("certinext", getattr(args, "profile", None))
+        prevetting_token = (
+            keyring_get(svc, "CERTINEXT_PREVETTING_TOKEN")
+            or os.environ.get("CERTINEXT_PREVETTING_TOKEN")
+            or None
+        )
 
     try:
         if cert_type == "dv":
