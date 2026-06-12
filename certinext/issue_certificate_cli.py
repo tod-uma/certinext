@@ -215,6 +215,11 @@ def build_parser(config: dict[str, Any] | None = None) -> argparse.ArgumentParse
 def _read_csr(path: str | None) -> str:
     """Read a PEM-encoded CSR from a file path or stdin.
 
+    When reading from an interactive TTY, reads line by line and stops
+    automatically after ``-----END CERTIFICATE REQUEST-----`` so the user
+    does not need to press Ctrl-D.  When stdin is a pipe the full stream is
+    read until EOF as before.
+
     Args:
         path: File path to read, or None to read from stdin.
 
@@ -227,7 +232,17 @@ def _read_csr(path: str | None) -> str:
     try:
         if path is None:
             if sys.stdin.isatty():
-                print("Reading CSR from stdin (paste PEM, then Ctrl-D):", file=sys.stderr)
+                print(
+                    "Paste the PEM-encoded CSR below "
+                    "(input stops automatically after '-----END CERTIFICATE REQUEST-----'):",
+                    file=sys.stderr,
+                )
+                lines: list[str] = []
+                for line in sys.stdin:
+                    lines.append(line)
+                    if line.rstrip() == "-----END CERTIFICATE REQUEST-----":
+                        break
+                return "".join(lines)
             return sys.stdin.read()
         with open(path) as f:
             return f.read()
