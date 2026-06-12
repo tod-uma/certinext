@@ -160,6 +160,7 @@ def _pick_org(
     orgs: list[Organization],
     cert_type: str,
     current_org_id: Any,
+    sandbox: bool = False,
 ) -> str | None:
     """Present a numbered organization menu and return the chosen org number.
 
@@ -171,6 +172,7 @@ def _pick_org(
         orgs: Organizations returned by the accounts API.
         cert_type: ``"dv"``, ``"ov"``, or ``"ev"``.
         current_org_id: Currently configured org_id value, or None.
+        sandbox: If ``True``, the portal hint links to the sandbox site.
 
     Returns:
         The chosen organization number as a string, or None if the list is
@@ -200,8 +202,9 @@ def _pick_org(
         print(f"  Auto-selected: {org.organization_name} ({_org_detail(org)})")
         return str(org.organization_number)
 
+    portal = "sandbox-us.certinext.io" if sandbox else "us.certinext.io"
+    print(f"Available organizations (the default is marked with a 'D' badge at {portal}):")
     current_str = str(current_org_id) if current_org_id not in (None, "") else None
-    print("Available organizations:")
     for i, org in enumerate(orgs, 1):
         marker = " [current]" if current_str and str(org.organization_number) == current_str else ""
         print(f"  {i}. {org.organization_name} ({_org_detail(org)}){marker}")
@@ -296,7 +299,7 @@ def main() -> None:
             # For org_id on OV/EV orders, use the API picker when available.
             if key == "org_id" and is_ov_ev and orgs:
                 print(f"{label}:")
-                chosen = _pick_org(orgs, cert_type, current.get("org_id"))
+                chosen = _pick_org(orgs, cert_type, current.get("org_id"), sandbox=args.sandbox)
                 if chosen is not None:
                     if chosen != str(current.get("org_id", "")):
                         values["org_id"] = chosen
