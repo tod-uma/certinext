@@ -25,7 +25,19 @@ Cut a release for certinext. The tag message is the source of truth — GitLab C
 
    **Never jump directly from one stable to the next.** Always go through at least one `rcN` first. The only exception is a trivially safe emergency hotfix already proven in production.
 
-3. **Draft the release notes.** Write a concise Markdown changelog:
+3. **Verify documentation is up to date.**
+   Review `README.md` against the commits since the previous tag:
+   ```bash
+   git log <prev-tag>..HEAD --oneline
+   ```
+   For every user-visible change (new CLI flag, changed behaviour, new feature, changed default), check that the README reflects it. Pay particular attention to:
+   - CLI tool sections (new arguments, changed prompts, new workflows)
+   - Credential resolution order
+   - Python library sections (new properties, new methods, changed return types)
+
+   If the README is missing any changes, **stop**. Create a `docs/` branch, update the README, bump to the next rc, merge it, and tag that version instead. Do not skip this check or defer it to a follow-up PR — the release is the public record.
+
+4. **Draft the release notes.** Write a concise Markdown changelog:
    - Lead with a `## Highlights` section (2–4 sentences of prose on the most important user-facing changes).
    - Follow with grouped detail lists (`## Features`, `## Fixes`, etc.); merge closely related entries and drop noise.
    - Preserve bare commit SHAs in parentheses — GitLab auto-links them.
@@ -34,9 +46,9 @@ Cut a release for certinext. The tag message is the source of truth — GitLab C
 
    **Output the full message as plain text in the response before any tool call.**
 
-4. **Get approval.** Use `AskUserQuestion` with Yes/No.
+5. **Get approval.** Use `AskUserQuestion` with Yes/No.
 
-5. **Create the annotated tag.**
+6. **Create the annotated tag.**
    Write the approved notes to a temp file, then:
    ```bash
    git tag -a vX.Y.Z --cleanup=verbatim -F <notes-file>
@@ -45,12 +57,12 @@ Cut a release for certinext. The tag message is the source of truth — GitLab C
    - `--cleanup=verbatim` is required: git's default strips lines starting with `#`, silently deleting every Markdown heading.
    - To re-cut a tag (e.g. after fixing the notes), add `-f`: `git tag -a vX.Y.Z --cleanup=verbatim -F <notes-file> -f`
 
-6. **Push the tag.** Use `AskUserQuestion` to confirm before pushing.
+7. **Push the tag.** Use `AskUserQuestion` to confirm before pushing.
    ```bash
    git push origin vX.Y.Z
    ```
 
-7. **Verify all three destinations:**
+8. **Verify all three destinations:**
    - **GitLab** — `release_job` passes; release at `sysadmin/python-libs/certinext/-/releases` has the correct description.
    - **GitHub Actions** — `publish-pypi` job passes; GitHub release appears with the same description.
    - **PyPI** — stable versions are visible without `--pre`; pre-releases require `pip install --pre certinext` to see.

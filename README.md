@@ -283,16 +283,26 @@ the order — useful when you want `certinext-issue-cert` to run end-to-end
 without a human approving each order.
 
 Find it in the CertiNext portal under **Organization Management →
-Organization Consent / Consent Tokens** for the target organization, and
-pass it per run:
+Organization Consent / Consent Tokens** for the target organization.
+
+**Recommended: store in the keyring once** (prompted by `certinext-setup-keyring`):
+
+```bash
+certinext-setup-keyring   # prompts for client ID, secret, and prevetting token
+```
+
+`certinext-issue-cert` then resolves the token automatically from the keyring
+(or the `CERTINEXT_PREVETTING_TOKEN` environment variable) — no flag needed per run.
+
+To pass it explicitly for a single run:
 
 ```bash
 certinext-issue-cert example.com.csr --type ov --org-id 8921215 \
   --prevetting-token TOKEN
 ```
 
-The token is a secret — it is never written to the config file by
-`--save-defaults` or `certinext-setup-defaults`.
+The token is never written to the config file by `--save-defaults` or
+`certinext-setup-defaults` — use the keyring or env var for persistent storage.
 
 ### Storing issue-cert defaults (optional)
 
@@ -423,15 +433,20 @@ certinext-setup-keyring --profile prod
 certinext-setup-keyring --sandbox
 ```
 
-The script prompts for your account number and client secret, shows any
-currently stored value as a default so you can keep it by pressing Enter, and
-masks the secret with asterisks on confirmation.
+The script prompts for your account number, client secret, and (optionally)
+your Organization Consent Token (prevetting token for OV/EV orders). It shows
+any currently stored value as a default so you can keep it by pressing Enter,
+and masks secrets with asterisks on confirmation.
 
 ### certinext-setup-defaults
 
 `certinext-setup-defaults` interactively stores defaults for
 `certinext-issue-cert` in the config file, so future issuance runs only need
 the CSR.
+
+If API credentials are not yet stored, the script offers to run
+`certinext-setup-keyring` first — credentials are needed for the org picker
+described below.
 
 The script asks for certificate type first (DV / OV / EV), then prompts for
 each field and labels it **[required]** or **[optional]** based on the type you
@@ -440,6 +455,14 @@ chose. Fields the tool can already read from a CSR (`requestor_email`,
 here if your CSRs don't include the corresponding subject fields
 (`emailAddress`, `L`, `ST`). The domain and SANs are never prompted — they
 always come from the CSR.
+
+For OV and EV orders, if API credentials are available the script fetches your
+organizations and presents them as a numbered menu filtered to pre-vetted orgs,
+showing validation scope and status for each (e.g.
+`#2517111, Orono, ME, OV, Validated`). A hint links to the portal
+(us.certinext.io or sandbox-us.certinext.io) where the default org is marked
+with a **D** badge. Falls back to free-text entry when credentials are
+unavailable.
 
 See [Storing issue-cert defaults](#storing-issue-cert-defaults-optional) for
 the file format and resolution order.
