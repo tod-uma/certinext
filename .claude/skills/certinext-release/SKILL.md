@@ -15,6 +15,11 @@ Cut a release for certinext. The tag message is the source of truth — GitLab C
      ```bash
      git checkout main && git pull
      ```
+   - **Confirm `main`'s CI is green before tagging.** The tag points at `HEAD` on `main` (usually a just-merged commit), and certinext's tag pipeline runs *different* jobs than the merge pipeline — the merge runs `integration-test`, while a tag runs `integration-cert-issuance` plus `release_build`/`release_job` — so a red `main` can stay hidden until after you tag. Check the latest `main` pipeline:
+     ```bash
+     glab ci list   # latest pipeline for `main` should be `success`
+     ```
+     If it is not `success`, inspect the failing jobs (`glab ci get -p <pipeline-id>`), **list each failing job and why**, then use `AskUserQuestion` to decide whether to tag anyway or stop. A red `main` does not always block a tag — e.g. a known vendor outage breaking the `/domains` integration tests does not affect the cert-issuance tag pipeline — but make proceeding a deliberate call.
 
 2. **Find the previous tag and determine the new version.**
    ```bash
