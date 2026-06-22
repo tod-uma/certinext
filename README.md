@@ -20,6 +20,7 @@ Python library and CLI scripts for managing your [CertiNext](https://us.certinex
   - [certinext-domain-cert-count](#certinext-domain-cert-count)
   - [certinext-issue-cert](#certinext-issue-cert)
   - [certinext-parent-dcv-status](#certinext-parent-dcv-status)
+  - [certinext-healthcheck](#certinext-healthcheck)
 - [Log output](#log-output)
 - [Python library](#python-library)
 - [Examples](#examples)
@@ -890,6 +891,90 @@ certinext-parent-dcv-status --no-ns-check
 
 # Raw JSON for scripting
 certinext-parent-dcv-status --json | jq '.[] | select(.dcv_status != "VERIFIED")'
+```
+
+---
+
+### certinext-healthcheck
+
+`certinext-healthcheck` probes (nearly) every read-only CertiNext endpoint the
+library exposes, classifies each result, and prints a scannable report of what
+works for the credentials it was given. It is **read-only and safe to run
+against production** — it only ever issues GETs and never mutates anything.
+
+Use it to answer two questions the CertiNext API makes surprisingly hard:
+
+- *"What should work with our library right now, against this account?"* — the
+  vendor changes behaviour that affects some orgs and environments but not
+  others, and drifts over time.
+- *(future, with fine-grained API keys)* *"Does this key have exactly the
+  access it should?"* — a `DENIED` outcome is the permission-denied signal.
+
+Probes run in two tiers. **Tier 1** needs no input and always runs. **Tier 2**
+needs an ID derived from a Tier-1 result (a specific organization, product,
+domain, or order); when that input is unavailable the probe is reported
+`SKIPPED`, never as a failure. Use `--quick` to run Tier 1 only.
+
+#### Outcomes
+
+| Outcome | Meaning | Fails the run? |
+|---|---|---|
+| `PASS` | 2xx with data (or a legitimately empty result) | no |
+| `EMPTY` | 2xx but unexpectedly empty where a baseline says it shouldn't be | only with `--strict` |
+| `DENIED` | 401/403, or a token error naming `invalid_client` | yes |
+| `NOT_FOUND` | 404 | yes |
+| `SERVER_BUG` | 422 or 5xx — the raw RFC 7807 body is captured verbatim | yes |
+| `RATE_LIMITED` | 429 | no |
+| `NETWORK` | connection/timeout error with no HTTP response | yes |
+| `SKIPPED` | a Tier-2 probe whose derived input was unavailable | no |
+
+The process exits non-zero when any probe is `DENIED`, `NOT_FOUND`,
+`SERVER_BUG`, or `NETWORK`. Add `--strict` to also fail on `EMPTY`.
+
+#### Current known issue: `/domains` returns 422 (production *and* sandbox)
+
+Since mid-June 2026 the CertiNext `/domains` list endpoint has returned a
+generic HTTP 422 for every request, in **both production and sandbox** — a
+vendor-side regression that appeared with their DCV-inheritance GA rollout
+(CertiNext ticket #131869). It is **not** a fault in this library or in
+`certinext-healthcheck`.
+
+While that outage persists, a run reports the domain-list probe as
+`SERVER_BUG` (with the raw RFC 7807 body captured verbatim) and the per-domain
+Tier-2 probes that depend on a domain from that list as `SKIPPED`, so the run
+exits non-zero. **We therefore cannot currently demonstrate a fully-green run
+in either environment** — which is exactly the condition `certinext-healthcheck`
+was built to surface: it pinpoints the broken endpoint and preserves the
+server's own error body, instead of letting the failure show up as a confusing
+crash somewhere downstream. Every probe that does not touch `/domains` is
+unaffected.
+
+#### Arguments
+
+```
+--quick                 Run Tier-1 probes only (skip derived-input Tier-2 probes)
+--strict                Also exit non-zero on an unexpectedly empty baseline list (EMPTY)
+--json                  Write the full results (with raw error bodies) as JSON
+-v, --verbose           Increase verbosity (-v progress, -vvv per-probe debug)
+```
+
+#### Examples
+
+```bash
+# Probe the sandbox and show progress
+certinext-healthcheck --sandbox -v
+
+# Probe production (read-only) — surfaces any endpoint that is down for this account
+certinext-healthcheck
+
+# Tier-1 only, for a fast auth/connectivity canary
+certinext-healthcheck --quick
+
+# Machine-readable output, with the raw RFC 7807 body for any 422
+certinext-healthcheck --json | python -m json.tool
+
+# Nightly cron that alerts on regressions via the exit code
+certinext-healthcheck 2>> /var/log/certinext-health.log || mail -s "CertiNext health" ops@example.edu
 ```
 
 ---
