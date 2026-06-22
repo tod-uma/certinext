@@ -931,6 +931,24 @@ domain, or order); when that input is unavailable the probe is reported
 The process exits non-zero when any probe is `DENIED`, `NOT_FOUND`,
 `SERVER_BUG`, or `NETWORK`. Add `--strict` to also fail on `EMPTY`.
 
+#### Current known issue: `/domains` returns 422 (production *and* sandbox)
+
+Since mid-June 2026 the CertiNext `/domains` list endpoint has returned a
+generic HTTP 422 for every request, in **both production and sandbox** — a
+vendor-side regression that appeared with their DCV-inheritance GA rollout
+(CertiNext ticket #131869). It is **not** a fault in this library or in
+`certinext-healthcheck`.
+
+While that outage persists, a run reports the domain-list probe as
+`SERVER_BUG` (with the raw RFC 7807 body captured verbatim) and the per-domain
+Tier-2 probes that depend on a domain from that list as `SKIPPED`, so the run
+exits non-zero. **We therefore cannot currently demonstrate a fully-green run
+in either environment** — which is exactly the condition `certinext-healthcheck`
+was built to surface: it pinpoints the broken endpoint and preserves the
+server's own error body, instead of letting the failure show up as a confusing
+crash somewhere downstream. Every probe that does not touch `/domains` is
+unaffected.
+
 #### Arguments
 
 ```
