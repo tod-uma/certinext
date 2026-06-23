@@ -337,6 +337,7 @@ signer_place    = "Orono, ME"      # optional if your CSR includes L and/or ST f
 type            = "ov"             # required (dv / ov / ev)
 org_id          = "12345"         # required for OV and EV; omit for DV
 validity        = 1                # optional; defaults to 1 year
+# product       = "974"            # optional product code; omit to let the API pick
 
 [profiles.sandbox]
 # overrides applied when --sandbox / --profile sandbox is active
@@ -526,6 +527,12 @@ on the type you chose. Fields the tool can already read from a CSR
 need to set them here if your CSRs don't include the corresponding subject
 fields (`emailAddress`, `L`, `ST`). The domain and SANs are never prompted —
 they always come from the CSR.
+
+If credentials are available, it then offers a **product** menu fetched from the
+Catalog API, filtered to the type you chose and sorted with wildcard products
+last. Pick one to store as the profile's default product code (sent as
+`X-Product-Code` at issue time), or choose *API default* to let the server pick.
+`certinext-issue-cert --product CODE` overrides the stored default per run.
 
 For OV and EV orders, if API credentials are available the script fetches your
 organizations and presents them as a numbered menu filtered to pre-vetted orgs,
@@ -840,6 +847,9 @@ csr_file                    PEM-encoded CSR file (positional; omit to read from 
 --type dv|ov|ev             Validation type (default: dv)
 --validity YEARS            Validity in years: 1, 2, or 3 (default: 1)
 --org-id ID                 Organization ID — required for OV and EV certificates
+--product CODE              Product code (X-Product-Code) selecting a specific
+                            catalog product; default: API default for the type.
+                            List codes with certinext-setup-defaults.
 --domain FQDN               Override the primary domain (default: extracted from CSR CN)
 --san FQDN                  Override SANs (default: extracted from CSR; repeatable)
 --auto-secure-www           Request automatic www-redirect coverage (API default: true)

@@ -70,6 +70,7 @@ CONFIG_KEYS: dict[str, str] = {
     "type": "cert_type",
     "org_id": "org_id",
     "validity": "validity",
+    "product": "product",
 }
 
 #: Reverse map: argparse dest -> TOML key (for saving).

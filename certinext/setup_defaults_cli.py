@@ -43,6 +43,7 @@ from certinext._cli import (
 from certinext._config import ConfigError, config_path, load_config, save_defaults
 from certinext._keyring import keyring_available, keyring_get, keyring_service
 from certinext.accounts import Organization
+from certinext.catalog import Product, ProductCategory
 from certinext.exceptions import CertiNextAPIError
 
 # Post-type fields in display order:
@@ -349,6 +350,82 @@ def _maybe_setup_keyring(args: argparse.Namespace) -> None:
     print()
 
 
+def _filter_products(categories: list[ProductCategory], cert_type: str) -> list[Product]:
+    """Flatten catalog categories to the products matching a validation level.
+
+    CERTInext groups all SSL products in one category, so the validation level
+    is matched against the product name (e.g. ``"OV"`` in ``"InCommon OV SSL
+    Certificate"``). Falls back to every product when nothing matches, so a
+    naming scheme this heuristic doesn't recognise never hides the list.
+
+    The result is sorted with wildcard products last and alphabetical within
+    each group, so the long, similar names are easier to scan in the menu.
+
+    Args:
+        categories: Product categories from :meth:`CatalogAccessor.list_products`.
+        cert_type: ``"dv"``, ``"ov"``, or ``"ev"``.
+
+    Returns:
+        The matching :class:`~certinext.catalog.Product` objects (wildcards
+        last), or all of them when the filter matches none.
+    """
+    level = cert_type.upper()
+    everything = [p for cat in categories for p in cat.products]
+    matched = [
+        p for p in everything
+        if p.product_name and level in p.product_name.upper().replace("-", " ").split()
+    ]
+
+    def _sort_key(p: Product) -> tuple[bool, str]:
+        """Sort non-wildcard products first, then alphabetically by name."""
+        name = (p.product_name or "").lower()
+        return ("wildcard" in name, name)
+
+    return sorted(matched or everything, key=_sort_key)
+
+
+def _prompt_product(products: list[Product], current_product: Any) -> tuple[dict[str, Any], list[str]]:
+    """Present a numbered menu of products and return ``(values, cleared)``.
+
+    Each option shows the product name and code; an extra option clears any
+    stored product so the API picks its default. The stored product (if still
+    in the list) is marked and used as the default choice.
+
+    Args:
+        products: Products to offer (already filtered to the chosen type).
+        current_product: Currently stored product code, or None.
+
+    Returns:
+        A ``(values, cleared)`` tuple to fold into the caller's
+        :func:`save_defaults` call; both empty when the selection is unchanged.
+    """
+    current = str(current_product) if current_product not in (None, "") else None
+    # Option 0 is always "API default" (no specific product).
+    print("Which product should this profile default to?")
+    print(f"  0. API default (no specific product){'  [current]' if not current else ''}")
+    default_idx = 0
+    for i, prod in enumerate(products, 1):
+        marker = "  [current]" if current and str(prod.product_code) == current else ""
+        if marker:
+            default_idx = i
+        price = f", {prod.price}" if prod.price else ""
+        print(f"  {i}. {prod.product_name} (code {prod.product_code}{price}){marker}")
+
+    while True:
+        choice = input(f"Product [{default_idx}]: ").strip() or str(default_idx)
+        if choice.isdigit() and 0 <= int(choice) <= len(products):
+            idx = int(choice)
+            break
+        print(f"  Enter a number between 0 and {len(products)}", file=sys.stderr)
+
+    if idx == 0:
+        return {}, (["product"] if current else [])
+    code = str(products[idx - 1].product_code)
+    if code == current:
+        return {}, []
+    return {"product": code}, []
+
+
 def _org_location(org: Organization) -> str:
     """Return a chosen org's location as a ``"City, ST"`` string (or ``""``).
 
@@ -492,16 +569,27 @@ def main() -> None:
         # Offer keyring setup next — credentials are needed for the org picker.
         _maybe_setup_keyring(args)
 
-        # Try to build a session for API-assisted lookups (org picker), now that
-        # the endpoint is settled. prompt=False means we fall back silently
-        # rather than blocking when credentials are absent.
+        # Try to build a session for API-assisted lookups (org and product
+        # pickers), now that the endpoint is settled. prompt=False means we fall
+        # back silently rather than blocking when credentials are absent.
         sess = None
         orgs: list[Organization] = []
+        product_categories: list[ProductCategory] = []
         try:
             sess = build_session(args, prompt=False)
-            orgs = sess.accounts.list_organizations()
         except (CredentialsNotFoundError, CertiNextAPIError, Exception):
-            pass
+            sess = None
+        if sess is not None:
+            # Fetch each list independently so one failing endpoint doesn't
+            # suppress the other picker.
+            try:
+                orgs = sess.accounts.list_organizations()
+            except (CertiNextAPIError, Exception):
+                pass
+            try:
+                product_categories = sess.catalog.list_products()
+            except (CertiNextAPIError, Exception):
+                pass
 
         # Ask certificate type first — determines which remaining fields are required.
         while True:
@@ -520,6 +608,16 @@ def main() -> None:
             except ValueError as exc:
                 print(f"  {exc}", file=sys.stderr)
         print()
+
+        # Product selection, filtered to the chosen type. Skipped silently when
+        # the catalog couldn't be fetched (no credentials / API error).
+        if product_categories:
+            products = _filter_products(product_categories, cert_type)
+            if products:
+                prod_values, prod_cleared = _prompt_product(products, current.get("product"))
+                values.update(prod_values)
+                cleared.extend(prod_cleared)
+                print()
 
         is_ov_ev = cert_type in ("ov", "ev")
         chosen_org: Organization | None = None

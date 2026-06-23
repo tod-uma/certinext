@@ -605,6 +605,30 @@ class TestSslAccessorCreateMethods:
         assert kwargs["json"]["certificate"]["domain"] == "example.com"
         assert kwargs["json"]["subscription"]["validityYears"] == 2
 
+    def test_create_dv_sends_product_code_header(self):
+        """create_dv(product_code=...) sends the X-Product-Code header."""
+        accessor, mock_session = self._make_accessor()
+        mock_session.post.return_value = _ok_response(_ORDER_DATA)
+        accessor.create_dv("example.com", product_code="842")
+        _, kwargs = mock_session.post.call_args
+        assert kwargs["headers"]["X-Product-Code"] == "842"
+
+    def test_create_dv_omits_product_code_header_by_default(self):
+        """create_dv() without a product code sends no X-Product-Code header."""
+        accessor, mock_session = self._make_accessor()
+        mock_session.post.return_value = _ok_response(_ORDER_DATA)
+        accessor.create_dv("example.com")
+        _, kwargs = mock_session.post.call_args
+        assert "X-Product-Code" not in kwargs["headers"]
+
+    def test_create_ov_sends_product_code_header(self):
+        """create_ov(product_code=...) sends the X-Product-Code header."""
+        accessor, mock_session = self._make_accessor()
+        mock_session.post.return_value = _ok_response(_ORDER_DATA)
+        accessor.create_ov("example.com", "12345", product_code="1057")
+        _, kwargs = mock_session.post.call_args
+        assert kwargs["headers"]["X-Product-Code"] == "1057"
+
     def test_create_dv_wildcard_uses_dv_wildcard_variant(self):
         """create_dv_wildcard() uses productVariant='dv-wildcard'."""
         accessor, mock_session = self._make_accessor()

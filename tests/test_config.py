@@ -228,6 +228,21 @@ def test_parser_still_requires_missing_values(capsys: pytest.CaptureFixture[str]
     assert "--requestor-name" in capsys.readouterr().err
 
 
+def test_config_defaults_includes_product(cfg_file: Path) -> None:
+    """A stored product code is returned under the 'product' dest."""
+    cfg_file.write_text('[defaults]\nproduct = "842"\n', encoding="utf-8")
+    merged, warnings = config_defaults(None)
+    assert merged == {"product": "842"}
+    assert warnings == []
+
+
+def test_save_defaults_product_roundtrip(cfg_file: Path) -> None:
+    """A product code saves and loads back under a profile."""
+    save_defaults({"product": "1057"}, "prod")
+    merged, _ = config_defaults("prod")
+    assert merged["product"] == "1057"
+
+
 # --- connection settings (sandbox / base_url / token_url) -------------------
 
 

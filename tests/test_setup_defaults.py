@@ -14,19 +14,23 @@
 
 """Tests for certinext-setup-defaults endpoint selection (flags and menu)."""
 
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
 
 import certinext
 from certinext.accounts import Organization
+from certinext.catalog import ProductCategory
 from certinext.setup_defaults_cli import (
     _endpoint_default,
     _endpoint_from_flags,
     _endpoint_sandbox,
     _endpoint_url,
+    _filter_products,
     _org_location,
     _prompt_endpoint,
+    _prompt_product,
 )
 
 INDIA = "https://api.certinext.io"
@@ -192,3 +196,82 @@ def test_org_location_city_only() -> None:
 def test_org_location_empty() -> None:
     """No locality yields an empty string (no default offered)."""
     assert _org_location(_org("", "ME")) == ""
+
+
+# --- product filtering and menu ----------------------------------------------
+
+
+def _cat(*product_dicts: dict[str, Any]) -> ProductCategory:
+    """Build a ProductCategory holding the given raw product dicts."""
+    return ProductCategory({"categoryName": "SSL/TLS Certificates", "products": list(product_dicts)})
+
+
+def _pd(name: str, code: str) -> dict[str, Any]:
+    """Build a raw product dict with a name and code."""
+    return {"productName": name, "productCode": code}
+
+
+def test_filter_products_matches_level() -> None:
+    """Filtering to OV keeps only OV-named products."""
+    cats = [
+        _cat(
+            _pd("InCommon OV SSL Certificate", "1001"),
+            _pd("InCommon DV SSL Certificate", "2001"),
+            _pd("InCommon OV SSL Certificate UCC", "1002"),
+        )
+    ]
+    matched = _filter_products(cats, "ov")
+    assert {p.product_code for p in matched} == {"1001", "1002"}
+
+
+def test_filter_products_falls_back_to_all_when_no_match() -> None:
+    """An unrecognised naming scheme returns every product rather than hiding them."""
+    cats = [_cat(_pd("Mystery Product", "9001"))]
+    matched = _filter_products(cats, "ev")
+    assert [p.product_code for p in matched] == ["9001"]
+
+
+def test_filter_products_sorts_wildcards_last() -> None:
+    """Wildcard products sink below non-wildcards; each group is alphabetical."""
+    cats = [
+        _cat(
+            _pd("InCommon OV SSL Certificate Wildcard", "975"),
+            _pd("InCommon OV SSL 90 Days", "967"),
+            _pd("InCommon OV SSL Certificate UCC", "976"),
+            _pd("InCommon OV SSL Certificate Wildcard UCC", "977"),
+            _pd("InCommon OV SSL", "974"),
+        )
+    ]
+    ordered = [p.product_code for p in _filter_products(cats, "ov")]
+    # Non-wildcards (alphabetical) first, then wildcards (alphabetical).
+    assert ordered == ["974", "967", "976", "975", "977"]
+
+
+def test_prompt_product_select(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Choosing a product stores its code."""
+    products = _filter_products(
+        [_cat(_pd("InCommon OV SSL Certificate", "1001"), _pd("InCommon OV SSL Certificate UCC", "1002"))],
+        "ov",
+    )
+    _mock_input(monkeypatch, "2")  # 0=API default, 1=first, 2=second
+    values, cleared = _prompt_product(products, None)
+    assert values == {"product": "1002"}
+    assert cleared == []
+
+
+def test_prompt_product_api_default_clears(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Choosing 'API default' clears a stored product."""
+    products = _filter_products([_cat(_pd("InCommon OV SSL Certificate", "1001"))], "ov")
+    _mock_input(monkeypatch, "0")
+    values, cleared = _prompt_product(products, "1001")
+    assert values == {}
+    assert cleared == ["product"]
+
+
+def test_prompt_product_keep_current(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pressing Enter keeps the current product (no change)."""
+    products = _filter_products([_cat(_pd("InCommon OV SSL Certificate", "1001"))], "ov")
+    _mock_input(monkeypatch, "")  # default index points at the current product
+    values, cleared = _prompt_product(products, "1001")
+    assert values == {}
+    assert cleared == []
