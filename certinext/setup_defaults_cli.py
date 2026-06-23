@@ -19,10 +19,15 @@ numbered menu rather than requiring the user to look them up manually.
 Secrets (client secret, prevetting token) are NOT stored here — use
 ``certinext-setup-keyring`` for credentials.
 
+The profile's API endpoint is stored too: ``--sandbox`` records
+``sandbox = true``, ``--base-url`` (with optional ``--token-url``) records a
+custom endpoint for non-US regions, and with no flag the tool prompts for it.
+
 Usage:
     certinext-setup-defaults                  # default profile
     certinext-setup-defaults --profile prod   # named profile
-    certinext-setup-defaults --sandbox        # sandbox profile shortcut
+    certinext-setup-defaults --sandbox        # store sandbox = true on the profile
+    certinext-setup-defaults --profile eu --base-url https://eu-api.certinext.io
 """
 import argparse
 import sys
@@ -55,12 +60,14 @@ _POST_TYPE_FIELDS: list[tuple[str, str, bool, bool, str]] = [
     ("requestor_designation",
      "Requestor job title/designation",
      False, False, ""),
-    ("signer_place",
-     "Signer place (city/location, e.g. 'Orono, ME')",
-     False, False, "read from CSR L and ST fields when present"),
+    # org_id comes before signer_place so the chosen org's location can be
+    # offered as the signer_place default (see main()).
     ("org_id",
      "Organization ID (from certinext-accounts)",
      False, True, "not needed for DV"),
+    ("signer_place",
+     "Signer place (city/location, e.g. 'Orono, ME')",
+     False, False, "read from CSR L and ST fields when present"),
     ("validity",
      "Validity in years (1/2/3)",
      False, False, "defaults to 1 year"),
@@ -90,51 +97,186 @@ def _prompt(label: str, current: Any) -> Any | None:
     return value
 
 
-def _prompt_endpoint(current: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
-    """Prompt for the profile's API endpoint and return ``(values, cleared)``.
+def _present(current: dict[str, Any], *keys: str) -> list[str]:
+    """Return the subset of keys actually stored in the current section.
 
-    Accepts ``production`` (the built-in default), ``sandbox`` (the boolean
-    shorthand), or an explicit ``http(s)`` base URL. A custom base URL derives
-    its token URL as ``<base_url>/oauth/token``. The returned tuple is meant to
-    be folded into the caller's single :func:`save_defaults` call; ``cleared``
-    only ever names keys actually present in ``current`` so an unchanged
-    endpoint never looks like an edit.
+    Used so a re-selected, unchanged endpoint never looks like an edit (we only
+    ever clear keys that are really there).
+
+    Args:
+        current: The currently stored section dict for this profile.
+        keys: Candidate keys to clear.
+
+    Returns:
+        The keys from ``keys`` that are present in ``current``.
+    """
+    return [k for k in keys if k in current]
+
+
+def _endpoint_default(current: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+    """Return (values, cleared) for the production-US default (clear all endpoint keys)."""
+    return {}, _present(current, "sandbox", "base_url", "token_url")
+
+
+def _endpoint_sandbox(current: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+    """Return (values, cleared) for the US sandbox (the ``sandbox = true`` shorthand)."""
+    values: dict[str, Any] = {} if current.get("sandbox") else {"sandbox": True}
+    return values, _present(current, "base_url", "token_url")
+
+
+def _endpoint_url(
+    base: str, token: str | None, current: dict[str, Any]
+) -> tuple[dict[str, Any], list[str]]:
+    """Return (values, cleared) for an explicit endpoint URL.
+
+    Args:
+        base: Base URL (a trailing slash is stripped).
+        token: Token URL, or None to derive ``<base>/oauth/token``.
+        current: The currently stored section dict for this profile.
+
+    Returns:
+        A ``(values, cleared)`` tuple; only changed keys appear in ``values``,
+        and a stored ``sandbox`` flag is cleared (an explicit URL supersedes it).
+    """
+    base = base.rstrip("/")
+    token = token or f"{base}/oauth/token"
+    values: dict[str, Any] = {}
+    for key, val in (("base_url", base), ("token_url", token)):
+        if val != current.get(key):
+            values[key] = val
+    return values, _present(current, "sandbox")
+
+
+def _endpoint_from_flags(
+    cli_sandbox: bool,
+    cli_base_url: str | None,
+    cli_token_url: str | None,
+    current: dict[str, Any],
+) -> tuple[dict[str, Any], list[str], list[str]] | None:
+    """Resolve endpoint persistence from explicit connection flags (no prompts).
+
+    Lets the connection flags on a ``certinext-setup-defaults`` run persist to
+    the profile: ``--sandbox`` stores ``sandbox = true``; ``--base-url`` (with
+    an optional ``--token-url``, otherwise derived as ``<base_url>/oauth/token``)
+    stores a custom endpoint — useful for non-US regions with their own API
+    hosts. The two are mutually exclusive: a custom URL clears any stored
+    ``sandbox`` flag, and ``--sandbox`` clears any stored custom URL.
+
+    Args:
+        cli_sandbox: Whether ``--sandbox`` was given on this run.
+        cli_base_url: Explicit ``--base-url`` value, or None if not given.
+        cli_token_url: Explicit ``--token-url`` value, or None if not given.
+        current: The currently stored section dict for this profile.
+
+    Returns:
+        A ``(values, cleared, messages)`` tuple to fold into the caller's
+        :func:`save_defaults` call, or ``None`` when no connection flag was
+        given (the caller should prompt interactively instead). ``messages``
+        are lines to print for the user.
+    """
+    if cli_sandbox:
+        values, cleared = _endpoint_sandbox(current)
+        messages = (
+            []
+            if current.get("sandbox")
+            else [f"This profile will default to the sandbox endpoint ({certinext.SANDBOX_BASE_URL})."]
+        )
+        return values, cleared, messages
+    if cli_base_url is not None or cli_token_url is not None:
+        if cli_base_url is not None:
+            values, cleared = _endpoint_url(cli_base_url, cli_token_url, current)
+            messages = [f"This profile will default to {cli_base_url.rstrip('/')}."]
+        else:
+            # --token-url alone: store just the token endpoint.
+            values, cleared = {}, _present(current, "sandbox")
+            if cli_token_url != current.get("token_url"):
+                values["token_url"] = cli_token_url
+            messages = []
+        return values, cleared, messages
+    return None
+
+
+def _prompt_endpoint(
+    current: dict[str, Any],
+) -> tuple[dict[str, Any], list[str], tuple[str, str, bool] | None]:
+    """Present a numbered menu of known API endpoints and return the selection.
+
+    Lists the production-US default, the US sandbox, every region in
+    :data:`certinext.KNOWN_API_ENDPOINTS` (India, QA, Demo, ...), and a
+    custom-URL option. The current selection is marked and used as the default
+    choice. A custom base URL derives its token URL as ``<base_url>/oauth/token``.
 
     Args:
         current: The currently stored section dict for this profile.
 
     Returns:
-        A ``(values, cleared)`` tuple; both empty when the user keeps the
-        current endpoint or enters something invalid.
+        A ``(values, cleared, live)`` tuple. ``values``/``cleared`` fold into
+        the caller's :func:`save_defaults` call. ``live`` is the chosen
+        ``(base_url, token_url, sandbox)`` so the caller can point the live
+        session (used for the org picker) at the selected endpoint; it is
+        ``None`` when the selection is unchanged or the custom URL was invalid,
+        meaning the caller should leave the session as-is.
     """
-    def _present(*keys: str) -> list[str]:
-        """Return the subset of keys actually stored in the current section."""
-        return [k for k in keys if k in current]
+    # Build the option list: default + sandbox + known regions + custom. Each
+    # option is (label, base_url_or_None, kind) where kind drives persistence.
+    options: list[tuple[str, str | None, str]] = [
+        ("Production - US (default)", certinext.BASE_URL, "default"),
+        ("Sandbox - US", certinext.SANDBOX_BASE_URL, "sandbox"),
+    ]
+    for region_label, region_url in certinext.KNOWN_API_ENDPOINTS:
+        if region_url == certinext.BASE_URL:
+            continue  # already shown as the default option
+        options.append((region_label, region_url, "url"))
+    options.append(("Custom URL…", None, "custom"))
 
-    if current.get("base_url"):
-        cur = str(current["base_url"])
-    elif current.get("sandbox"):
-        cur = "sandbox"
-    else:
-        cur = "production"
-
-    print("API endpoint for this profile — 'production', 'sandbox', or a base URL.")
-    entered = input(f"Endpoint [{cur}]: ").strip()
-    if not entered:
-        return {}, []
-    low = entered.lower()
-    if low in ("production", "prod"):
-        return {}, _present("sandbox", "base_url", "token_url")
-    if low == "sandbox":
-        return {"sandbox": True}, _present("base_url", "token_url")
-    if not entered.startswith(("http://", "https://")):
-        print(
-            "  Endpoint must be 'production', 'sandbox', or an http(s) URL; keeping current.",
-            file=sys.stderr,
+    # Mark the option matching the current config as the default choice.
+    cur_base = current.get("base_url")
+    if cur_base:
+        default_idx = next(
+            (i for i, (_, u, _) in enumerate(options, 1) if u == cur_base),
+            len(options),  # an unrecognised stored URL maps to "Custom URL…"
         )
-        return {}, []
+    elif current.get("sandbox"):
+        default_idx = 2
+    else:
+        default_idx = 1
+
+    print("Which CERTInext API endpoint should this profile use?")
+    for i, (label, url, _kind) in enumerate(options, 1):
+        suffix = f"  {url}" if url else ""
+        marker = "  [current]" if i == default_idx else ""
+        print(f"  {i}. {label}{suffix}{marker}")
+
+    while True:
+        choice = input(f"Endpoint [{default_idx}]: ").strip() or str(default_idx)
+        if choice.isdigit() and 1 <= int(choice) <= len(options):
+            _label, url, kind = options[int(choice) - 1]
+            break
+        print(f"  Enter a number between 1 and {len(options)}", file=sys.stderr)
+
+    if kind == "default":
+        values, cleared = _endpoint_default(current)
+        return values, cleared, (certinext.BASE_URL, certinext.TOKEN_URL, False)
+    if kind == "sandbox":
+        values, cleared = _endpoint_sandbox(current)
+        return values, cleared, (certinext.SANDBOX_BASE_URL, certinext.SANDBOX_TOKEN_URL, True)
+    if kind == "url":
+        assert url is not None  # non-custom options always carry a URL
+        values, cleared = _endpoint_url(url, None, current)
+        base = url.rstrip("/")
+        return values, cleared, (base, f"{base}/oauth/token", False)
+    # Custom URL: offer the current stored URL (if any) as the default.
+    cur_custom = str(cur_base) if cur_base else ""
+    hint = f" [{cur_custom}]" if cur_custom else ""
+    entered = input(f"Custom base URL{hint}: ").strip() or cur_custom
+    if not entered:
+        return {}, [], None
+    if not entered.startswith(("http://", "https://")):
+        print("  Must be an http(s) URL; keeping current.", file=sys.stderr)
+        return {}, [], None
+    values, cleared = _endpoint_url(entered, None, current)
     base = entered.rstrip("/")
-    return {"base_url": base, "token_url": f"{base}/oauth/token"}, _present("sandbox")
+    return values, cleared, (base, f"{base}/oauth/token", False)
 
 
 def _validated(key: str, value: str) -> Any:
@@ -205,6 +347,23 @@ def _maybe_setup_keyring(args: argparse.Namespace) -> None:
     else:
         print(f"\nWhen you're ready:\n  {cmd_str}")
     print()
+
+
+def _org_location(org: Organization) -> str:
+    """Return a chosen org's location as a ``"City, ST"`` string (or ``""``).
+
+    Used to offer the organization's locality as the default ``signer_place``.
+
+    Args:
+        org: The organization the user selected.
+
+    Returns:
+        ``"City, ST"`` when both are present, ``"City"`` when only the locality
+        is known, or ``""`` when no locality is available.
+    """
+    if not org.locality:
+        return ""
+    return f"{org.locality}, {org.state_code}" if org.state_code else org.locality
 
 
 def _pick_org(
@@ -282,9 +441,12 @@ def main() -> None:
         )
         add_connection_args(parser)
         args = parser.parse_args()
-        # Capture the raw flag before apply_sandbox() folds profile config into
-        # it — only an explicit --sandbox on this run should persist sandbox=true.
+        # Capture the raw connection flags before apply_sandbox() folds profile
+        # config into them — only values explicit on *this* run should persist.
+        # base_url/token_url default to None, so "not None" means user-supplied.
         cli_sandbox = bool(args.sandbox)
+        cli_base_url = args.base_url
+        cli_token_url = args.token_url
         apply_sandbox(args)
 
         path = config_path()
@@ -295,19 +457,6 @@ def main() -> None:
         print("The domain and SANs are always read from the CSR and are not stored here.")
         print("Press Enter to keep a shown value, or enter '-' to clear it.")
         print()
-
-        # Offer keyring setup first — credentials are needed for the org picker.
-        _maybe_setup_keyring(args)
-
-        # Try to build a session for API-assisted lookups (org picker).
-        # prompt=False means we fall back silently rather than blocking.
-        sess = None
-        orgs: list[Organization] = []
-        try:
-            sess = build_session(args, prompt=False)
-            orgs = sess.accounts.list_organizations()
-        except (CredentialsNotFoundError, CertiNextAPIError, Exception):
-            pass
 
         try:
             doc = load_config(path)
@@ -322,6 +471,37 @@ def main() -> None:
 
         values: dict[str, Any] = {}
         cleared: list[str] = []
+
+        # Endpoint selection FIRST: the org picker below calls the API, so the
+        # live session must point at the chosen endpoint before we build it.
+        # Explicit flags (--sandbox / --base-url) persist directly; otherwise
+        # prompt with a menu and apply the choice to args for this run.
+        from_flags = _endpoint_from_flags(cli_sandbox, cli_base_url, cli_token_url, current)
+        if from_flags is not None:
+            ep_values, ep_cleared, ep_messages = from_flags
+            for message in ep_messages:
+                print(message)
+        else:
+            ep_values, ep_cleared, live = _prompt_endpoint(current)
+            if live is not None:
+                args.base_url, args.token_url, args.sandbox = live
+        values.update(ep_values)
+        cleared.extend(ep_cleared)
+        print()
+
+        # Offer keyring setup next — credentials are needed for the org picker.
+        _maybe_setup_keyring(args)
+
+        # Try to build a session for API-assisted lookups (org picker), now that
+        # the endpoint is settled. prompt=False means we fall back silently
+        # rather than blocking when credentials are absent.
+        sess = None
+        orgs: list[Organization] = []
+        try:
+            sess = build_session(args, prompt=False)
+            orgs = sess.accounts.list_organizations()
+        except (CredentialsNotFoundError, CertiNextAPIError, Exception):
+            pass
 
         # Ask certificate type first — determines which remaining fields are required.
         while True:
@@ -342,6 +522,7 @@ def main() -> None:
         print()
 
         is_ov_ev = cert_type in ("ov", "ev")
+        chosen_org: Organization | None = None
 
         for key, base_label, req_dv, req_ov_ev, note in _POST_TYPE_FIELDS:
             required = req_ov_ev if is_ov_ev else req_dv
@@ -355,10 +536,29 @@ def main() -> None:
                 print(f"{label}:")
                 chosen = _pick_org(orgs, cert_type, current.get("org_id"), sandbox=args.sandbox)
                 if chosen is not None:
+                    # Remember the org so signer_place (asked next) can default
+                    # to its location.
+                    chosen_org = next(
+                        (o for o in orgs if str(o.organization_number) == chosen), None
+                    )
                     if chosen != str(current.get("org_id", "")):
                         values["org_id"] = chosen
                     continue
                 # Fall through to free-text if picker returned nothing.
+
+            # For signer_place, offer the chosen org's location as the default
+            # when nothing is stored yet — Enter accepts it.
+            if (
+                key == "signer_place"
+                and chosen_org is not None
+                and not current.get("signer_place")
+                and _org_location(chosen_org)
+            ):
+                org_loc = _org_location(chosen_org)
+                raw = input(f"{label} [{org_loc}] (from chosen org): ").strip()
+                if raw != "-":
+                    values[key] = raw or org_loc
+                continue
 
             while True:
                 entered = _prompt(label, current.get(key))
@@ -373,35 +573,20 @@ def main() -> None:
                 except ValueError as exc:
                     print(f"  {exc}", file=sys.stderr)
 
-        # Endpoint selection. An explicit --sandbox on this run persists
-        # sandbox=true for the profile; otherwise prompt for production /
-        # sandbox / a custom base URL.
-        print()
-        if cli_sandbox:
-            if not current.get("sandbox"):
-                values["sandbox"] = True
-                print(f"This profile will default to the sandbox endpoint ({certinext.SANDBOX_BASE_URL}).")
-            # Enabling sandbox supersedes any custom endpoint stored here.
-            cleared.extend(k for k in ("base_url", "token_url") if k in current)
-        else:
-            ep_values, ep_cleared = _prompt_endpoint(current)
-            values.update(ep_values)
-            cleared.extend(ep_cleared)
-
         if not values and not cleared:
-            print("\nNothing to change.")
+            print(f"\nNothing to change. Config file: {path}")
         else:
             try:
-                save_defaults(values, args.profile, path, remove=tuple(cleared))
+                saved_path = save_defaults(values, args.profile, path, remove=tuple(cleared))
             except ConfigError as exc:
                 sys.exit(f"Error: {exc}")
 
-            print(f"\nStored in {section_label}:")
+            print(f"\nSaved to {saved_path}")
+            print(f"Section {section_label}:")
             for key, value in values.items():
                 print(f"  {key} = {value}")
             for key in cleared:
                 print(f"  {key} (cleared)")
-            print(f"\nConfig file: {path}")
             print("Precedence: CLI argument > environment variable > profile section > [defaults].")
 
     except KeyboardInterrupt:

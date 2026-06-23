@@ -365,6 +365,20 @@ With a stored endpoint, plain `certinext-domains --profile sandbox` (or
 `--sandbox` or `--base-url` still overrides the stored value for that run.
 Set these with `certinext-setup-defaults` (see below) or by hand-editing.
 
+CERTInext runs several regions. Non-US customers can point a profile at theirs —
+for example India production:
+
+```toml
+[profiles.india]
+base_url  = "https://api.certinext.io"
+token_url = "https://api.certinext.io/oauth/token"
+```
+
+The known endpoints (`certinext.KNOWN_API_ENDPOINTS`, from the OpenAPI `servers`
+list) are: US production `https://us-api.certinext.io`, US sandbox
+`https://sandbox-us-api.certinext.io`, India production `https://api.certinext.io`,
+plus `qa-api` and `demo-api`. `certinext-setup-defaults` offers these as a menu.
+
 Values resolve in priority order: explicit CLI argument → environment
 variable → `[profiles.NAME]` → `[defaults]` → built-in default. Secrets
 (client secret, prevetting token) are never stored here — use
@@ -483,13 +497,35 @@ If API credentials are not yet stored, the script offers to run
 `certinext-setup-keyring` first — credentials are needed for the org picker
 described below.
 
-The script asks for certificate type first (DV / OV / EV), then prompts for
-each field and labels it **[required]** or **[optional]** based on the type you
-chose. Fields the tool can already read from a CSR (`requestor_email`,
-`signer_place`) are labelled optional with a note — you only need to set them
-here if your CSRs don't include the corresponding subject fields
-(`emailAddress`, `L`, `ST`). The domain and SANs are never prompted — they
-always come from the CSR.
+**API endpoint first.** The script begins by asking which endpoint this profile
+should target, because the organization lookup below talks to that environment.
+It shows a numbered menu of the known CERTInext endpoints plus a custom-URL
+option:
+
+```text
+Which CERTInext API endpoint should this profile use?
+  1. Production - US (default)  https://us-api.certinext.io  [current]
+  2. Sandbox - US               https://sandbox-us-api.certinext.io
+  3. Production - India         https://api.certinext.io
+  4. QA                         https://qa-api.certinext.io
+  5. Demo                       https://demo-api.certinext.io
+  6. Custom URL…
+```
+
+The choice is stored on the profile (`sandbox = true` for the US sandbox, or
+`base_url` / `token_url` for a region or custom host, with the token URL derived
+as `<base_url>/oauth/token`), so later runs don't need `--sandbox` or
+`--base-url`. Passing `--sandbox` or `--base-url` on the command line persists
+that choice directly and skips the menu. The endpoint list comes from
+`certinext.KNOWN_API_ENDPOINTS`.
+
+**Then the certificate defaults.** It asks for certificate type (DV / OV / EV),
+then prompts for each field, labelling it **[required]** or **[optional]** based
+on the type you chose. Fields the tool can already read from a CSR
+(`requestor_email`, `signer_place`) are labelled optional with a note — you only
+need to set them here if your CSRs don't include the corresponding subject
+fields (`emailAddress`, `L`, `ST`). The domain and SANs are never prompted —
+they always come from the CSR.
 
 For OV and EV orders, if API credentials are available the script fetches your
 organizations and presents them as a numbered menu filtered to pre-vetted orgs,
@@ -497,14 +533,8 @@ showing validation scope and status for each (e.g.
 `#2517111, Orono, ME, OV, Validated`). A hint links to the portal
 (us.certinext.io or sandbox-us.certinext.io) where the default org is marked
 with a **D** badge. Falls back to free-text entry when credentials are
-unavailable.
-
-After the certificate fields, the script asks which **API endpoint** the
-profile should target — `production`, `sandbox`, or an explicit base URL (its
-token URL is derived as `<base_url>/oauth/token`). This is stored on the
-profile, so later runs don't need `--sandbox` or `--base-url`. Passing
-`--sandbox` on this command persists `sandbox = true` for the profile directly
-and skips that prompt.
+unavailable. The organization is asked **before** the signer place, so when you
+pick one its location (`City, ST`) is offered as the signer-place default.
 
 See [Storing issue-cert defaults](#storing-issue-cert-defaults-optional) for
 the file format and resolution order.
