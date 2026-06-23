@@ -78,6 +78,15 @@ def main() -> None:
         if args.sandbox:
             if args.profile is None:
                 args.profile = "sandbox"
+            else:
+                print(
+                    f"Warning: --sandbox is ignored because --profile {args.profile!r} "
+                    f"was given; storing under profile {args.profile!r}.\n"
+                    "  (This tool stores only credentials, not a URL. To make a profile "
+                    "use the sandbox endpoint,\n"
+                    f"   run: certinext-setup-defaults --profile {args.profile} --sandbox)",
+                    file=sys.stderr,
+                )
 
         service = _service_name(args.profile)
         profile_label = f'profile {args.profile!r}' if args.profile else 'default profile'

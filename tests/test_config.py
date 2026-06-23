@@ -14,19 +14,32 @@
 
 """Tests for stored issue-cert defaults (certinext._config) and CLI precedence."""
 
+import argparse
 from pathlib import Path
 
 import pytest
 
+import certinext
+from certinext._cli import add_connection_args, apply_sandbox
 from certinext._config import (
     ConfigError,
     config_defaults,
     config_path,
+    connection_config,
     load_config,
     profile_from_argv,
     save_defaults,
 )
 from certinext.issue_certificate_cli import build_parser
+
+
+def _resolved_args(argv: list[str]) -> argparse.Namespace:
+    """Parse connection argv and run apply_sandbox, returning the resolved args."""
+    parser = argparse.ArgumentParser()
+    add_connection_args(parser)
+    args = parser.parse_args(argv)
+    apply_sandbox(args)
+    return args
 
 
 @pytest.fixture
@@ -213,3 +226,143 @@ def test_parser_still_requires_missing_values(capsys: pytest.CaptureFixture[str]
     with pytest.raises(SystemExit):
         build_parser({}).parse_args([])
     assert "--requestor-name" in capsys.readouterr().err
+
+
+# --- connection settings (sandbox / base_url / token_url) -------------------
+
+
+def test_connection_config_sandbox_bool(cfg_file: Path) -> None:
+    """A profile's sandbox = true is read back as a boolean."""
+    cfg_file.write_text("[profiles.srv]\nsandbox = true\n", encoding="utf-8")
+    conn, warnings = connection_config("srv")
+    assert conn == {"sandbox": True}
+    assert warnings == []
+
+
+def test_connection_config_custom_urls(cfg_file: Path) -> None:
+    """Explicit base_url/token_url are read back verbatim."""
+    cfg_file.write_text(
+        '[profiles.staging]\nbase_url = "https://s-api"\ntoken_url = "https://s-api/oauth/token"\n',
+        encoding="utf-8",
+    )
+    conn, _ = connection_config("staging")
+    assert conn == {"base_url": "https://s-api", "token_url": "https://s-api/oauth/token"}
+
+
+def test_connection_config_profile_over_defaults(cfg_file: Path) -> None:
+    """[profiles.NAME] connection keys merge over [defaults] connection keys."""
+    cfg_file.write_text(
+        '[defaults]\nsandbox = true\n\n[profiles.prod]\nbase_url = "https://p-api"\n',
+        encoding="utf-8",
+    )
+    conn, _ = connection_config("prod")
+    assert conn == {"sandbox": True, "base_url": "https://p-api"}
+
+
+def test_connection_config_wrong_types_warn(cfg_file: Path) -> None:
+    """A non-bool sandbox and a bool base_url are skipped with warnings."""
+    cfg_file.write_text('[profiles.x]\nsandbox = "yes"\nbase_url = true\n', encoding="utf-8")
+    conn, warnings = connection_config("x")
+    assert conn == {}
+    assert len(warnings) == 2
+
+
+def test_config_defaults_ignores_connection_keys(cfg_file: Path) -> None:
+    """Connection keys don't trip config_defaults' unknown-key warning."""
+    cfg_file.write_text(
+        '[defaults]\nsandbox = true\nbase_url = "https://x"\ntype = "dv"\n',
+        encoding="utf-8",
+    )
+    merged, warnings = config_defaults(None)
+    assert merged == {"cert_type": "dv"}
+    assert warnings == []
+
+
+def test_save_defaults_writes_connection_keys(cfg_file: Path) -> None:
+    """save_defaults accepts and round-trips connection keys."""
+    save_defaults({"sandbox": True}, "srv")
+    conn, warnings = connection_config("srv")
+    assert conn == {"sandbox": True}
+    assert warnings == []
+
+
+def test_save_defaults_custom_url_roundtrip(cfg_file: Path) -> None:
+    """A custom base/token URL pair saves and loads identically."""
+    save_defaults(
+        {"base_url": "https://s-api", "token_url": "https://s-api/oauth/token"}, "staging"
+    )
+    conn, _ = connection_config("staging")
+    assert conn == {"base_url": "https://s-api", "token_url": "https://s-api/oauth/token"}
+
+
+# --- apply_sandbox endpoint resolution --------------------------------------
+
+
+def test_apply_sandbox_default_is_production(cfg_file: Path) -> None:
+    """No flags and no config resolve to the production endpoints."""
+    args = _resolved_args([])
+    assert args.base_url == certinext.BASE_URL
+    assert args.token_url == certinext.TOKEN_URL
+    assert args.sandbox is False
+    assert args.profile is None
+
+
+def test_apply_sandbox_cli_flag(cfg_file: Path) -> None:
+    """--sandbox resolves to sandbox endpoints and the sandbox profile."""
+    args = _resolved_args(["--sandbox"])
+    assert args.base_url == certinext.SANDBOX_BASE_URL
+    assert args.token_url == certinext.SANDBOX_TOKEN_URL
+    assert args.sandbox is True
+    assert args.profile == "sandbox"
+
+
+def test_apply_sandbox_explicit_base_url_wins(cfg_file: Path) -> None:
+    """An explicit --base-url is kept and does not flip the sandbox flag."""
+    args = _resolved_args(["--base-url", "https://custom-api"])
+    assert args.base_url == "https://custom-api"
+    assert args.sandbox is False
+
+
+def test_apply_sandbox_profile_sandbox_true(cfg_file: Path) -> None:
+    """A profile with sandbox = true targets sandbox without the CLI flag."""
+    cfg_file.write_text("[profiles.srv]\nsandbox = true\n", encoding="utf-8")
+    args = _resolved_args(["--profile", "srv"])
+    assert args.base_url == certinext.SANDBOX_BASE_URL
+    assert args.token_url == certinext.SANDBOX_TOKEN_URL
+    assert args.sandbox is True
+    assert args.profile == "srv"  # named profile keeps its own name
+
+
+def test_apply_sandbox_profile_custom_url(cfg_file: Path) -> None:
+    """A profile with base_url/token_url targets that endpoint."""
+    cfg_file.write_text(
+        '[profiles.staging]\nbase_url = "https://s-api"\ntoken_url = "https://s-api/oauth/token"\n',
+        encoding="utf-8",
+    )
+    args = _resolved_args(["--profile", "staging"])
+    assert args.base_url == "https://s-api"
+    assert args.token_url == "https://s-api/oauth/token"
+    assert args.sandbox is False
+
+
+def test_apply_sandbox_cli_flag_overrides_profile_url(cfg_file: Path) -> None:
+    """CLI --sandbox beats a profile's stored custom base_url for that run."""
+    cfg_file.write_text('[profiles.staging]\nbase_url = "https://s-api"\n', encoding="utf-8")
+    args = _resolved_args(["--profile", "staging", "--sandbox"])
+    assert args.base_url == certinext.SANDBOX_BASE_URL
+
+
+def test_apply_sandbox_cli_base_url_overrides_profile(cfg_file: Path) -> None:
+    """An explicit --base-url beats a profile's sandbox = true."""
+    cfg_file.write_text("[profiles.srv]\nsandbox = true\n", encoding="utf-8")
+    args = _resolved_args(["--profile", "srv", "--base-url", "https://custom-api"])
+    assert args.base_url == "https://custom-api"
+
+
+def test_apply_sandbox_reads_env_profile(cfg_file: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """CERTINEXT_PROFILE selects the profile whose connection config is applied."""
+    cfg_file.write_text("[profiles.srv]\nsandbox = true\n", encoding="utf-8")
+    monkeypatch.setenv("CERTINEXT_PROFILE", "srv")
+    args = _resolved_args([])
+    assert args.base_url == certinext.SANDBOX_BASE_URL
+    assert args.sandbox is True

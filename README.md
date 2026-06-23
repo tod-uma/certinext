@@ -340,13 +340,30 @@ validity        = 1                # optional; defaults to 1 year
 
 [profiles.sandbox]
 # overrides applied when --sandbox / --profile sandbox is active
-type = "dv"
+type    = "dv"
+sandbox = true                         # target the sandbox API by default
+
+[profiles.staging]
+# point a profile at any endpoint (token_url defaults to <base_url>/oauth/token)
+base_url  = "https://staging-api.certinext.io"
+token_url = "https://staging-api.certinext.io/oauth/token"
 ```
 
 The primary domain and SANs are read directly from the CSR and are not stored
 here. `requestor_email` and `signer_place` are also read from the CSR when
 present (the `emailAddress`, `L`, and `ST` subject fields), so you only need
 to set them here if your CSRs don't include those fields.
+
+A profile can also record **which endpoint it targets** so you don't have to
+pass `--sandbox` (or `--base-url`) on every run:
+
+- `sandbox = true` — the profile defaults to the sandbox endpoints.
+- `base_url` / `token_url` — the profile defaults to an explicit endpoint.
+
+With a stored endpoint, plain `certinext-domains --profile sandbox` (or
+`CERTINEXT_PROFILE=sandbox`) hits the sandbox API directly. A command-line
+`--sandbox` or `--base-url` still overrides the stored value for that run.
+Set these with `certinext-setup-defaults` (see below) or by hand-editing.
 
 Values resolve in priority order: explicit CLI argument → environment
 variable → `[profiles.NAME]` → `[defaults]` → built-in default. Secrets
@@ -376,6 +393,17 @@ certinext-domain-cert-count --sandbox
 
 `--sandbox` is a shortcut that sets `--base-url` and `--token-url` to the
 sandbox endpoints and defaults `--profile` to `sandbox`.
+
+To avoid passing `--sandbox` every time, record it on a profile so the profile
+targets the sandbox by default:
+
+```bash
+certinext-setup-defaults --profile srv-acct --sandbox   # stores sandbox = true
+certinext-domains --profile srv-acct list               # hits the sandbox API
+```
+
+See [Storing issue-cert defaults](#storing-issue-cert-defaults-optional) for
+the per-profile `sandbox` / `base_url` settings.
 
 ### Integration tests
 
@@ -439,6 +467,12 @@ your Organization Consent Token (prevetting token for OV/EV orders). It shows
 any currently stored value as a default so you can keep it by pressing Enter,
 and masks secrets with asterisks on confirmation.
 
+This command stores **only credentials, not a URL** — `--sandbox` here is just
+a shortcut for `--profile sandbox`. If you pass both `--sandbox` and an explicit
+`--profile NAME`, the `--sandbox` flag is ignored (the profile wins) and the
+script warns you. To make a profile *use* the sandbox endpoint, set that on the
+profile with `certinext-setup-defaults --profile NAME --sandbox`.
+
 ### certinext-setup-defaults
 
 `certinext-setup-defaults` interactively stores defaults for
@@ -465,6 +499,13 @@ showing validation scope and status for each (e.g.
 with a **D** badge. Falls back to free-text entry when credentials are
 unavailable.
 
+After the certificate fields, the script asks which **API endpoint** the
+profile should target — `production`, `sandbox`, or an explicit base URL (its
+token URL is derived as `<base_url>/oauth/token`). This is stored on the
+profile, so later runs don't need `--sandbox` or `--base-url`. Passing
+`--sandbox` on this command persists `sandbox = true` for the profile directly
+and skips that prompt.
+
 See [Storing issue-cert defaults](#storing-issue-cert-defaults-optional) for
 the file format and resolution order.
 
@@ -475,8 +516,11 @@ certinext-setup-defaults
 # Edit a profile section ([profiles.prod])
 certinext-setup-defaults --profile prod
 
-# Edit the sandbox profile
+# Edit the sandbox profile (and store sandbox = true on it)
 certinext-setup-defaults --sandbox
+
+# Make a named profile target the sandbox endpoint by default
+certinext-setup-defaults --profile srv-acct --sandbox
 ```
 
 Each prompt shows the currently stored value — press Enter to keep it, or

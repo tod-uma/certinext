@@ -15,6 +15,7 @@ from typing import Any, NoReturn
 import structlog
 
 import certinext
+from certinext._config import ConfigError, connection_config
 from certinext._keyring import keyring_available, keyring_get, keyring_service, no_keyring_help
 from certinext.exceptions import CertiNextAPIError
 
@@ -135,13 +136,16 @@ def add_connection_args(target: Any, *, scope: bool = False) -> None:
         "--sandbox", action="store_true", default=False,
         help="Connect to the CertiNext sandbox API; implies --profile sandbox unless --profile is set",
     )
+    # Defaults are None (not the production URL) so apply_sandbox() can tell an
+    # explicit --base-url from "unset" and fall back to the profile config or
+    # the --sandbox flag. The resolved default is still production.
     target.add_argument(
-        "--base-url", default=certinext.BASE_URL, metavar="URL",
-        help=f"CertiNext base URL (default: {certinext.BASE_URL})",
+        "--base-url", default=None, metavar="URL",
+        help=f"CertiNext base URL (default: {certinext.BASE_URL}, or the profile/sandbox endpoint)",
     )
     target.add_argument(
-        "--token-url", default=certinext.TOKEN_URL, metavar="URL",
-        help=f"OAuth2 token endpoint URL (default: {certinext.TOKEN_URL})",
+        "--token-url", default=None, metavar="URL",
+        help="OAuth2 token endpoint URL (default: derived from the base URL)",
     )
     target.add_argument(
         "--account-number", "--client-id", dest="account_number", default=None, metavar="ACCT",
@@ -156,19 +160,86 @@ def add_connection_args(target: Any, *, scope: bool = False) -> None:
 
 
 def apply_sandbox(args: argparse.Namespace) -> None:
-    """Override base_url and token_url for the sandbox when ``--sandbox`` is set.
+    """Resolve ``base_url``, ``token_url``, ``sandbox``, and ``profile`` in place.
 
-    Also sets ``args.profile`` to ``'sandbox'`` if no profile was explicitly
-    provided, so keyring lookups automatically find sandbox credentials.
+    Fills in the connection endpoint from (in priority order):
+
+    1. An explicit ``--base-url`` / ``--token-url`` on the command line.
+    2. The ``--sandbox`` flag (the sandbox endpoints).
+    3. The active profile's stored connection settings — an explicit
+       ``base_url`` / ``token_url``, or ``sandbox = true`` — from the config
+       file (see :func:`certinext._config.connection_config`).
+    4. The built-in production endpoints.
+
+    After this call ``args.base_url`` / ``args.token_url`` are always concrete
+    strings, and ``args.sandbox`` reflects the *effective* choice (CLI flag or
+    profile config) so ``CertiNextSession.sandbox`` and portal hints are
+    correct. As before, the bare ``--sandbox`` flag also defaults
+    ``args.profile`` to ``'sandbox'`` so keyring lookups find sandbox
+    credentials; a profile configured with ``sandbox = true`` keeps its own
+    name.
 
     Args:
         args: Parsed CLI arguments (modified in place).
     """
-    if args.sandbox:
+    cli_sandbox = bool(args.sandbox)
+
+    # Mirror build_session's profile precedence so the stored connection
+    # settings are read for the profile that will actually be used.
+    profile = args.profile
+    if profile is None and cli_sandbox:
+        profile = "sandbox"
+    if profile is None:
+        profile = os.environ.get("CERTINEXT_PROFILE") or None
+
+    try:
+        conn, warnings = connection_config(profile)
+    except ConfigError as exc:
+        # A broken config file should not silently send traffic to production;
+        # surface it and fall back to no stored connection settings.
+        log.warning("Ignoring connection settings", error=str(exc))
+        conn, warnings = {}, []
+    for warning in warnings:
+        log.warning("certinext config", warning=warning)
+
+    cfg_sandbox = bool(conn.get("sandbox", False))
+    cfg_base = conn.get("base_url")
+    cfg_token = conn.get("token_url")
+
+    if args.base_url is not None:
+        pass  # explicit CLI value wins
+    elif cli_sandbox:
         args.base_url = certinext.SANDBOX_BASE_URL
+    elif cfg_base is not None:
+        args.base_url = cfg_base
+    elif cfg_sandbox:
+        args.base_url = certinext.SANDBOX_BASE_URL
+    else:
+        args.base_url = certinext.BASE_URL
+
+    if args.token_url is not None:
+        pass  # explicit CLI value wins
+    elif cli_sandbox:
         args.token_url = certinext.SANDBOX_TOKEN_URL
-        if args.profile is None:
-            args.profile = "sandbox"
+    elif cfg_token is not None:
+        args.token_url = cfg_token
+    elif cfg_base is not None:
+        # Custom base_url without a matching token_url — keep the production
+        # token endpoint; setup-defaults always writes the two together.
+        args.token_url = certinext.TOKEN_URL
+    elif cfg_sandbox:
+        args.token_url = certinext.SANDBOX_TOKEN_URL
+    else:
+        args.token_url = certinext.TOKEN_URL
+
+    # Effective sandbox flag: a profile that targets sandbox counts even without
+    # the CLI flag, so sess.sandbox and the org-picker portal hint stay right.
+    args.sandbox = cli_sandbox or cfg_sandbox
+
+    # Only the bare CLI flag auto-selects the 'sandbox' keyring profile; a named
+    # profile with sandbox = true keeps its own credentials.
+    if cli_sandbox and args.profile is None:
+        args.profile = "sandbox"
 
 
 def _reorder_log_keys(_logger: Any, _method: str, event_dict: structlog.typing.EventDict) -> structlog.typing.EventDict:

@@ -28,6 +28,7 @@ import argparse
 import sys
 from typing import Any
 
+import certinext
 from certinext._cli import (
     CredentialsNotFoundError,
     add_connection_args,
@@ -89,6 +90,53 @@ def _prompt(label: str, current: Any) -> Any | None:
     return value
 
 
+def _prompt_endpoint(current: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+    """Prompt for the profile's API endpoint and return ``(values, cleared)``.
+
+    Accepts ``production`` (the built-in default), ``sandbox`` (the boolean
+    shorthand), or an explicit ``http(s)`` base URL. A custom base URL derives
+    its token URL as ``<base_url>/oauth/token``. The returned tuple is meant to
+    be folded into the caller's single :func:`save_defaults` call; ``cleared``
+    only ever names keys actually present in ``current`` so an unchanged
+    endpoint never looks like an edit.
+
+    Args:
+        current: The currently stored section dict for this profile.
+
+    Returns:
+        A ``(values, cleared)`` tuple; both empty when the user keeps the
+        current endpoint or enters something invalid.
+    """
+    def _present(*keys: str) -> list[str]:
+        """Return the subset of keys actually stored in the current section."""
+        return [k for k in keys if k in current]
+
+    if current.get("base_url"):
+        cur = str(current["base_url"])
+    elif current.get("sandbox"):
+        cur = "sandbox"
+    else:
+        cur = "production"
+
+    print("API endpoint for this profile — 'production', 'sandbox', or a base URL.")
+    entered = input(f"Endpoint [{cur}]: ").strip()
+    if not entered:
+        return {}, []
+    low = entered.lower()
+    if low in ("production", "prod"):
+        return {}, _present("sandbox", "base_url", "token_url")
+    if low == "sandbox":
+        return {"sandbox": True}, _present("base_url", "token_url")
+    if not entered.startswith(("http://", "https://")):
+        print(
+            "  Endpoint must be 'production', 'sandbox', or an http(s) URL; keeping current.",
+            file=sys.stderr,
+        )
+        return {}, []
+    base = entered.rstrip("/")
+    return {"base_url": base, "token_url": f"{base}/oauth/token"}, _present("sandbox")
+
+
 def _validated(key: str, value: str) -> Any:
     """Validate and coerce one entered value for its config key.
 
@@ -120,11 +168,13 @@ def _maybe_setup_keyring(args: argparse.Namespace) -> None:
 
     Silently returns when credentials are already present or when no usable
     keyring backend is available.  Otherwise prompts the user and either runs
-    ``certinext-setup-keyring`` (forwarding ``--sandbox`` or ``--profile``) or
-    prints the manual command.
+    ``certinext-setup-keyring`` for the active profile or prints the manual
+    command.
 
     Args:
-        args: Parsed CLI arguments.  Reads ``args.profile`` and ``args.sandbox``.
+        args: Parsed CLI arguments.  Reads ``args.profile`` (already resolved
+            by :func:`apply_sandbox`, so ``--sandbox`` has become profile
+            ``'sandbox'`` when no other profile was given).
     """
     import subprocess
 
@@ -135,10 +185,11 @@ def _maybe_setup_keyring(args: argparse.Namespace) -> None:
     if not keyring_available():
         return  # no usable backend — don't offer what can't work
 
+    # Forward the resolved profile (not --sandbox) so credentials land under the
+    # same service the lookup above checked — apply_sandbox has already turned a
+    # bare --sandbox into profile 'sandbox'.
     cmd = ["certinext-setup-keyring"]
-    if args.sandbox:
-        cmd.append("--sandbox")
-    elif args.profile:
+    if args.profile:
         cmd.extend(["--profile", args.profile])
     cmd_str = " ".join(cmd)
 
@@ -231,6 +282,9 @@ def main() -> None:
         )
         add_connection_args(parser)
         args = parser.parse_args()
+        # Capture the raw flag before apply_sandbox() folds profile config into
+        # it — only an explicit --sandbox on this run should persist sandbox=true.
+        cli_sandbox = bool(args.sandbox)
         apply_sandbox(args)
 
         path = config_path()
@@ -318,6 +372,21 @@ def main() -> None:
                     break
                 except ValueError as exc:
                     print(f"  {exc}", file=sys.stderr)
+
+        # Endpoint selection. An explicit --sandbox on this run persists
+        # sandbox=true for the profile; otherwise prompt for production /
+        # sandbox / a custom base URL.
+        print()
+        if cli_sandbox:
+            if not current.get("sandbox"):
+                values["sandbox"] = True
+                print(f"This profile will default to the sandbox endpoint ({certinext.SANDBOX_BASE_URL}).")
+            # Enabling sandbox supersedes any custom endpoint stored here.
+            cleared.extend(k for k in ("base_url", "token_url") if k in current)
+        else:
+            ep_values, ep_cleared = _prompt_endpoint(current)
+            values.update(ep_values)
+            cleared.extend(ep_cleared)
 
         if not values and not cleared:
             print("\nNothing to change.")
