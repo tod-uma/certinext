@@ -16,8 +16,9 @@
 
 Reads and writes ``config.toml``, which holds per-user defaults for
 ``certinext-issue-cert`` (requestor identity, certificate type, org ID,
-validity, ...). The file has a ``[defaults]`` section plus optional
-``[profiles.NAME]`` sections that override it, mirroring the keyring
+validity, ...) plus optional per-profile *connection* settings (which API
+endpoint a profile targets). The file has a ``[defaults]`` section plus
+optional ``[profiles.NAME]`` sections that override it, mirroring the keyring
 profile concept:
 
 .. code-block:: toml
@@ -29,7 +30,18 @@ profile concept:
     org_id          = "12345"
 
     [profiles.sandbox]
-    type = "dv"
+    type    = "dv"
+    sandbox = true                       # this profile targets the sandbox API
+
+    [profiles.staging]
+    base_url  = "https://staging-api.certinext.io"
+    token_url = "https://staging-api.certinext.io/oauth/token"
+
+Two key families live side by side. Issue-cert defaults (see
+:data:`CONFIG_KEYS`) are read by :func:`config_defaults`; connection settings
+(see :data:`CONNECTION_KEYS`) are read by :func:`connection_config`. Each
+reader ignores the other family's keys, so a ``sandbox``/``base_url`` entry
+never trips an "unknown key" warning during certificate issuance.
 
 Resolution precedence (highest first): explicit CLI argument, environment
 variable, ``[profiles.NAME]`` value, ``[defaults]`` value, built-in default.
@@ -58,10 +70,22 @@ CONFIG_KEYS: dict[str, str] = {
     "type": "cert_type",
     "org_id": "org_id",
     "validity": "validity",
+    "product": "product",
 }
 
 #: Reverse map: argparse dest -> TOML key (for saving).
 DEST_TO_KEY: dict[str, str] = {dest: key for key, dest in CONFIG_KEYS.items()}
+
+#: Per-profile connection settings, mapped to their expected Python type. These
+#: live in the same [defaults]/[profiles.NAME] sections as the issue-cert
+#: defaults but are read by :func:`connection_config`, not :func:`config_defaults`.
+#: ``sandbox`` is a boolean shorthand for the sandbox endpoints; ``base_url`` /
+#: ``token_url`` point a profile at an arbitrary endpoint.
+CONNECTION_KEYS: dict[str, type] = {
+    "sandbox": bool,
+    "base_url": str,
+    "token_url": str,
+}
 
 
 class ConfigError(Exception):
@@ -176,12 +200,58 @@ def config_defaults(profile: str | None, path: Path | None = None) -> tuple[dict
             warnings.append(f"{label} is not a table; ignoring")
             continue
         for key, value in section.items():
+            if key in CONNECTION_KEYS:
+                continue  # connection settings are read by connection_config()
             if key not in CONFIG_KEYS:
                 warnings.append(f"{label}: unknown key {key!r}; ignoring")
                 continue
             checked = _validate(key, value, label, warnings)
             if checked is not None:
                 merged[CONFIG_KEYS[key]] = checked
+    return merged, warnings
+
+
+def connection_config(profile: str | None, path: Path | None = None) -> tuple[dict[str, Any], list[str]]:
+    """Return stored connection settings for a profile (endpoint selection).
+
+    Merges the ``[defaults]`` section with the matching ``[profiles.NAME]``
+    section (profile values win), keeping only the keys in
+    :data:`CONNECTION_KEYS`. Values of the wrong type are skipped and reported
+    via the warnings list rather than raising, so a typo never blocks a CLI
+    from connecting (it just falls back to the production default).
+
+    Args:
+        profile: Profile name, or None for the default profile only.
+        path: Config file to read; defaults to :func:`config_path`.
+
+    Returns:
+        A ``(settings, warnings)`` tuple. ``settings`` may contain ``sandbox``
+        (bool), ``base_url`` (str), and/or ``token_url`` (str).
+
+    Raises:
+        ConfigError: If the config file exists but cannot be parsed.
+    """
+    doc = load_config(path)
+    warnings: list[str] = []
+    merged: dict[str, Any] = {}
+
+    sections: list[tuple[str, Any]] = [("[defaults]", doc.get("defaults", {}))]
+    if profile:
+        sections.append((f"[profiles.{profile}]", doc.get("profiles", {}).get(profile, {})))
+
+    for label, section in sections:
+        if not isinstance(section, dict):
+            continue  # config_defaults() already warns about a non-table section
+        for key, value in section.items():
+            if key not in CONNECTION_KEYS:
+                continue  # issue-cert defaults are read by config_defaults()
+            expected = CONNECTION_KEYS[key]
+            # bool is a subclass of int, so a stray "base_url = true" must not
+            # pass the str check — reject any bool where a string is expected.
+            if not isinstance(value, expected) or (expected is str and isinstance(value, bool)):
+                warnings.append(f"{label}: {key} must be {expected.__name__} (got {value!r}); ignoring")
+                continue
+            merged[key] = value
     return merged, warnings
 
 
@@ -274,11 +344,12 @@ def save_defaults(
 ) -> Path:
     """Write defaults into the config file, creating it if needed.
 
-    Values land in ``[defaults]`` (no profile) or ``[profiles.NAME]``. Keys
-    are accepted by argparse dest name or TOML key name; falsy values are
-    skipped so a blank prompt answer never writes an empty default. Existing
-    sections and keys not mentioned in ``values`` are preserved; comments in
-    a hand-written file are not.
+    Values land in ``[defaults]`` (no profile) or ``[profiles.NAME]``. Both
+    issue-cert defaults (:data:`CONFIG_KEYS`) and connection settings
+    (:data:`CONNECTION_KEYS`) are accepted, by argparse dest name or TOML key
+    name; ``None`` and empty-string values are skipped so a blank prompt answer
+    never writes an empty default. Existing sections and keys not mentioned in
+    ``values`` are preserved; comments in a hand-written file are not.
 
     Args:
         values: Defaults to store, keyed by dest or TOML key name.
@@ -310,7 +381,7 @@ def save_defaults(
 
     for name, value in values.items():
         key = DEST_TO_KEY.get(name, name)
-        if key not in CONFIG_KEYS:
+        if key not in CONFIG_KEYS and key not in CONNECTION_KEYS:
             raise ConfigError(f"Not a recognised default: {name!r}")
         if value in (None, ""):
             continue

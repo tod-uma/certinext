@@ -108,6 +108,29 @@ def test_setup_keyring_cli_no_backend(monkeypatch: pytest.MonkeyPatch, capsys: p
     assert "CERTINEXT_CLIENT_ID" in err
 
 
+def test_setup_keyring_warns_on_sandbox_with_profile(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """--sandbox + --profile warns that --sandbox is ignored and stores under the profile."""
+    monkeypatch.setattr(sys, "argv", ["certinext-setup-keyring", "--profile", "prod", "--sandbox"])
+    monkeypatch.setattr(keyring, "get_password", lambda *a, **k: None)
+    stored: list[tuple[str, str, str]] = []
+    monkeypatch.setattr(keyring, "set_password", lambda s, k, v: stored.append((s, k, v)))
+    monkeypatch.setattr("builtins.input", lambda *a, **k: "acct123")
+    # client secret, then an empty prevetting token (skip).
+    monkeypatch.setattr(
+        "certinext.setup_keyring_cli.getpass.getpass",
+        MagicMock(side_effect=["secret-xyz", ""]),
+    )
+
+    setup_keyring_main()
+
+    err = capsys.readouterr().err
+    assert "--sandbox is ignored" in err
+    assert "prod" in err
+    assert ("certinext-prod", "CERTINEXT_CLIENT_ID", "acct123") in stored
+
+
 def test_resolve_non_tty_without_backend(monkeypatch: pytest.MonkeyPatch) -> None:
     """_resolve's non-TTY error includes the keyring help when no backend exists."""
     monkeypatch.delenv("CERTINEXT_CLIENT_ID", raising=False)

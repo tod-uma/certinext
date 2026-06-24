@@ -139,6 +139,14 @@ def build_parser(config: dict[str, Any] | None = None) -> argparse.ArgumentParse
         help="Organization ID, required for OV and EV certificates",
     )
     cert.add_argument(
+        "--product", metavar="CODE", default=cfg.get("product"),
+        help=(
+            "CERTInext product code (X-Product-Code) selecting a specific catalog "
+            "product; list codes with certinext-setup-defaults. "
+            "Default: the API's default product for the --type."
+        ),
+    )
+    cert.add_argument(
         "--prevetting-token", metavar="TOKEN", default=None,
         help=(
             "Organization Consent Token for OV/EV orders. "
@@ -394,6 +402,7 @@ def _create_order(sess: CertiNextSession, args: argparse.Namespace, csr: str = "
     requestor_designation: str = args.requestor_designation or ""
     signer_place: str = args.signer_place or ""
     auto_secure_www: bool = bool(args.auto_secure_www)
+    product_code: str | None = getattr(args, "product", None) or None
     prevetting_token: str | None = getattr(args, "prevetting_token", None)
     if not prevetting_token:
         svc = keyring_service("certinext", getattr(args, "profile", None))
@@ -417,6 +426,7 @@ def _create_order(sess: CertiNextSession, args: argparse.Namespace, csr: str = "
                 requestor_designation=requestor_designation,
                 signer_name=requestor_name,
                 signer_place=signer_place,
+                product_code=product_code,
             )
         elif cert_type == "ov":
             return sess.ssl.create_ov(
@@ -433,6 +443,7 @@ def _create_order(sess: CertiNextSession, args: argparse.Namespace, csr: str = "
                 requestor_designation=requestor_designation,
                 signer_name=requestor_name,
                 signer_place=signer_place,
+                product_code=product_code,
             )
         else:
             return sess.ssl.create_ev(
@@ -449,6 +460,7 @@ def _create_order(sess: CertiNextSession, args: argparse.Namespace, csr: str = "
                 requestor_designation=requestor_designation,
                 signer_name=requestor_name,
                 signer_place=signer_place,
+                product_code=product_code,
             )
     except CertiNextAPIError as exc:
         fatal_api_error(exc, "Error creating order")
@@ -630,6 +642,7 @@ def _maybe_save_defaults(args: argparse.Namespace) -> None:
         "cert_type": args.cert_type,
         "org_id": args.org_id,
         "validity": args.validity,
+        "product": getattr(args, "product", None),
     }
     section = f"profile {args.profile!r}" if args.profile else "the default profile"
     if sys.stdin.isatty():

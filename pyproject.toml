@@ -101,3 +101,7 @@ typeCheckingMode = "standard"
 python_version = "3.10"
 strict = true
 ignore_missing_imports = true
+# keyring ships py.typed but its backend constructors (e.g. backends.fail.Keyring)
+# are unannotated. Allow calling into the keyring package without per-call
+# `# type: ignore[no-untyped-call]`; our own code is still fully type-checked.
+untyped_calls_exclude = ["keyring"]

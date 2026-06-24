@@ -337,16 +337,48 @@ signer_place    = "Orono, ME"      # optional if your CSR includes L and/or ST f
 type            = "ov"             # required (dv / ov / ev)
 org_id          = "12345"         # required for OV and EV; omit for DV
 validity        = 1                # optional; defaults to 1 year
+# product       = "974"            # optional product code; omit to let the API pick
 
 [profiles.sandbox]
 # overrides applied when --sandbox / --profile sandbox is active
-type = "dv"
+type    = "dv"
+sandbox = true                         # target the sandbox API by default
+
+[profiles.staging]
+# point a profile at any endpoint (token_url defaults to <base_url>/oauth/token)
+base_url  = "https://staging-api.certinext.io"
+token_url = "https://staging-api.certinext.io/oauth/token"
 ```
 
 The primary domain and SANs are read directly from the CSR and are not stored
 here. `requestor_email` and `signer_place` are also read from the CSR when
 present (the `emailAddress`, `L`, and `ST` subject fields), so you only need
 to set them here if your CSRs don't include those fields.
+
+A profile can also record **which endpoint it targets** so you don't have to
+pass `--sandbox` (or `--base-url`) on every run:
+
+- `sandbox = true` — the profile defaults to the sandbox endpoints.
+- `base_url` / `token_url` — the profile defaults to an explicit endpoint.
+
+With a stored endpoint, plain `certinext-domains --profile sandbox` (or
+`CERTINEXT_PROFILE=sandbox`) hits the sandbox API directly. A command-line
+`--sandbox` or `--base-url` still overrides the stored value for that run.
+Set these with `certinext-setup-defaults` (see below) or by hand-editing.
+
+CERTInext runs several regions. Non-US customers can point a profile at theirs —
+for example India production:
+
+```toml
+[profiles.india]
+base_url  = "https://api.certinext.io"
+token_url = "https://api.certinext.io/oauth/token"
+```
+
+The known endpoints (`certinext.KNOWN_API_ENDPOINTS`, from the OpenAPI `servers`
+list) are: US production `https://us-api.certinext.io`, US sandbox
+`https://sandbox-us-api.certinext.io`, India production `https://api.certinext.io`,
+plus `qa-api` and `demo-api`. `certinext-setup-defaults` offers these as a menu.
 
 Values resolve in priority order: explicit CLI argument → environment
 variable → `[profiles.NAME]` → `[defaults]` → built-in default. Secrets
@@ -376,6 +408,17 @@ certinext-domain-cert-count --sandbox
 
 `--sandbox` is a shortcut that sets `--base-url` and `--token-url` to the
 sandbox endpoints and defaults `--profile` to `sandbox`.
+
+To avoid passing `--sandbox` every time, record it on a profile so the profile
+targets the sandbox by default:
+
+```bash
+certinext-setup-defaults --profile srv-acct --sandbox   # stores sandbox = true
+certinext-domains --profile srv-acct list               # hits the sandbox API
+```
+
+See [Storing issue-cert defaults](#storing-issue-cert-defaults-optional) for
+the per-profile `sandbox` / `base_url` settings.
 
 ### Integration tests
 
@@ -439,6 +482,12 @@ your Organization Consent Token (prevetting token for OV/EV orders). It shows
 any currently stored value as a default so you can keep it by pressing Enter,
 and masks secrets with asterisks on confirmation.
 
+This command stores **only credentials, not a URL** — `--sandbox` here is just
+a shortcut for `--profile sandbox`. If you pass both `--sandbox` and an explicit
+`--profile NAME`, the `--sandbox` flag is ignored (the profile wins) and the
+script warns you. To make a profile *use* the sandbox endpoint, set that on the
+profile with `certinext-setup-defaults --profile NAME --sandbox`.
+
 ### certinext-setup-defaults
 
 `certinext-setup-defaults` interactively stores defaults for
@@ -449,13 +498,41 @@ If API credentials are not yet stored, the script offers to run
 `certinext-setup-keyring` first — credentials are needed for the org picker
 described below.
 
-The script asks for certificate type first (DV / OV / EV), then prompts for
-each field and labels it **[required]** or **[optional]** based on the type you
-chose. Fields the tool can already read from a CSR (`requestor_email`,
-`signer_place`) are labelled optional with a note — you only need to set them
-here if your CSRs don't include the corresponding subject fields
-(`emailAddress`, `L`, `ST`). The domain and SANs are never prompted — they
-always come from the CSR.
+**API endpoint first.** The script begins by asking which endpoint this profile
+should target, because the organization lookup below talks to that environment.
+It shows a numbered menu of the known CERTInext endpoints plus a custom-URL
+option:
+
+```text
+Which CERTInext API endpoint should this profile use?
+  1. Production - US (default)  https://us-api.certinext.io  [current]
+  2. Sandbox - US               https://sandbox-us-api.certinext.io
+  3. Production - India         https://api.certinext.io
+  4. QA                         https://qa-api.certinext.io
+  5. Demo                       https://demo-api.certinext.io
+  6. Custom URL…
+```
+
+The choice is stored on the profile (`sandbox = true` for the US sandbox, or
+`base_url` / `token_url` for a region or custom host, with the token URL derived
+as `<base_url>/oauth/token`), so later runs don't need `--sandbox` or
+`--base-url`. Passing `--sandbox` or `--base-url` on the command line persists
+that choice directly and skips the menu. The endpoint list comes from
+`certinext.KNOWN_API_ENDPOINTS`.
+
+**Then the certificate defaults.** It asks for certificate type (DV / OV / EV),
+then prompts for each field, labelling it **[required]** or **[optional]** based
+on the type you chose. Fields the tool can already read from a CSR
+(`requestor_email`, `signer_place`) are labelled optional with a note — you only
+need to set them here if your CSRs don't include the corresponding subject
+fields (`emailAddress`, `L`, `ST`). The domain and SANs are never prompted —
+they always come from the CSR.
+
+If credentials are available, it then offers a **product** menu fetched from the
+Catalog API, filtered to the type you chose and sorted with wildcard products
+last. Pick one to store as the profile's default product code (sent as
+`X-Product-Code` at issue time), or choose *API default* to let the server pick.
+`certinext-issue-cert --product CODE` overrides the stored default per run.
 
 For OV and EV orders, if API credentials are available the script fetches your
 organizations and presents them as a numbered menu filtered to pre-vetted orgs,
@@ -463,7 +540,8 @@ showing validation scope and status for each (e.g.
 `#2517111, Orono, ME, OV, Validated`). A hint links to the portal
 (us.certinext.io or sandbox-us.certinext.io) where the default org is marked
 with a **D** badge. Falls back to free-text entry when credentials are
-unavailable.
+unavailable. The organization is asked **before** the signer place, so when you
+pick one its location (`City, ST`) is offered as the signer-place default.
 
 See [Storing issue-cert defaults](#storing-issue-cert-defaults-optional) for
 the file format and resolution order.
@@ -475,8 +553,11 @@ certinext-setup-defaults
 # Edit a profile section ([profiles.prod])
 certinext-setup-defaults --profile prod
 
-# Edit the sandbox profile
+# Edit the sandbox profile (and store sandbox = true on it)
 certinext-setup-defaults --sandbox
+
+# Make a named profile target the sandbox endpoint by default
+certinext-setup-defaults --profile srv-acct --sandbox
 ```
 
 Each prompt shows the currently stored value — press Enter to keep it, or
@@ -766,6 +847,9 @@ csr_file                    PEM-encoded CSR file (positional; omit to read from 
 --type dv|ov|ev             Validation type (default: dv)
 --validity YEARS            Validity in years: 1, 2, or 3 (default: 1)
 --org-id ID                 Organization ID — required for OV and EV certificates
+--product CODE              Product code (X-Product-Code) selecting a specific
+                            catalog product; default: API default for the type.
+                            List codes with certinext-setup-defaults.
 --domain FQDN               Override the primary domain (default: extracted from CSR CN)
 --san FQDN                  Override SANs (default: extracted from CSR; repeatable)
 --auto-secure-www           Request automatic www-redirect coverage (API default: true)

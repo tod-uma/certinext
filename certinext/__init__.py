@@ -92,6 +92,20 @@ SANDBOX_BASE_URL: str = "https://sandbox-us-api.certinext.io"
 SANDBOX_TOKEN_URL: str = "https://sandbox-us-api.certinext.io/oauth/token"
 """OAuth 2.0 token endpoint for the CertiNext US sandbox environment."""
 
+KNOWN_API_ENDPOINTS: tuple[tuple[str, str], ...] = (
+    ("Production - US", BASE_URL),
+    ("Production - India", "https://api.certinext.io"),
+    ("QA", "https://qa-api.certinext.io"),
+    ("Demo", "https://demo-api.certinext.io"),
+)
+"""Known CERTInext REST API endpoints as ``(label, base_url)`` pairs, taken from
+the certinext-v2 OpenAPI ``servers`` list
+(``https://<host>/v3/api-docs/certinext-v2``). ``certinext-setup-defaults``
+presents these as a menu. The token endpoint for each is
+``<base_url>/oauth/token``; the US sandbox is selected via the ``sandbox`` flag
+rather than listed here. ``https://api.certinext.io`` is the India (global)
+production region."""
+
 
 def session(
     base_url: str = "",
@@ -136,6 +150,7 @@ __all__ = [
     "TOKEN_URL",
     "SANDBOX_BASE_URL",
     "SANDBOX_TOKEN_URL",
+    "KNOWN_API_ENDPOINTS",
     # CSR parsing
     "CsrInfo",
     # Exceptions

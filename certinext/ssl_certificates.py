@@ -830,17 +830,21 @@ class SslAccessor:
 
     # --- internal helpers ---
 
-    def _create(self, body: dict[str, Any]) -> SslOrder:
+    def _create(self, body: dict[str, Any], product_code: str | None = None) -> SslOrder:
         """POST to the ssl-certificates endpoint and return an SslOrder.
 
         Args:
             body: JSON request body including ``productVariant`` and all required fields.
+            product_code: Optional CERTInext product code sent as the
+                ``X-Product-Code`` header to select a specific catalog product.
+                ``None`` lets the API pick the default product for the variant.
 
         Returns:
             :class:`SslOrder` wrapping the API response.
         """
-        log.debug("POST ssl-certificates", body=body)
-        data = self._client.post(_SSL_BASE, json=body)
+        log.debug("POST ssl-certificates", body=body, product_code=product_code)
+        extra_headers = {"X-Product-Code": product_code} if product_code else None
+        data = self._client.post(_SSL_BASE, json=body, extra_headers=extra_headers)
         return SslOrder(self._client, data)
 
     @staticmethod
@@ -1054,6 +1058,7 @@ class SslAccessor:
         technical_poc_phone: str = "",
         technical_poc_designation: str = "",
         delegation: dict[str, Any] | None = None,
+        product_code: str | None = None,
     ) -> SslOrder:
         """Create a DV (Domain Validated) single-domain certificate order.
 
@@ -1084,6 +1089,9 @@ class SslAccessor:
             technical_poc_phone: Phone of the technical POC (E.164 format).
             technical_poc_designation: Job title of the technical POC.
             delegation: Raw delegation block (see CertiNext account manager).
+            product_code: Optional CERTInext product code (from the Catalog API)
+                sent as the ``X-Product-Code`` header to select a specific
+                product; ``None`` uses the API default for this variant.
 
         Returns:
             :class:`SslOrder` with status ``"pending-csr"`` or a later stage.
@@ -1103,7 +1111,7 @@ class SslAccessor:
             technical_poc_name=technical_poc_name, technical_poc_email=technical_poc_email,
             technical_poc_phone=technical_poc_phone, technical_poc_designation=technical_poc_designation,
             delegation=delegation,
-        ))
+        ), product_code=product_code)
 
     def create_dv_wildcard(
         self,
@@ -1129,6 +1137,7 @@ class SslAccessor:
         technical_poc_phone: str = "",
         technical_poc_designation: str = "",
         delegation: dict[str, Any] | None = None,
+        product_code: str | None = None,
     ) -> SslOrder:
         """Create a DV wildcard certificate order.
 
@@ -1157,6 +1166,9 @@ class SslAccessor:
             technical_poc_phone: Phone of the technical POC (E.164 format).
             technical_poc_designation: Job title of the technical POC.
             delegation: Raw delegation block (see CertiNext account manager).
+            product_code: Optional CERTInext product code (from the Catalog API)
+                sent as the ``X-Product-Code`` header to select a specific
+                product; ``None`` uses the API default for this variant.
 
         Returns:
             :class:`SslOrder` for the wildcard certificate.
@@ -1175,7 +1187,7 @@ class SslAccessor:
             technical_poc_name=technical_poc_name, technical_poc_email=technical_poc_email,
             technical_poc_phone=technical_poc_phone, technical_poc_designation=technical_poc_designation,
             delegation=delegation,
-        ))
+        ), product_code=product_code)
 
     def create_dv_ucc(
         self,
@@ -1201,6 +1213,7 @@ class SslAccessor:
         technical_poc_phone: str = "",
         technical_poc_designation: str = "",
         delegation: dict[str, Any] | None = None,
+        product_code: str | None = None,
     ) -> SslOrder:
         """Create a DV UCC (multi-domain / Unified Communications) certificate order.
 
@@ -1230,6 +1243,9 @@ class SslAccessor:
             technical_poc_phone: Phone of the technical POC (E.164 format).
             technical_poc_designation: Job title of the technical POC.
             delegation: Raw delegation block (see CertiNext account manager).
+            product_code: Optional CERTInext product code (from the Catalog API)
+                sent as the ``X-Product-Code`` header to select a specific
+                product; ``None`` uses the API default for this variant.
 
         Returns:
             :class:`SslOrder` for the multi-domain certificate.
@@ -1252,7 +1268,7 @@ class SslAccessor:
             technical_poc_name=technical_poc_name, technical_poc_email=technical_poc_email,
             technical_poc_phone=technical_poc_phone, technical_poc_designation=technical_poc_designation,
             delegation=delegation,
-        ))
+        ), product_code=product_code)
 
     def create_dv_wildcard_ucc(
         self,
@@ -1278,6 +1294,7 @@ class SslAccessor:
         technical_poc_phone: str = "",
         technical_poc_designation: str = "",
         delegation: dict[str, Any] | None = None,
+        product_code: str | None = None,
     ) -> SslOrder:
         """Create a DV wildcard UCC certificate order.
 
@@ -1307,6 +1324,9 @@ class SslAccessor:
             technical_poc_phone: Phone of the technical POC (E.164 format).
             technical_poc_designation: Job title of the technical POC.
             delegation: Raw delegation block (see CertiNext account manager).
+            product_code: Optional CERTInext product code (from the Catalog API)
+                sent as the ``X-Product-Code`` header to select a specific
+                product; ``None`` uses the API default for this variant.
 
         Returns:
             :class:`SslOrder` for the wildcard UCC certificate.
@@ -1329,7 +1349,7 @@ class SslAccessor:
             technical_poc_name=technical_poc_name, technical_poc_email=technical_poc_email,
             technical_poc_phone=technical_poc_phone, technical_poc_designation=technical_poc_designation,
             delegation=delegation,
-        ))
+        ), product_code=product_code)
 
     def create_ov(
         self,
@@ -1358,6 +1378,7 @@ class SslAccessor:
         technical_poc_phone: str = "",
         technical_poc_designation: str = "",
         delegation: dict[str, Any] | None = None,
+        product_code: str | None = None,
     ) -> SslOrder:
         """Create an OV (Organization Validated) single-domain certificate order.
 
@@ -1392,6 +1413,9 @@ class SslAccessor:
             technical_poc_phone: Phone of the technical POC (E.164 format).
             technical_poc_designation: Job title of the technical POC.
             delegation: Raw delegation block (see CertiNext account manager).
+            product_code: Optional CERTInext product code (from the Catalog API)
+                sent as the ``X-Product-Code`` header to select a specific
+                product; ``None`` uses the API default for this variant.
 
         Returns:
             :class:`SslOrder` for the OV certificate.
@@ -1412,7 +1436,7 @@ class SslAccessor:
             technical_poc_name=technical_poc_name, technical_poc_email=technical_poc_email,
             technical_poc_phone=technical_poc_phone, technical_poc_designation=technical_poc_designation,
             delegation=delegation,
-        ))
+        ), product_code=product_code)
 
     def create_ov_wildcard(
         self,
@@ -1440,6 +1464,7 @@ class SslAccessor:
         technical_poc_phone: str = "",
         technical_poc_designation: str = "",
         delegation: dict[str, Any] | None = None,
+        product_code: str | None = None,
     ) -> SslOrder:
         """Create an OV wildcard certificate order.
 
@@ -1472,6 +1497,9 @@ class SslAccessor:
             technical_poc_phone: Phone of the technical POC (E.164 format).
             technical_poc_designation: Job title of the technical POC.
             delegation: Raw delegation block (see CertiNext account manager).
+            product_code: Optional CERTInext product code (from the Catalog API)
+                sent as the ``X-Product-Code`` header to select a specific
+                product; ``None`` uses the API default for this variant.
 
         Returns:
             :class:`SslOrder` for the OV wildcard certificate.
@@ -1491,7 +1519,7 @@ class SslAccessor:
             technical_poc_name=technical_poc_name, technical_poc_email=technical_poc_email,
             technical_poc_phone=technical_poc_phone, technical_poc_designation=technical_poc_designation,
             delegation=delegation,
-        ))
+        ), product_code=product_code)
 
     def create_ov_ucc(
         self,
@@ -1519,6 +1547,7 @@ class SslAccessor:
         technical_poc_phone: str = "",
         technical_poc_designation: str = "",
         delegation: dict[str, Any] | None = None,
+        product_code: str | None = None,
     ) -> SslOrder:
         """Create an OV UCC (multi-domain) certificate order.
 
@@ -1552,6 +1581,9 @@ class SslAccessor:
             technical_poc_phone: Phone of the technical POC (E.164 format).
             technical_poc_designation: Job title of the technical POC.
             delegation: Raw delegation block (see CertiNext account manager).
+            product_code: Optional CERTInext product code (from the Catalog API)
+                sent as the ``X-Product-Code`` header to select a specific
+                product; ``None`` uses the API default for this variant.
 
         Returns:
             :class:`SslOrder` for the OV multi-domain certificate.
@@ -1575,7 +1607,7 @@ class SslAccessor:
             technical_poc_name=technical_poc_name, technical_poc_email=technical_poc_email,
             technical_poc_phone=technical_poc_phone, technical_poc_designation=technical_poc_designation,
             delegation=delegation,
-        ))
+        ), product_code=product_code)
 
     def create_ov_wildcard_ucc(
         self,
@@ -1603,6 +1635,7 @@ class SslAccessor:
         technical_poc_phone: str = "",
         technical_poc_designation: str = "",
         delegation: dict[str, Any] | None = None,
+        product_code: str | None = None,
     ) -> SslOrder:
         """Create an OV wildcard UCC certificate order.
 
@@ -1636,6 +1669,9 @@ class SslAccessor:
             technical_poc_phone: Phone of the technical POC (E.164 format).
             technical_poc_designation: Job title of the technical POC.
             delegation: Raw delegation block (see CertiNext account manager).
+            product_code: Optional CERTInext product code (from the Catalog API)
+                sent as the ``X-Product-Code`` header to select a specific
+                product; ``None`` uses the API default for this variant.
 
         Returns:
             :class:`SslOrder` for the OV wildcard UCC certificate.
@@ -1659,7 +1695,7 @@ class SslAccessor:
             technical_poc_name=technical_poc_name, technical_poc_email=technical_poc_email,
             technical_poc_phone=technical_poc_phone, technical_poc_designation=technical_poc_designation,
             delegation=delegation,
-        ))
+        ), product_code=product_code)
 
     def create_ev(
         self,
@@ -1688,6 +1724,7 @@ class SslAccessor:
         technical_poc_phone: str = "",
         technical_poc_designation: str = "",
         delegation: dict[str, Any] | None = None,
+        product_code: str | None = None,
     ) -> SslOrder:
         """Create an EV (Extended Validation) single-domain certificate order.
 
@@ -1722,6 +1759,9 @@ class SslAccessor:
             technical_poc_phone: Phone of the technical POC (E.164 format).
             technical_poc_designation: Job title of the technical POC.
             delegation: Raw delegation block (see CertiNext account manager).
+            product_code: Optional CERTInext product code (from the Catalog API)
+                sent as the ``X-Product-Code`` header to select a specific
+                product; ``None`` uses the API default for this variant.
 
         Returns:
             :class:`SslOrder` for the EV certificate.
@@ -1742,7 +1782,7 @@ class SslAccessor:
             technical_poc_name=technical_poc_name, technical_poc_email=technical_poc_email,
             technical_poc_phone=technical_poc_phone, technical_poc_designation=technical_poc_designation,
             delegation=delegation,
-        ))
+        ), product_code=product_code)
 
     def create_ev_ucc(
         self,
@@ -1770,6 +1810,7 @@ class SslAccessor:
         technical_poc_phone: str = "",
         technical_poc_designation: str = "",
         delegation: dict[str, Any] | None = None,
+        product_code: str | None = None,
     ) -> SslOrder:
         """Create an EV UCC (multi-domain) certificate order.
 
@@ -1803,6 +1844,9 @@ class SslAccessor:
             technical_poc_phone: Phone of the technical POC (E.164 format).
             technical_poc_designation: Job title of the technical POC.
             delegation: Raw delegation block (see CertiNext account manager).
+            product_code: Optional CERTInext product code (from the Catalog API)
+                sent as the ``X-Product-Code`` header to select a specific
+                product; ``None`` uses the API default for this variant.
 
         Returns:
             :class:`SslOrder` for the EV multi-domain certificate.
@@ -1826,7 +1870,7 @@ class SslAccessor:
             technical_poc_name=technical_poc_name, technical_poc_email=technical_poc_email,
             technical_poc_phone=technical_poc_phone, technical_poc_designation=technical_poc_designation,
             delegation=delegation,
-        ))
+        ), product_code=product_code)
 
     def get(self, order_id: str) -> SslOrder:
         """Return an existing SSL order by its order ID.
