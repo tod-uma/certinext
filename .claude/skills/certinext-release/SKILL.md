@@ -19,7 +19,7 @@ Cut a release for certinext. The tag message is the source of truth — GitLab C
      ```bash
      glab ci list   # latest pipeline for `main` should be `success`
      ```
-     If it is not `success`, inspect the failing jobs (`glab ci get -p <pipeline-id>`), **list each failing job and why**, then use `AskUserQuestion` to decide whether to tag anyway or stop. A red `main` does not always block a tag — e.g. a known vendor outage breaking the `/domains` integration tests does not affect the cert-issuance tag pipeline — but make proceeding a deliberate call.
+     If it is not `success`, inspect the failing jobs (`glab ci get -p <pipeline-id>`), **list each failing job and why**, then use `AskUserQuestion` to decide whether to tag anyway or stop. A red `main` does not always block *shipping*: a known vendor `/domains` outage reddens the `integration-cert-issuance` tag job too (`tests/test_sandbox_integration.py` calls `domain.get_list()`), which **skips** the GitLab `release_job` and package upload — but PyPI and the GitHub Release still publish, because those run on GitHub Actions independently of GitLab CI. So tagging mid-outage still reaches PyPI; you just lose the GitLab Release page until the outage clears. Make proceeding a deliberate call. See [RELEASING.md](../../../RELEASING.md) for the full GitLab-vs-GitHub-Actions split.
 
 2. **Find the previous tag and determine the new version.**
    ```bash

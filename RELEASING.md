@@ -103,3 +103,51 @@ as the release description.
 **GitHub Actions** (`release` job): uses the `gh` CLI to fetch the annotated
 tag object from the GitHub API (after the mirror pushes it) and passes the
 message as the release body to `softprops/action-gh-release`.
+
+## Two pipelines, different jobs
+
+The two CI systems live in `.gitlab-ci.yml` (primary —
+`gitlab.its.maine.edu/sysadmin/python-libs/certinext`) and
+`.github/workflows/ci.yml` (the push mirror at `tod-uma/certinext`). They run
+**different jobs**, and the GitLab *tag* pipeline runs different jobs than a
+GitLab *merge* pipeline — so a green merge does not imply a green tag, and vice
+versa.
+
+| Trigger | Jobs |
+| --- | --- |
+| GitLab merge / branch | `lint`, `typecheck`, `unit-test` (`-m "not integration"`); plus `integration-test` → `tests/test_integration.py` (only on `main`, and only when sandbox creds are set) |
+| GitLab tag (`vX.Y.Z`) | `integration-cert-issuance` → `tests/test_sandbox_integration.py`, then `release_build` (GitLab package registry) and `release_job` (GitLab Release page) |
+| GitHub Actions (any `refs/tags/v*`) | `lint`, `typecheck`, `test`, then `publish-pypi` (PyPI via OIDC) and `release` (GitHub Release page) |
+
+## PyPI is published by GitHub Actions, not GitLab
+
+The public PyPI upload is the `publish-pypi` job in `.github/workflows/ci.yml`.
+It triggers on any `refs/tags/v*` (rc tags included), `needs: [lint, typecheck,
+test]`, and uploads to pypi.org over OIDC (`environment: pypi`). Its `test` job
+runs `pytest tests/` with **no sandbox credentials**, so every
+`@pytest.mark.integration` test **skips** there. That makes the PyPI publish
+**independent of GitLab CI and of any CertiNext sandbox outage.**
+
+## When the GitLab tag pipeline goes red but PyPI still publishes
+
+A CertiNext `/domains` outage (the recurring sandbox 422 / empty-content bug)
+breaks the GitLab tag pipeline but **not** PyPI:
+
+- `tests/test_sandbox_integration.py` calls `domain.get_list()`, so
+  `integration-cert-issuance` **fails** during the outage.
+- `release_build` and `release_job` both declare
+  `needs: [{job: integration-cert-issuance, optional: true}]`. `optional: true`
+  only tolerates the job being **absent**, not **failing** — so when it fails,
+  both are **skipped**: no GitLab Release page, no GitLab package upload.
+- GitHub Actions is a separate system whose `test` job skips the integration
+  suite, so `publish-pypi` and the GitHub Release still succeed.
+
+**Precedent:** `rc6` (2026-06-22) was tagged mid-outage — its GitLab tag
+pipeline failed and no GitLab Release was created, yet it still reached public
+PyPI. `rc7` (2026-06-24) was tagged after sandbox `/domains` recovered, so
+`integration-cert-issuance` passed and the whole tag pipeline went green (GitLab
+Release + package + PyPI all published).
+
+**Bottom line:** tagging during a `/domains` outage still ships the package to
+PyPI and creates the GitHub Release — you just won't get a GitLab Release page or
+GitLab package entry until the outage clears and the tag pipeline is re-run.
