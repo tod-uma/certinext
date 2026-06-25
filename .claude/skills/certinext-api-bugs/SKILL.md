@@ -13,6 +13,21 @@ Intended for exact or substring filtering by FQDN. Returns all domains regardles
 **`domainStatus` + `dcvStatus` filters together on `GET /api/certinext/v2/domains`**
 Returns HTTP 400 when both are used in the same request. Individual filter behavior untested.
 
+## Filing a new issue
+
+When a new bug is confirmed, create a GitLab issue and assign it to yourself unless it clearly belongs to another team:
+
+```bash
+$env:GITLAB_HOST = "gitlab.its.maine.edu"
+glab issue create -R sysadmin/python-libs/certinext \
+  --title "CertiNext /endpoint: short description" \
+  --description "..." \
+  --label "certinext,vendor-bug" \
+  --assignee @me
+```
+
+Use `--assignee @me` by default. Assign to someone else only if the issue involves infrastructure, credentials, or a system owned by a different team.
+
 ## When the vendor fixes these, update
 
 - `certinext/domains.py` — remove the `search` warning from the `list()` docstring; rewrite `list_pending_dcv()` to use server-side filtering instead of fetching all + client-side filter via `needs_dcv`
