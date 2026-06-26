@@ -258,21 +258,34 @@ class CertificateDownload:
         val = self._data.get("chainPem")
         return val if isinstance(val, list) else []
 
-    def as_pem_chain(self) -> str:
+    def as_pem_chain(self, *, sort: bool = True) -> str:
         """Return the full certificate chain as a leaf-first PEM string.
 
         Concatenates the end-entity certificate (:attr:`certificate_pem`)
-        followed by each intermediate in :attr:`chain_pem`, normalised so the
-        result ends with exactly one trailing newline. This is the
-        ``fullchain`` layout ACME clients and servers expect, assembled
-        deterministically from the JSON download fields — independent of the
-        ordering of the raw bundle returned by
-        :meth:`SslOrder.download_certificate_pem`.
+        followed by its intermediates, normalised so the result ends with
+        exactly one trailing newline. This is the ``fullchain`` layout ACME
+        clients and servers expect.
+
+        By default (``sort=True``) the intermediates are re-ordered into true
+        signing order (each certificate's issuer follows it, root last) rather
+        than trusting the order CertiNext returns them in, which is non-standard
+        and breaks Windows Schannel / IIS validation (GitLab #4). Pass
+        ``sort=False`` to concatenate the fields in the exact order the API
+        returned — useful for debugging or when ``cryptography`` is unavailable.
+
+        Args:
+            sort: When ``True`` (default), re-order the chain into leaf-first
+                signing order. When ``False``, preserve the API's order.
 
         Returns:
             Leaf-first PEM chain (end-entity certificate followed by its
             intermediates) ending in a single newline, or an empty string if
             no certificate is present.
+
+        Raises:
+            ImportError: If ``sort=True`` and the ``cryptography`` package is
+                not installed. Install it with ``pip install certinext[csr]``,
+                or pass ``sort=False`` to skip sorting.
         """
         pems = [
             pem.strip()
@@ -281,6 +294,12 @@ class CertificateDownload:
         ]
         if not pems:
             return ""
+        if sort:
+            from certinext._chain import order_certificate_chain
+
+            ordered = order_certificate_chain(self.chain_pem, leaf_pem=self.certificate_pem)
+            if ordered:
+                return "\n".join(ordered) + "\n"
         return "\n".join(pems) + "\n"
 
     def as_dict(self) -> dict[str, Any]:

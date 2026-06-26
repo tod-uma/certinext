@@ -862,10 +862,14 @@ csr_file                    PEM-encoded CSR file (positional; omit to read from 
 --signer-place PLACE        City/location for the subscriber agreement (env: CERTINEXT_SIGNER_PLACE)
 
 # Output / control
--o FILE, --output FILE      Write the certificate PEM to FILE (default: stdout)
+-o FILE, --output FILE      Write the certificate PEM bundle to FILE (default: stdout)
 --cert-out FILE             Write only the end-entity (leaf) certificate PEM to FILE
---chain-out FILE            Write only the intermediate CA chain PEM to FILE
+--chain-out FILE            Write only the intermediate CA chain PEM to FILE (signing order)
 --fullchain-out FILE        Write the leaf-first fullchain PEM (leaf + intermediates) to FILE
+--der-out FILE              Write the end-entity certificate in DER (binary) format to FILE
+--all-formats-out DIR       Write {domain}.pem and {domain}.der to DIR in one call
+--raw-chain                 Emit the chain exactly as the API returns it, unsorted
+                            (default: sort into leaf-first signing order; see below)
 --wait SECONDS              Seconds to wait for issuance (default: 300; 0 = submit and exit)
 --order-id ID               Resume polling an existing order instead of creating a new one
 --save-defaults             Store the effective requestor/certificate values as config defaults
@@ -890,6 +894,9 @@ certinext-issue-cert example.com.csr --output example.com.pem
 # Write leaf, intermediate chain, and fullchain to separate files
 # (the layout nginx, Apache, and HAProxy configs typically expect)
 certinext-issue-cert example.com.csr --cert-out cert.pem --chain-out chain.pem --fullchain-out fullchain.pem
+
+# Emit the chain exactly as the API returns it, without re-sorting (debugging)
+certinext-issue-cert example.com.csr --fullchain-out fullchain.pem --raw-chain
 
 # OV certificate with explicit org
 certinext-issue-cert example.com.csr --type ov --org-id 8921215
@@ -1469,8 +1476,8 @@ print(order.status)  # "pending-approval" or "issued"
 
 # 6. Download once issued
 cert = order.download_certificate()           # JSON — cert + chain PEM strings
-pem  = order.download_certificate_pem()      # raw PEM bundle (ordering not guaranteed)
-chain = order.download_certificate().as_pem_chain()  # leaf-first fullchain, normalised newline
+pem  = order.download_certificate_pem()      # raw PEM bundle (API order — see note below)
+chain = order.download_certificate().as_pem_chain()  # leaf-first fullchain, sorted into signing order
 der  = order.download_certificate_der()      # raw DER bytes
 ```
 
@@ -1536,6 +1543,16 @@ chain = wf.download_chain()   # retries HTTP 422 ("not ready yet") automatically
 end-entity certificate followed by its intermediates, with a single trailing
 newline. Use this instead of `download()` when the bundle order matters (e.g.
 when writing a `fullchain.pem` for an ACME server).
+
+> **Chain ordering.** CertiNext returns the chain in a non-standard order — the
+> root CA appears right after the leaf instead of last — which breaks Windows
+> Schannel / IIS validation ([GitLab #4](https://gitlab.its.maine.edu/sysadmin/python-libs/certinext/-/issues/4)).
+> `as_pem_chain()` (and `download_chain()`, `--fullchain-out`, `--chain-out`, and
+> the `--output`/stdout bundle) re-sort the chain into correct leaf-first signing
+> order by default. Pass `as_pem_chain(sort=False)` — or `certinext-issue-cert
+> --raw-chain` — to emit the exact bytes the API returned. Sorting needs the
+> `cryptography` package (`pip install certinext[csr]`); without it the CLI exits
+> with guidance and the library raises `ImportError` unless you use the raw path.
 
 #### Other lifecycle operations
 

@@ -60,7 +60,7 @@ import os
 import sys
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 import structlog
 
@@ -78,7 +78,12 @@ from certinext._keyring import keyring_get, keyring_service
 from certinext.csr import CsrInfo
 from certinext.exceptions import CertiNextAPIError, CertiNextTimeoutError
 from certinext.session import CertiNextSession
-from certinext.ssl_certificates import DcvChallenge, OrderWorkflow, SslOrder
+from certinext.ssl_certificates import (
+    CertificateDownload,
+    DcvChallenge,
+    OrderWorkflow,
+    SslOrder,
+)
 
 log = structlog.get_logger()
 
@@ -151,7 +156,7 @@ def build_parser(config: dict[str, Any] | None = None) -> argparse.ArgumentParse
         help=(
             "Organization Consent Token for OV/EV orders. "
             "When provided, the CA auto-approves without a manual approver step. "
-            "Retrieve from the CertiNext portal under Organization Management → "
+            "Retrieve from the CertiNext portal under Organization Management > "
             "Organization Consent / Consent Tokens for the target organization."
         ),
     )
@@ -193,6 +198,15 @@ def build_parser(config: dict[str, Any] | None = None) -> argparse.ArgumentParse
             "Write all certificate formats to DIR: {domain}.pem (PEM bundle) "
             "and {domain}.der (DER). "
             "The domain stem comes from the order's CN."
+        ),
+    )
+    ctl.add_argument(
+        "--raw-chain", action="store_true",
+        help=(
+            "Emit the certificate chain exactly as the API returns it, without "
+            "re-sorting into leaf-first signing order. By default the chain is "
+            "sorted (correct for IIS/Schannel); use this only for debugging or "
+            "if you cannot install the 'cryptography' package."
         ),
     )
     ctl.add_argument(
@@ -544,20 +558,89 @@ def _try_download_write_binary(
     return True
 
 
+def _fail_chain_sort(exc: ImportError) -> NoReturn:
+    """Report that chain sorting needs ``cryptography`` and exit.
+
+    Called when sorting was requested (``--raw-chain`` not set) but the
+    ``cryptography`` package is unavailable. Points the user at the install
+    extra and the ``--raw-chain`` escape hatch, then exits non-zero.
+
+    Args:
+        exc: The :class:`ImportError` raised by the sorting helper.
+
+    Raises:
+        SystemExit: Always, with code 1.
+    """
+    log.error(
+        "Chain sorting requires the 'cryptography' package",
+        install="pip install certinext[csr]",
+        alternative="pass --raw-chain to emit the raw (unsorted) API order",
+    )
+    raise SystemExit(1) from exc
+
+
+def _ordered_intermediates(dl: CertificateDownload) -> list[str]:
+    """Return the intermediate certificates in leaf-first signing order.
+
+    Sorts the full chain (leaf + intermediates) and drops the leaf, so the
+    result is the intermediates ordered issuer-after-subject up to the root.
+
+    Args:
+        dl: The JSON certificate download to read leaf and intermediates from.
+
+    Returns:
+        Intermediate PEM strings in signing order; empty if there are none.
+
+    Raises:
+        ImportError: If the ``cryptography`` package is not installed.
+    """
+    from certinext._chain import order_certificate_chain
+
+    ordered = order_certificate_chain(dl.chain_pem, leaf_pem=dl.certificate_pem)
+    return ordered[1:] if len(ordered) > 1 else []
+
+
+def _sort_pem_bundle(pem: str) -> str:
+    """Return *pem* re-sorted into leaf-first signing order.
+
+    Splits the bundle into individual certificates and re-orders them. If the
+    bundle contains no parseable certificates the original text is returned
+    unchanged.
+
+    Args:
+        pem: A PEM bundle (leaf plus chain), typically the raw download.
+
+    Returns:
+        The re-sorted PEM bundle ending in a single newline, or *pem* unchanged
+        if nothing could be ordered.
+
+    Raises:
+        ImportError: If the ``cryptography`` package is not installed.
+    """
+    from certinext._chain import order_certificate_chain, split_pem_certificates
+
+    ordered = order_certificate_chain(split_pem_certificates(pem))
+    return "\n".join(ordered) + "\n" if ordered else pem
+
+
 def _write_outputs(order: SslOrder, args: argparse.Namespace, pem: str) -> None:
     """Write the issued certificate to the requested output destinations.
 
-    ``--output`` receives the raw PEM bundle returned by the workflow
-    (unchanged historical behavior); when no destination flag at all is given,
-    that bundle is printed to stdout. ``--cert-out``, ``--chain-out``, and
-    ``--fullchain-out`` are assembled from the JSON download
+    ``--output`` (and the stdout default) receive the raw PEM bundle returned
+    by the workflow, re-sorted into leaf-first signing order. ``--cert-out``,
+    ``--chain-out``, and ``--fullchain-out`` are assembled from the JSON download
     (:meth:`~certinext.ssl_certificates.SslOrder.download_certificate`), which
     separates the end-entity certificate from its intermediates:
 
     - ``--cert-out``: the end-entity (leaf) certificate only
-    - ``--chain-out``: the intermediate CA certificates only
-    - ``--fullchain-out``: leaf followed by intermediates
+    - ``--chain-out``: the intermediate CA certificates only, in signing order
+    - ``--fullchain-out``: leaf followed by intermediates, in signing order
       (:meth:`~certinext.ssl_certificates.CertificateDownload.as_pem_chain`)
+
+    CertiNext returns the chain in a non-standard order that breaks IIS/Schannel
+    (GitLab #4), so every chain-bearing output is sorted by default. ``--raw-chain``
+    disables sorting and emits the exact API order; it is also the escape hatch
+    when ``cryptography`` is not installed.
 
     Each PEM file is normalised to end with exactly one trailing newline.
     The binary format ``--der-out`` writes a DER-encoded end-entity certificate
@@ -568,17 +651,33 @@ def _write_outputs(order: SslOrder, args: argparse.Namespace, pem: str) -> None:
     Args:
         order: The issued order to download certificate parts from.
         args: Parsed CLI arguments (reads ``output``, ``cert_out``,
-            ``chain_out``, ``fullchain_out``, ``der_out``,
-            and ``all_formats_out``).
+            ``chain_out``, ``fullchain_out``, ``der_out``, ``all_formats_out``,
+            and ``raw_chain``).
         pem: Raw PEM bundle already downloaded by the workflow.
 
     Raises:
         SystemExit: With code 1 if any download fails, a requested part is
-            missing from the download, or a file cannot be written. An empty
+            missing from the download, a file cannot be written, or chain
+            sorting is required but ``cryptography`` is not installed. An empty
             intermediate chain with ``--chain-out`` is a warning, not an
             error, because a leaf signed directly by a root has no
             intermediates.
     """
+    sort = not getattr(args, "raw_chain", False)
+
+    # The raw bundle is used by --output, --all-formats-out, and the stdout
+    # default; sort it once (and only if one of those will consume it).
+    need_bundle = bool(args.output or args.all_formats_out) or not (
+        args.cert_out or args.chain_out or args.fullchain_out
+        or args.der_out or args.all_formats_out or args.output
+    )
+    pem_out = pem
+    if need_bundle and sort:
+        try:
+            pem_out = _sort_pem_bundle(pem)
+        except ImportError as exc:
+            _fail_chain_sort(exc)
+
     if args.cert_out or args.chain_out or args.fullchain_out:
         try:
             dl = order.download_certificate()
@@ -591,12 +690,22 @@ def _write_outputs(order: SslOrder, args: argparse.Namespace, pem: str) -> None:
                 raise SystemExit(1)
             _write_file(args.cert_out, leaf + "\n", "certificate")
         if args.chain_out:
-            chain = [p.strip() for p in dl.chain_pem if p and p.strip()]
+            try:
+                chain = (
+                    _ordered_intermediates(dl)
+                    if sort
+                    else [p.strip() for p in dl.chain_pem if p and p.strip()]
+                )
+            except ImportError as exc:
+                _fail_chain_sort(exc)
             if not chain:
                 log.warning("Download contained no intermediate certificates")
             _write_file(args.chain_out, "\n".join(chain) + "\n" if chain else "", "chain")
         if args.fullchain_out:
-            fullchain = dl.as_pem_chain()
+            try:
+                fullchain = dl.as_pem_chain(sort=sort)
+            except ImportError as exc:
+                _fail_chain_sort(exc)
             if not fullchain:
                 log.error("Download contained no certificates for the fullchain")
                 raise SystemExit(1)
@@ -608,16 +717,16 @@ def _write_outputs(order: SslOrder, args: argparse.Namespace, pem: str) -> None:
     if args.all_formats_out:
         stem = _stem_from_domain(order.domain)
         out_dir = Path(args.all_formats_out)
-        _write_file(str(out_dir / f"{stem}.pem"), pem, "certificate bundle (PEM)")
+        _write_file(str(out_dir / f"{stem}.pem"), pem_out, "certificate bundle (PEM)")
         _try_download_write_binary(
             "certificate (DER)", str(out_dir / f"{stem}.der"), order.download_certificate_der,
         )
 
     if args.output:
-        _write_file(args.output, pem, "certificate bundle")
+        _write_file(args.output, pem_out, "certificate bundle")
     elif not (args.cert_out or args.chain_out or args.fullchain_out
               or args.der_out or args.all_formats_out):
-        print(pem, end="")
+        print(pem_out, end="")
 
 
 def _maybe_save_defaults(args: argparse.Namespace) -> None:
