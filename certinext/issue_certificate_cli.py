@@ -338,7 +338,7 @@ def _check_existing_and_prompt(
     try:
         all_matches = sess.orders.find_by_domain(args.domain, status=None)
     except CertiNextAPIError as exc:
-        log.debug("Domain existence check failed — skipping", status_code=exc.status_code)
+        log.debug("Domain existence check failed - skipping", status_code=exc.status_code)
         return None
 
     log.debug("Domain check: orders found", count=len(all_matches), domain=args.domain)
@@ -358,12 +358,12 @@ def _check_existing_and_prompt(
         pending_order = sess.ssl.get(pending.order_number)
         if pending_order.csr_submitted:
             log.warning(
-                "In-progress order exists with CSR on file — resuming may work",
+                "In-progress order exists with CSR on file - resuming may work",
                 domain=args.domain, order_id=pending.order_number, status=pending.certificate_status,
             )
         else:
             log.warning(
-                "In-progress order exists without CSR — resuming will submit current CSR",
+                "In-progress order exists without CSR - resuming will submit current CSR",
                 domain=args.domain, order_id=pending.order_number, status=pending.certificate_status,
             )
         try:
@@ -541,7 +541,7 @@ def _try_download_write_binary(
         data = download_fn()
     except CertiNextAPIError as exc:
         log.warning(
-            "Skipping format — download failed",
+            "Skipping format - download failed",
             output=label, path=path, status_code=exc.status_code,
         )
         return False
@@ -550,7 +550,7 @@ def _try_download_write_binary(
             f.write(data)
     except OSError as exc:
         log.warning(
-            "Skipping format — write failed",
+            "Skipping format - write failed",
             output=label, path=path, error=str(exc),
         )
         return False

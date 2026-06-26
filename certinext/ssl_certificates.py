@@ -2190,7 +2190,7 @@ class OrderWorkflow:
                     self._emit("status_change", current, self._order.status)
             except CertiNextAPIError as exc:
                 log.debug(
-                    "accept_agreement returned HTTP error — order may advance on its own",
+                    "accept_agreement returned HTTP error - order may advance on its own",
                     status_code=exc.status_code, order_id=self._order.order_id,
                 )
             return "accepted-agreement"

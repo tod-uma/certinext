@@ -108,7 +108,7 @@ def _build_row(domain: Domain, expiring_days: int) -> dict[str, str]:
         if days < 0:
             expires_in_str = "EXPIRED"
         elif days <= expiring_days:
-            expires_in_str = f"{days}d ⚠"
+            expires_in_str = f"{days}d !"
         else:
             expires_in_str = f"{days}d"
 
@@ -151,7 +151,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--expiring-days", type=int, default=30, metavar="DAYS",
         help=(
             "Number of days ahead to flag a domain as expiring soon "
-            "(used by --status expiring and the ⚠ indicator; default: 30)"
+            "(used by --status expiring and the ! indicator; default: 30)"
         ),
     )
     parser.add_argument(
@@ -259,7 +259,7 @@ def main() -> None:
             ))
             print(
                 f"\n{len(parents)} domain(s)"
-                f"  [⚠ = expiring within {args.expiring_days} days]"
+                f"  [! = expiring within {args.expiring_days} days]"
             )
     except KeyboardInterrupt:
         print("\nAborted.", file=sys.stderr)

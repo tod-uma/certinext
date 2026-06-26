@@ -450,14 +450,14 @@ def _short(text: str, limit: int = 70) -> str:
         limit: Maximum length before truncation.
 
     Returns:
-        The original text, or a truncated form ending in ``…``.
+        The original text, or a truncated form ending in ``...``.
     """
     text = text.replace("\n", " ").strip()
-    return text if len(text) <= limit else text[: limit - 1] + "…"
+    return text if len(text) <= limit else text[: limit - 3] + "..."
 
 
 def render_summary(results: list[ProbeResult]) -> str:
-    """Return the one-line outcome tally, e.g. ``"PASS 6 · SERVER_BUG 1 · SKIPPED 3"``.
+    """Return the one-line outcome tally, e.g. ``"PASS 6 | SERVER_BUG 1 | SKIPPED 3"``.
 
     Args:
         results: The probe results from :func:`run`.
@@ -467,7 +467,7 @@ def render_summary(results: list[ProbeResult]) -> str:
         order.
     """
     counts = Counter(r.outcome for r in results)
-    return " · ".join(f"{outcome} {counts[outcome]}" for outcome in _SUMMARY_ORDER if counts[outcome])
+    return " | ".join(f"{outcome} {counts[outcome]}" for outcome in _SUMMARY_ORDER if counts[outcome])
 
 
 def render_table(results: list[ProbeResult]) -> str:

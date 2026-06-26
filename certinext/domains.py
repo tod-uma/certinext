@@ -118,7 +118,7 @@ def _has_ns_records(name: str) -> bool:
         return True
     except ImportError:
         log.debug(
-            "dnspython not installed — skipping NS check",
+            "dnspython not installed - skipping NS check",
             domain=name,
         )
         return False
@@ -343,7 +343,7 @@ class Domain:
         """
         if check_ns and _has_ns_records(self.name or ""):
             log.debug(
-                "has NS records (DNS zone boundary) — DCV will not propagate from parent",
+                "has NS records (DNS zone boundary) - DCV will not propagate from parent",
                 domain=self.name,
             )
             return None
