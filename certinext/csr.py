@@ -109,7 +109,7 @@ def parse_csr(pem: str) -> CsrInfo:
     cn = _get(NameOID.COMMON_NAME)
     if not cn:
         raise ValueError(
-            "CSR subject has no Common Name — use --domain to specify the primary domain"
+            "CSR subject has no Common Name - use --domain to specify the primary domain"
         )
 
     try:

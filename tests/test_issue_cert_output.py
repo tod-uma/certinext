@@ -115,7 +115,11 @@ _LEAF_PEM, _INT_PEM, _ROOT_PEM, _LEAF_DER = _make_test_chain()
 LEAF = _LEAF_PEM
 INT1 = _INT_PEM
 INT2 = _ROOT_PEM
+# Correct leaf-first signing order: leaf, intermediate, root.
 BUNDLE = LEAF + "\n" + INT1 + "\n" + INT2 + "\n"
+# The order CertiNext actually returns (GitLab #4): root jumps ahead of the
+# intermediate. Sorting must reorder this back to BUNDLE.
+SCRAMBLED = LEAF + "\n" + INT2 + "\n" + INT1 + "\n"
 
 FAKE_DER: bytes = _LEAF_DER
 
@@ -176,7 +180,7 @@ def _args(**overrides: Any) -> argparse.Namespace:
     """
     ns = argparse.Namespace(
         output=None, cert_out=None, chain_out=None, fullchain_out=None,
-        der_out=None, all_formats_out=None,
+        der_out=None, all_formats_out=None, raw_chain=False,
     )
     for key, value in overrides.items():
         setattr(ns, key, value)
@@ -260,6 +264,36 @@ def test_parser_all_formats_out_defaults_to_none() -> None:
     cfg = {"requestor_name": "Jane", "requestor_phone": "+12075551234"}
     args = build_parser(cfg).parse_args([])
     assert args.all_formats_out is None
+
+
+def test_parser_raw_chain_defaults_false_and_sets_true() -> None:
+    """--raw-chain is a store_true flag defaulting to False."""
+    cfg = {"requestor_name": "Jane", "requestor_phone": "+12075551234"}
+    assert build_parser(cfg).parse_args([]).raw_chain is False
+    assert build_parser(cfg).parse_args(["--raw-chain"]).raw_chain is True
+
+
+def test_help_text_is_ascii() -> None:
+    """--help text must be pure ASCII so it never crashes on a non-UTF-8 console.
+
+    A U+2192 arrow in a help string previously raised UnicodeEncodeError when
+    --help was printed to a cp1252 (Windows) pipe, because cp1252 cannot encode
+    that character. Keeping the help text ASCII avoids the whole class of
+    console-encoding failures regardless of locale.
+    """
+    cfg = {"requestor_name": "Jane", "requestor_phone": "+12075551234"}
+    help_text = build_parser(cfg).format_help()
+    non_ascii = sorted({ch for ch in help_text if not ch.isascii()})
+    assert help_text.isascii(), f"non-ASCII characters in --help text: {non_ascii!r}"
+
+
+def test_help_flag_exits_zero(capsys: pytest.CaptureFixture[str]) -> None:
+    """--help prints usage (including --raw-chain) and exits 0."""
+    cfg = {"requestor_name": "Jane", "requestor_phone": "+12075551234"}
+    with pytest.raises(SystemExit) as excinfo:
+        build_parser(cfg).parse_args(["--help"])
+    assert excinfo.value.code == 0
+    assert "--raw-chain" in capsys.readouterr().out
 
 
 # ---------------------------------------------------------------------------
@@ -362,6 +396,97 @@ def test_write_outputs_unwritable_path_is_fatal(tmp_path: Path) -> None:
     with pytest.raises(SystemExit) as excinfo:
         _write_outputs(order, _args(cert_out=str(missing_dir)), BUNDLE)  # type: ignore[arg-type]
     assert excinfo.value.code == 1
+
+
+# ---------------------------------------------------------------------------
+# _write_outputs — chain sorting (default) vs --raw-chain
+# ---------------------------------------------------------------------------
+
+
+def test_write_outputs_stdout_sorts_scrambled_bundle(capsys: pytest.CaptureFixture[str]) -> None:
+    """By default a scrambled bundle is re-sorted to leaf-first signing order on stdout."""
+    _write_outputs(FakeOrder({}), _args(), SCRAMBLED)  # type: ignore[arg-type]
+    assert capsys.readouterr().out == BUNDLE
+
+
+def test_write_outputs_output_file_sorts_scrambled_bundle(tmp_path: Path) -> None:
+    """--output writes the re-sorted bundle, not the raw API order."""
+    out = tmp_path / "bundle.pem"
+    _write_outputs(FakeOrder({}), _args(output=str(out)), SCRAMBLED)  # type: ignore[arg-type]
+    assert out.read_text() == BUNDLE
+
+
+def test_write_outputs_raw_chain_preserves_stdout_order(capsys: pytest.CaptureFixture[str]) -> None:
+    """--raw-chain emits the bundle exactly as received, unsorted."""
+    _write_outputs(FakeOrder({}), _args(raw_chain=True), SCRAMBLED)  # type: ignore[arg-type]
+    assert capsys.readouterr().out == SCRAMBLED
+
+
+def test_write_outputs_fullchain_sorts_by_default(tmp_path: Path) -> None:
+    """--fullchain-out re-orders an out-of-order JSON chain into signing order."""
+    order = FakeOrder({"certificatePem": LEAF, "chainPem": [INT2, INT1]})
+    fc = tmp_path / "fullchain.pem"
+    _write_outputs(order, _args(fullchain_out=str(fc)), SCRAMBLED)  # type: ignore[arg-type]
+    assert fc.read_text() == BUNDLE
+
+
+def test_write_outputs_fullchain_raw_chain_preserves_api_order(tmp_path: Path) -> None:
+    """--fullchain-out --raw-chain concatenates the JSON fields in API order."""
+    order = FakeOrder({"certificatePem": LEAF, "chainPem": [INT2, INT1]})
+    fc = tmp_path / "fullchain.pem"
+    _write_outputs(order, _args(fullchain_out=str(fc), raw_chain=True), SCRAMBLED)  # type: ignore[arg-type]
+    assert fc.read_text() == LEAF + "\n" + INT2 + "\n" + INT1 + "\n"
+
+
+def test_write_outputs_chain_out_sorts_intermediates(tmp_path: Path) -> None:
+    """--chain-out emits intermediates in signing order, dropping the leaf and root position."""
+    order = FakeOrder({"certificatePem": LEAF, "chainPem": [INT2, INT1]})
+    chain = tmp_path / "chain.pem"
+    _write_outputs(order, _args(chain_out=str(chain)), SCRAMBLED)  # type: ignore[arg-type]
+    assert chain.read_text() == INT1 + "\n" + INT2 + "\n"
+
+
+def test_write_outputs_all_formats_out_sorts_bundle(tmp_path: Path) -> None:
+    """--all-formats-out writes the re-sorted PEM bundle."""
+    _write_outputs(FakeOrder({}), _args(all_formats_out=str(tmp_path)), SCRAMBLED)  # type: ignore[arg-type]
+    assert (tmp_path / f"{_TEST_DOMAIN}.pem").read_text() == BUNDLE
+
+
+def test_write_outputs_chain_sort_missing_cryptography_is_fatal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When sorting is required but cryptography is unavailable, exit 1 with guidance."""
+    import builtins
+
+    real_import = builtins.__import__
+
+    def fake_import(name: str, *args: Any, **kwargs: Any) -> Any:
+        if name == "cryptography" or name.startswith("cryptography."):
+            raise ImportError("simulated missing cryptography")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+    with pytest.raises(SystemExit) as excinfo:
+        _write_outputs(FakeOrder({}), _args(), SCRAMBLED)  # type: ignore[arg-type]
+    assert excinfo.value.code == 1
+
+
+def test_write_outputs_raw_chain_works_without_cryptography(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """--raw-chain never needs cryptography: it emits the raw bundle even if absent."""
+    import builtins
+
+    real_import = builtins.__import__
+
+    def fake_import(name: str, *args: Any, **kwargs: Any) -> Any:
+        if name == "cryptography" or name.startswith("cryptography."):
+            raise ImportError("simulated missing cryptography")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+    _write_outputs(FakeOrder({}), _args(raw_chain=True), SCRAMBLED)  # type: ignore[arg-type]
+    assert capsys.readouterr().out == SCRAMBLED
 
 
 # ---------------------------------------------------------------------------

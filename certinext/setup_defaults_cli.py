@@ -228,7 +228,7 @@ def _prompt_endpoint(
         if region_url == certinext.BASE_URL:
             continue  # already shown as the default option
         options.append((region_label, region_url, "url"))
-    options.append(("Custom URL…", None, "custom"))
+    options.append(("Custom URL...", None, "custom"))
 
     # Mark the option matching the current config as the default choice.
     cur_base = current.get("base_url")
@@ -627,7 +627,7 @@ def main() -> None:
             tag = "[required]" if required else "[optional]"
             label = f"{base_label} {tag}"
             if note:
-                label += f" — {note}"
+                label += f" - {note}"
 
             # For org_id on OV/EV orders, use the API picker when available.
             if key == "org_id" and is_ov_ev and orgs:

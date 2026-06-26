@@ -113,8 +113,8 @@ def main() -> None:
         keyring.set_password(service, "CERTINEXT_CLIENT_SECRET", client_secret)
 
         print()
-        print("Organization Consent Token (optional — needed for OV/EV orders to skip manual approval).")
-        print("Find it in the CertiNext portal: Organization Management → Consent Tokens.")
+        print("Organization Consent Token (optional - needed for OV/EV orders to skip manual approval).")
+        print("Find it in the CertiNext portal: Organization Management > Consent Tokens.")
         current_token = _current(service, "CERTINEXT_PREVETTING_TOKEN")
         token_hint = " [keep existing]" if current_token else " (press Enter to skip)"
         prevetting_token = _prompt_with_default(
@@ -135,7 +135,7 @@ def main() -> None:
         elif current_token:
             print("  CERTINEXT_PREVETTING_TOKEN = (kept existing)")
         else:
-            print("  CERTINEXT_PREVETTING_TOKEN = (not set — pass --prevetting-token at runtime if needed)")
+            print("  CERTINEXT_PREVETTING_TOKEN = (not set - pass --prevetting-token at runtime if needed)")
         print()
         if args.profile:
             print(f"Run scripts with '--profile {args.profile}' or set CERTINEXT_PROFILE={args.profile}.")

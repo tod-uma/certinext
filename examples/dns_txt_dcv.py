@@ -134,7 +134,7 @@ def set_dns_txt_record(fqdn: str, value: str, dry_run: bool) -> None:
         )
     """
     raise NotImplementedError(
-        f"Implement set_dns_txt_record — publish TXT {value!r} at {fqdn!r} via your DNS provider"
+        f"Implement set_dns_txt_record - publish TXT {value!r} at {fqdn!r} via your DNS provider"
     )
 
 
@@ -179,7 +179,7 @@ def has_dns_txt_record(fqdn: str, value: str, nameserver: str) -> bool:
         return False
     """
     raise NotImplementedError(
-        f"Implement has_dns_txt_record — check TXT {value!r} at {fqdn!r} against {nameserver!r}"
+        f"Implement has_dns_txt_record - check TXT {value!r} at {fqdn!r} against {nameserver!r}"
     )
 
 
@@ -256,7 +256,7 @@ def process_domain(
 
     dcv = domain.get_dcv()
     if dcv.method != "DNS-TXT":
-        log.debug("%s: skipping — DCV method is %r (not DNS-TXT)", name, dcv.method or "unset")
+        log.debug("%s: skipping - DCV method is %r (not DNS-TXT)", name, dcv.method or "unset")
         return
 
     token: str = dcv.token
@@ -276,12 +276,12 @@ def process_domain(
     check_ns = auth_nameservers[:1] or public_nameservers[:1]
     if check_ns:
         if not has_dns_txt_record(dns_fqdn, token, check_ns[0]):
-            log.info("%s: TXT not yet visible — publishing", name)
+            log.info("%s: TXT not yet visible - publishing", name)
             set_dns_txt_record(dns_fqdn, token, dry_run)
             if not dry_run:
-                log.info("%s: record published — DNS propagation takes time, run again later", name)
+                log.info("%s: record published - DNS propagation takes time, run again later", name)
             return
-        log.info("%s: TXT record visible — checking full propagation", name)
+        log.info("%s: TXT record visible - checking full propagation", name)
     else:
         # No nameservers configured: publish unconditionally and proceed to verify.
         # set_dns_txt_record should be idempotent (UPSERT).
@@ -289,7 +289,7 @@ def process_domain(
         if dry_run:
             log.info("[dry-run] %s: would call domain.verify()", name)
             return
-        log.info("%s: no propagation check configured — proceeding directly to verify", name)
+        log.info("%s: no propagation check configured - proceeding directly to verify", name)
 
     # Step 2 — wait for all authoritative nameservers.
     if auth_nameservers and not _all_see_txt(dns_fqdn, token, auth_nameservers):
@@ -304,7 +304,7 @@ def process_domain(
         log.info("%s: not yet visible on public resolvers, run again later", name)
         return
 
-    log.info("%s: fully propagated — triggering DCV verification", name)
+    log.info("%s: fully propagated - triggering DCV verification", name)
 
     # Step 4 — trigger CertiNext DCV verification.
     if dry_run:
@@ -440,9 +440,9 @@ def main() -> None:
 
         apply_sandbox(args)
         if args.sandbox:
-            log.warning("SANDBOX MODE — connecting to CertiNext sandbox API")
+            log.warning("SANDBOX MODE - connecting to CertiNext sandbox API")
         if args.dry_run:
-            log.info("DRY RUN — no changes will be made")
+            log.info("DRY RUN - no changes will be made")
 
         sess = build_session(args)
         log.info("Starting run pid=%d correlation_id=%s", os.getpid(), correlation_id)

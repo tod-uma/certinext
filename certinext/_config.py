@@ -308,7 +308,7 @@ def _render(doc: dict[str, Any]) -> str:
         TOML text ending in a newline.
     """
     chunks: list[str] = [
-        "# CertiNext stored defaults — see the certinext README.",
+        "# CertiNext stored defaults - see the certinext README.",
         "# Managed by certinext-setup-defaults / --save-defaults; comments are not preserved.",
         "",
     ]
