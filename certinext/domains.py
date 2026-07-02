@@ -26,6 +26,23 @@ log = structlog.get_logger()
 
 _BASE = "/api/certinext/v2/domains"
 
+# get_list() with no offset/limit is meant to return the whole account, but
+# passing no `limit` at all just gets the server's own default page size back
+# -- silently truncating large accounts. It also can't safely loop the raw
+# offset/limit pages under the API's default sort, which vendor-confirmed is
+# not a stable total order across offset values (tracked as issue #1 on UMS's
+# private GitLab instance at gitlab.its.maine.edu -- not the public GitHub
+# mirror's tracker, and not visible outside UMS). domainName is a unique,
+# documented sortBy value instead, so paging under it is a stable total order
+# regardless of account size; _LIST_PAGE_SIZE bounds each request (the API
+# docs recommend limit <=200).
+_LIST_PAGE_SIZE = 200
+# Defensive ceiling on the number of pages get_list() will walk before giving
+# up, in case pagination ever regresses to non-terminating drift. At
+# _LIST_PAGE_SIZE rows per page this allows 200,000 domains -- far beyond any
+# real account.
+_MAX_LIST_PAGES = 1000
+
 DomainStatus = Literal["ACTIVE", "INACTIVE", "EXPIRED", "REVOKED"]
 """Valid values returned by :attr:`Domain.status`."""
 
@@ -124,6 +141,27 @@ def _has_ns_records(name: str) -> bool:
         return False
     except Exception:
         return False
+
+
+def _extract_domain_rows(result: dict[str, Any] | list[Any]) -> list[Any]:
+    """Return the list of raw domain rows from a Domains API response.
+
+    The endpoint sometimes returns a bare JSON array and sometimes a dict
+    with the array nested under a key (e.g. total-count metadata alongside
+    the rows); this normalizes both shapes.
+
+    Args:
+        result: The parsed JSON response from ``GET /domains``.
+
+    Returns:
+        The nested list of raw row dicts, or an empty list if none is found.
+    """
+    if isinstance(result, list):
+        return result
+    for val in result.values():
+        if isinstance(val, list):
+            return val
+    return []
 
 
 class Domain:
@@ -588,13 +626,31 @@ class DomainAccessor:
     ) -> list[Domain]:
         """Return a list of all domains in the account.
 
+        When both ``offset`` and ``limit`` are omitted, this fetches the
+        **complete** account by paging under an explicit ``sortBy=domainName``
+        sort, which is a stable total order regardless of account size (the
+        API's default sort order is not -- see the ``limit``/``offset`` note
+        below). Pass ``offset``/``limit`` explicitly to fetch a single raw
+        server page instead, under whichever ordering the API applies by
+        default.
+
         Server-side filters (``search``, ``domain_status``, ``dcv_status``) are
         passed to the API and reduce the data transferred. ``pattern`` is applied
         client-side for cases that require regex matching.
 
         Args:
-            offset: 0-based row offset for pagination.
-            limit: Page size (API default 50; keep ≤200 for performance).
+            offset: 0-based row offset. When given together with ``limit``,
+                fetches exactly that single server page instead of the whole
+                account.
+            limit: Page size. When given together with ``offset``, fetches
+                exactly that single server page (API default 50; keep ≤200
+                for performance) instead of the whole account. **Note:** the
+                API's default sort order for a raw page like this is not a
+                stable total order across offset values -- rows can be
+                skipped or duplicated between pages (vendor-confirmed;
+                tracked as issue #1 on UMS's private GitLab instance at
+                gitlab.its.maine.edu, not the public GitHub mirror's issue
+                tracker). Omit ``offset``/``limit`` for a reliable full list.
             search: Full FQDN for exact match (``maine.edu``) or a substring
                 for LIKE matching (``maine``). Maps to the API ``search`` param.
                 **Warning:** the API ``search`` parameter is partially fixed
@@ -619,6 +675,34 @@ class DomainAccessor:
             re.error: If ``pattern`` is not a valid regular expression.
             CertiNextAPIError: On a non-2xx API response. Provides ``.status_code`` and ``.body``.
         """
+        if offset is None and limit is None:
+            domains = self._get_all_domains(search, domain_status, dcv_status)
+        else:
+            domains = self._get_domains_page(offset, limit, search, domain_status, dcv_status)
+        if pattern is not None:
+            domains = [d for d in domains if re.fullmatch(pattern, d.name or "", re.IGNORECASE)]
+        return domains
+
+    def _get_domains_page(
+        self,
+        offset: int | None,
+        limit: int | None,
+        search: str | None,
+        domain_status: str | None,
+        dcv_status: str | None,
+    ) -> list[Domain]:
+        """Fetch a single raw server page, under whichever ordering the API applies by default.
+
+        Args:
+            offset: 0-based row offset, or ``None`` to omit.
+            limit: Page size, or ``None`` to omit.
+            search: Server-side ``search`` filter, or ``None`` to omit.
+            domain_status: Server-side ``domainStatus`` filter, or ``None`` to omit.
+            dcv_status: Server-side ``dcvStatus`` filter, or ``None`` to omit.
+
+        Returns:
+            List of `Domain` objects for that one page.
+        """
         params: dict[str, Any] = {}
         if offset is not None:
             params["offset"] = offset
@@ -631,18 +715,62 @@ class DomainAccessor:
         if dcv_status is not None:
             params["dcvStatus"] = dcv_status
         result = self._client.get(_BASE, params=params or None)
-        raw: list[Any]
-        if isinstance(result, list):
-            raw = result
+        return [Domain(self._client, item) for item in _extract_domain_rows(result)]
+
+    def _get_all_domains(
+        self,
+        search: str | None,
+        domain_status: str | None,
+        dcv_status: str | None,
+    ) -> list[Domain]:
+        """Fetch every domain in the account via stable sortBy=domainName offset paging.
+
+        Args:
+            search: Server-side ``search`` filter, or ``None`` to omit.
+            domain_status: Server-side ``domainStatus`` filter, or ``None`` to omit.
+            dcv_status: Server-side ``dcvStatus`` filter, or ``None`` to omit.
+
+        Returns:
+            List of `Domain` objects for the whole account, de-duplicated by
+            id (or name, if id is absent) as a defensive measure against any
+            residual server-side ordering drift.
+        """
+        params: dict[str, Any] = {
+            "sortBy": "domainName",
+            "sortDir": "asc",
+            "limit": _LIST_PAGE_SIZE,
+        }
+        if search is not None:
+            params["search"] = search
+        if domain_status is not None:
+            params["domainStatus"] = domain_status
+        if dcv_status is not None:
+            params["dcvStatus"] = dcv_status
+
+        domains: list[Domain] = []
+        seen: set[str] = set()
+        offset = 0
+        for _ in range(_MAX_LIST_PAGES):
+            result = self._client.get(_BASE, params={**params, "offset": offset})
+            raw = _extract_domain_rows(result)
+            if not raw:
+                break
+            for item in raw:
+                domain = Domain(self._client, item)
+                key = domain.id or domain.name or ""
+                if key in seen:
+                    continue
+                seen.add(key)
+                domains.append(domain)
+            if len(raw) < _LIST_PAGE_SIZE:
+                break
+            offset += _LIST_PAGE_SIZE
         else:
-            raw = []
-            for val in result.values():
-                if isinstance(val, list):
-                    raw = val
-                    break
-        domains = [Domain(self._client, item) for item in raw]
-        if pattern is not None:
-            domains = [d for d in domains if re.fullmatch(pattern, d.name or "", re.IGNORECASE)]
+            log.warning(
+                "get_list hit the defensive page-count ceiling; results may be incomplete",
+                pages=_MAX_LIST_PAGES,
+                count=len(domains),
+            )
         return domains
 
     def get_pending_dcv(self, search: str | None = None, pattern: str | None = None) -> list[Domain]:
