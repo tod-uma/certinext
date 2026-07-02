@@ -359,11 +359,14 @@ class TestDomainAccessorList:
         accessor.get_list(offset=10, limit=5)
         mock_client.get.assert_called_once_with("/api/certinext/v2/domains", params={"offset": 10, "limit": 5})
 
-    def test_no_params_when_not_specified(self, accessor: DomainAccessor, mock_client: MagicMock):
-        """list() passes params=None when offset and limit are not given."""
+    def test_no_params_paginates_with_sortby_domainname(self, accessor: DomainAccessor, mock_client: MagicMock):
+        """list() with no offset/limit pages under an explicit sortBy=domainName sort."""
         mock_client.get.return_value = []
         accessor.get_list()
-        mock_client.get.assert_called_once_with("/api/certinext/v2/domains", params=None)
+        mock_client.get.assert_called_once_with(
+            "/api/certinext/v2/domains",
+            params={"sortBy": "domainName", "sortDir": "asc", "limit": 200, "offset": 0},
+        )
 
     def test_returns_empty_list_when_no_domains(self, accessor: DomainAccessor, mock_client: MagicMock):
         """list returns an empty list when the API returns an empty array."""
@@ -409,19 +412,28 @@ class TestDomainAccessorList:
         """list(search=) forwards the value as the 'search' query parameter."""
         mock_client.get.return_value = []
         accessor.get_list(search="maine.edu")
-        mock_client.get.assert_called_once_with("/api/certinext/v2/domains", params={"search": "maine.edu"})
+        mock_client.get.assert_called_once_with(
+            "/api/certinext/v2/domains",
+            params={"sortBy": "domainName", "sortDir": "asc", "limit": 200, "search": "maine.edu", "offset": 0},
+        )
 
     def test_domain_status_passed_as_query_param(self, accessor: DomainAccessor, mock_client: MagicMock):
         """list(domain_status=) forwards the value as the 'domainStatus' query parameter."""
         mock_client.get.return_value = []
         accessor.get_list(domain_status="ACTIVE")
-        mock_client.get.assert_called_once_with("/api/certinext/v2/domains", params={"domainStatus": "ACTIVE"})
+        mock_client.get.assert_called_once_with(
+            "/api/certinext/v2/domains",
+            params={"sortBy": "domainName", "sortDir": "asc", "limit": 200, "domainStatus": "ACTIVE", "offset": 0},
+        )
 
     def test_dcv_status_passed_as_query_param(self, accessor: DomainAccessor, mock_client: MagicMock):
         """list(dcv_status=) forwards the value as the 'dcvStatus' query parameter."""
         mock_client.get.return_value = []
         accessor.get_list(dcv_status="PENDING")
-        mock_client.get.assert_called_once_with("/api/certinext/v2/domains", params={"dcvStatus": "PENDING"})
+        mock_client.get.assert_called_once_with(
+            "/api/certinext/v2/domains",
+            params={"sortBy": "domainName", "sortDir": "asc", "limit": 200, "dcvStatus": "PENDING", "offset": 0},
+        )
 
     def test_server_side_params_combined(self, accessor: DomainAccessor, mock_client: MagicMock):
         """list() can combine search, domain_status, and dcv_status in a single call."""
@@ -429,8 +441,83 @@ class TestDomainAccessorList:
         accessor.get_list(search="maine", domain_status="ACTIVE", dcv_status="PENDING,REJECTED")
         mock_client.get.assert_called_once_with(
             "/api/certinext/v2/domains",
-            params={"search": "maine", "domainStatus": "ACTIVE", "dcvStatus": "PENDING,REJECTED"},
+            params={
+                "sortBy": "domainName",
+                "sortDir": "asc",
+                "limit": 200,
+                "search": "maine",
+                "domainStatus": "ACTIVE",
+                "dcvStatus": "PENDING,REJECTED",
+                "offset": 0,
+            },
         )
+
+
+def _domain_row(idx: int) -> dict:
+    """Build a minimal, uniquely-identified domain row for pagination tests.
+
+    Args:
+        idx: Distinguishes this row's id/name from every other generated row.
+
+    Returns:
+        A dict shaped like a single row of the Domains list API response.
+    """
+    return dict(SAMPLE_DOMAIN_DATA, domainId=f"id-{idx}", domainName=f"domain-{idx}.edu")
+
+
+class TestDomainAccessorListPagination:
+    """get_list() with no offset/limit pages the whole account under sortBy=domainName."""
+
+    def test_paginates_across_multiple_pages(self, accessor: DomainAccessor, mock_client: MagicMock, monkeypatch):
+        """Accumulates rows across pages, stopping at the first short page."""
+        monkeypatch.setattr("certinext.domains._LIST_PAGE_SIZE", 2)
+        pages = [
+            [_domain_row(1), _domain_row(2)],
+            [_domain_row(3), _domain_row(4)],
+            [_domain_row(5)],  # short page: fewer rows than the page size
+        ]
+        mock_client.get.side_effect = pages
+        result = accessor.get_list()
+        assert [d.id for d in result] == ["id-1", "id-2", "id-3", "id-4", "id-5"]
+        assert mock_client.get.call_count == 3
+        offsets_used = [call.kwargs["params"]["offset"] for call in mock_client.get.call_args_list]
+        assert offsets_used == [0, 2, 4]
+
+    def test_stops_on_empty_page(self, accessor: DomainAccessor, mock_client: MagicMock, monkeypatch):
+        """Stops paging as soon as a page comes back empty."""
+        monkeypatch.setattr("certinext.domains._LIST_PAGE_SIZE", 2)
+        pages = [[_domain_row(1), _domain_row(2)], []]
+        mock_client.get.side_effect = pages
+        result = accessor.get_list()
+        assert [d.id for d in result] == ["id-1", "id-2"]
+        assert mock_client.get.call_count == 2
+
+    def test_dedupes_rows_repeated_across_pages(self, accessor: DomainAccessor, mock_client: MagicMock, monkeypatch):
+        """A row echoed on a second page (residual ordering drift) is not double-counted."""
+        monkeypatch.setattr("certinext.domains._LIST_PAGE_SIZE", 2)
+        overlapping_row = _domain_row(2)
+        pages = [
+            [_domain_row(1), overlapping_row],
+            [overlapping_row, _domain_row(3)],
+            [],
+        ]
+        mock_client.get.side_effect = pages
+        result = accessor.get_list()
+        assert [d.id for d in result] == ["id-1", "id-2", "id-3"]
+
+    def test_stops_at_defensive_page_ceiling(self, accessor: DomainAccessor, mock_client: MagicMock, monkeypatch):
+        """Never-shrinking pages stop at the defensive ceiling instead of looping forever."""
+        monkeypatch.setattr("certinext.domains._LIST_PAGE_SIZE", 2)
+        monkeypatch.setattr("certinext.domains._MAX_LIST_PAGES", 3)
+        counter = iter(range(1, 100))
+
+        def _next_page(*_args, **_kwargs):
+            return [_domain_row(next(counter)), _domain_row(next(counter))]
+
+        mock_client.get.side_effect = _next_page
+        result = accessor.get_list()
+        assert len(result) == 6  # 3 pages * page size 2
+        assert mock_client.get.call_count == 3
 
 
 class TestDomainAccessorGetPendingDcv:
@@ -480,7 +567,10 @@ class TestDomainAccessorGetPendingDcv:
         """
         mock_client.get.return_value = []
         accessor.get_pending_dcv()
-        mock_client.get.assert_called_once_with("/api/certinext/v2/domains", params=None)
+        mock_client.get.assert_called_once_with(
+            "/api/certinext/v2/domains",
+            params={"sortBy": "domainName", "sortDir": "asc", "limit": 200, "offset": 0},
+        )
 
 
 class TestDomainAccessorGet:

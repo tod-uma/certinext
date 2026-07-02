@@ -13,6 +13,16 @@ Intended for exact or substring filtering by FQDN. Returns all domains regardles
 **`domainStatus` + `dcvStatus` filters together on `GET /api/certinext/v2/domains`**
 Returns HTTP 400 when both are used in the same request. Individual filter behavior untested.
 
+## Pagination
+
+`GET /api/certinext/v2/domains`'s default sort order (`createdAt desc`) is
+not a documented stable total order across `offset` pages — vendor-confirmed;
+looping raw `offset`/`limit` under it can skip or duplicate rows. `domainName`
+is a documented, unique `sortBy` value, so `DomainAccessor.get_list()` pages
+under `sortBy=domainName&sortDir=asc` whenever it's asked for the whole
+account (no `offset`/`limit` given). Only pass `offset`/`limit` explicitly
+when you want one raw server page and can tolerate the default ordering.
+
 ## Filing a new issue
 
 When a new bug is confirmed, create a GitLab issue and assign it to yourself unless it clearly belongs to another team:

@@ -1148,11 +1148,21 @@ for d in domains:
     print(d)
 ```
 
-Paginate with `offset` and `limit`:
+With no `offset`/`limit`, `get_list()` returns the **complete** account,
+paging under an explicit `sortBy=domainName` sort behind the scenes — that
+sort is a stable total order regardless of account size.
+
+Pass `offset` and `limit` explicitly to fetch a single raw server page
+instead, under whichever ordering the API applies by default:
 
 ```python
 page = sess.domain.get_list(offset=50, limit=25)
 ```
+
+> **Note:** the API's default sort order for a raw page like this is not a
+> stable total order across offset values — rows can be skipped or
+> duplicated between pages if you loop `offset` yourself. Omit
+> `offset`/`limit` for a reliable full list instead.
 
 Filter by status server-side (reduces data transferred):
 
