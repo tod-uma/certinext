@@ -76,8 +76,9 @@ def main() -> None:
         apply_sandbox(args)
         sess = build_session(args)
 
-        # get_pending_dcv() uses server-side filters (ACTIVE + non-VERIFIED DCV status)
-        # to minimise data transferred, then applies the optional client-side pattern.
+        # get_pending_dcv() fetches the full domain list and filters client-side
+        # (needs_dcv + the optional pattern) because combining domainStatus and
+        # dcvStatus server-side filters has returned HTTP 400 (GitLab issue #6).
         domains = sess.domain.get_pending_dcv(pattern=args.pattern)
         _show_domains(domains, args.json)
     except KeyboardInterrupt:
