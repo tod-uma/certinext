@@ -8,14 +8,21 @@ The following CertiNext API bugs were confirmed by vendor support on 2026-05-20.
 ## Broken parameters
 
 **`search` on `GET /api/certinext/v2/domains`**
-Intended for exact or substring filtering by FQDN. As of 2026-06-05: an
-exact-FQDN value filters correctly, but a substring returns 0 rows instead
-of the matching domains (originally it returned all domains regardless of
-value; GitLab issue #2). Workaround: fetch all, filter client-side
-(`get_list()`'s `pattern` regex).
+Intended for exact or substring filtering by FQDN. Environment split
+confirmed 2026-07-02 by probe R01 (GitLab issue #2): **sandbox** now matches
+substrings correctly; **production** still returns 0 rows for any substring
+(exact-FQDN works in both). Results are also capped at the ~50-row default
+page. Workaround until prod is fixed: fetch all, filter client-side
+(`get_list()`'s `pattern` regex). History: returned everything regardless of
+value until ~2026-05; exact-FQDN fixed 2026-06-05.
 
 **`domainStatus` + `dcvStatus` filters together on `GET /api/certinext/v2/domains`**
-Returns HTTP 400 when both are used in the same request. Individual filter behavior untested.
+Originally returned HTTP 400 when both were used in one request (reported
+2026-05-20). Probe R02 confirmed the combination now works in **both**
+environments (2026-07-02, GitLab issue #6). `get_pending_dcv()` still fetches
+all + filters client-side; the switch to server-side filtering is planned for
+the 1.0 refactor (phase 1). Contested enum values remain (issue #6 / vendor
+#135290): `dcvStatus=EXPIRED` still returns 400 in both envs (probe R23).
 
 ## Pagination
 

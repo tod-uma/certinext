@@ -275,3 +275,30 @@ class TestLedgerAccessorGetList:
         result = accessor.get_list(page_size=2)
         assert len(result) == 2
         assert mock_session.get.call_count == 2
+
+    def test_wrapper_total_pages_terminates(self):
+        """get_list() stops at the wrapper's totalPages instead of fetching further."""
+        client, mock_session = _make_client()
+        mock_session.get.side_effect = [
+            _ok_response({"content": [_make_record(1), _make_record(2)], "totalElements": 3, "totalPages": 2}),
+            _ok_response({"content": [_make_record(3)], "totalElements": 3, "totalPages": 2}),
+        ]
+        accessor = LedgerAccessor(client)
+        result = accessor.get_list(page_size=2)
+        assert len(result) == 3
+        assert mock_session.get.call_count == 2
+
+    def test_wrapper_exact_multiple_no_infinite_loop(self):
+        """A total that is an exact multiple of page_size must not refetch the clamped last page.
+
+        The server clamps out-of-range pages to the last page (probe R16,
+        2026-07-02), so without totalPages termination a full final page
+        would be refetched forever.
+        """
+        client, mock_session = _make_client()
+        full_last = {"content": [_make_record(1), _make_record(2)], "totalElements": 2, "totalPages": 1}
+        mock_session.get.side_effect = [_ok_response(full_last)] * 3
+        accessor = LedgerAccessor(client)
+        result = accessor.get_list(page_size=2)
+        assert len(result) == 2
+        assert mock_session.get.call_count == 1

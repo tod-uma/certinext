@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "certinext"
-version = "0.3.0rc9"
+version = "0.3.0rc10"
 description = "Python client library for the CertiNext certificate management API"
 readme = "README.md"
 license = "Apache-2.0"
@@ -79,6 +79,7 @@ include = ["certinext*"]
 testpaths = ["tests"]
 markers = [
     "integration: tests that call the live CertiNext sandbox API (requires keyring profile 'sandbox')",
+    "probe: live assumption-register probes (R01-R24) against sandbox or prod; env via CERTINEXT_PROBE_ENV",
 ]
 
 [tool.ruff]
