@@ -414,7 +414,7 @@ def capture(client: CertiNextClient, out_dir: Path, raw_dir: Path | None) -> int
 
 def main() -> None:
     """Entry point: parse args, capture one environment's corpus."""
-    parser = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
+    parser = argparse.ArgumentParser(description=(__doc__ or "").split("\n", 1)[0])
     parser.add_argument("--sandbox", action="store_true", help="capture the sandbox instead of production")
     parser.add_argument(
         "--out-root", default="tests/fixtures/corpus",
