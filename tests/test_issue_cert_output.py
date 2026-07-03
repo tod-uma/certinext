@@ -175,8 +175,7 @@ def _args(**overrides: Any) -> argparse.Namespace:
 
     Returns:
         Namespace with ``output``, ``cert_out``, ``chain_out``,
-        ``fullchain_out``, ``der_out``, ``pkcs7_out``, and
-        ``all_formats_out`` attributes.
+        ``fullchain_out``, ``der_out``, and ``all_formats_out`` attributes.
     """
     ns = argparse.Namespace(
         output=None, cert_out=None, chain_out=None, fullchain_out=None,
