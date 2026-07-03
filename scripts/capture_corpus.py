@@ -38,6 +38,9 @@ The mapping (see :data:`_KEY_RULES` and the ``_pseudo_*`` functions):
   Hierarchy is preserved: equal labels map to equal pseudonyms, so
   parent/child relationships (DCV inheritance analysis) survive.
 - **Emails** — ``user-<6 hex of sha256>@example.invalid``.
+- **Phone numbers** — every digit replaced from a hash-derived decimal
+  stream; non-digit formatting (``+``, dashes) kept, so the vendor's format
+  variance survives.
 - **Person / organization names** — ``Name-<6 hex>`` / ``Org-<6 hex>``.
 - **Identifiers** (org / account / domain / order ids) — pseudo-ids derived
   from ``sha256`` of the real id, so cross-file correlation (a domain's list
@@ -119,10 +122,15 @@ _PERSON_KEYS = {
 #: which pass ``org_name_keys=True`` (product names etc. stay readable).
 _ORG_NAME_KEYS = {"organizationname", "orgname", "companyname", "legalname", "groupname"}
 
+#: JSON keys whose string values are phone numbers.
+_PHONE_KEYS = {"phone", "phonenumber", "mobilenumber", "telephonenumber", "fax", "faxnumber"}
+
 #: JSON keys treated as correlatable identifiers (pseudonymized, not dropped).
 _ID_KEYS = {
     "id", "domainid", "orgid", "organizationid", "orderid", "ordernumber",
     "accountnumber", "certificateid", "parentid", "groupid",
+    "organizationnumber", "groupnumber", "representativenumber",
+    "requestnumber", "requestid", "attemptid",
 }
 
 
@@ -149,19 +157,42 @@ def _pseudo_email(value: str) -> str:
 
 
 def _pseudo_id(value: Any) -> Any:
-    """Pseudonymize an identifier, preserving type and digit-count for ints.
+    """Pseudonymize an identifier, preserving type and digit-count.
 
-    Strings map to ``id-<8 hex>``; integers map to a same-width integer
-    derived from the hash so downstream ``int()`` parsing still succeeds.
+    Integers (and all-digit strings) map to a same-width number derived from
+    the hash — as int or str to match the input — so downstream ``int()``
+    parsing and shape expectations still hold. Other strings map to
+    ``id-<8 hex>``.
     """
     if isinstance(value, bool) or value is None:
         return value
-    if isinstance(value, int):
-        digits = len(str(abs(value)))
+    if isinstance(value, int) or (isinstance(value, str) and value.isdigit()):
+        digits = len(str(abs(int(value))))
         h = int(hashlib.sha256((_SALT + str(value)).encode()).hexdigest(), 16)
         low, high = 10 ** (digits - 1), 10**digits
-        return low + h % (high - low)
+        pseudo = low + h % (high - low)
+        return pseudo if isinstance(value, int) else str(pseudo)
     return f"id-{_hash(str(value), 8)}"
+
+
+def _pseudo_phone(value: str) -> str:
+    """Pseudonymize a phone number, preserving its exact format.
+
+    Every digit is replaced from a hash-derived decimal stream; non-digit
+    characters (``+``, ``-``, spaces, parentheses) are kept in place, so the
+    format variance the vendor sends (``2075551234`` vs ``+12075551234``) —
+    which future models must parse — survives sanitization.
+    """
+    stream = str(int(hashlib.sha256((_SALT + value).encode()).hexdigest(), 16))
+    out: list[str] = []
+    i = 0
+    for ch in value:
+        if ch.isdigit():
+            out.append(stream[i % len(stream)])
+            i += 1
+        else:
+            out.append(ch)
+    return "".join(out)
 
 
 def _looks_like_email(value: str) -> bool:
@@ -183,7 +214,9 @@ def sanitize(node: Any, *, org_name_keys: bool = False) -> Any:
     if isinstance(node, dict):
         # A dict with an email/phone sibling is a contact record: its bare
         # ``name`` is a person name (e.g. requestor.name, signer blocks).
-        contact_record = any(k.lower() in _EMAIL_KEYS or k.lower() in ("phone", "emailid") for k in node)
+        contact_record = any(
+            k.lower() in _EMAIL_KEYS or k.lower() in _PHONE_KEYS or k.lower() == "emailid" for k in node
+        )
         out: dict[str, Any] = {}
         for key, value in node.items():
             lk = key.lower()
@@ -194,6 +227,8 @@ def sanitize(node: Any, *, org_name_keys: bool = False) -> Any:
                     out[key] = _pseudo_domain(value)
                 elif lk in _PERSON_KEYS or (contact_record and lk == "name"):
                     out[key] = f"Name-{_hash(value, 6)}"
+                elif lk in _PHONE_KEYS:
+                    out[key] = _pseudo_phone(value)
                 elif lk in _ORG_NAME_KEYS or (org_name_keys and lk == "name"):
                     out[key] = f"Org-{_hash(value, 6)}"
                 elif lk in _ID_KEYS:

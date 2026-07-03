@@ -8,7 +8,7 @@
     "body": {
       "content": [
         {
-          "attemptId": "110678",
+          "attemptId": "729645",
           "attemptedAt": "2026-06-23T16:39:29Z",
           "failureClass": "UNKNOWN",
           "method": "dns-txt",
@@ -26,7 +26,7 @@
       "Connection": "keep-alive",
       "Content-Security-Policy": "frame-ancestors 'self';manifest-src 'self';",
       "Content-Type": "application/json",
-      "Date": "Fri, 03 Jul 2026 00:47:21 GMT",
+      "Date": "Fri, 03 Jul 2026 01:23:41 GMT",
       "Expires": "Thu, 01 Jan 1970 00:00:00 GMT",
       "Pragma": "no-cache, no-cache",
       "Referrer-Policy": "origin-when-cross-origin",
