@@ -1,0 +1,596 @@
+{
+  "request": {
+    "method": "GET",
+    "params": null,
+    "path": "/api/certinext/v2/catalog/products"
+  },
+  "response": {
+    "body": {
+      "products": [
+        {
+          "categoryID": "3",
+          "categoryName": "SSL/TLS Certificates",
+          "currencyType": "USD",
+          "products": [
+            {
+              "productCode": "959",
+              "productName": "InCommon DV SSL Certificate 30 Days",
+              "productTypeID": "13",
+              "subscriptionPrice": {
+                "1 Year": {
+                  "cost": "0.0"
+                },
+                "2 Years": {
+                  "cost": "0.0"
+                },
+                "3 Years": {
+                  "cost": "0.0"
+                }
+              }
+            },
+            {
+              "productCode": "947",
+              "productName": "InCommon DV SSL Certificate 90 Days",
+              "productTypeID": "13",
+              "subscriptionPrice": {
+                "1 Year": {
+                  "cost": "0.0"
+                },
+                "2 Years": {
+                  "cost": "0.0"
+                },
+                "3 Years": {
+                  "cost": "0.0"
+                }
+              }
+            },
+            {
+              "productCode": "970",
+              "productName": "InCommon DV SSL Certificate",
+              "productTypeID": "13",
+              "subscriptionPrice": {
+                "1 Year": {
+                  "cost": "0.0"
+                },
+                "2 Years": {
+                  "cost": "0.0"
+                },
+                "3 Years": {
+                  "cost": "0.0"
+                }
+              }
+            },
+            {
+              "productCode": "960",
+              "productName": "InCommon DV SSL Certificate Wildcard 30 Days",
+              "productTypeID": "14",
+              "subscriptionPrice": {
+                "1 Year": {
+                  "cost": "0.0"
+                },
+                "2 Years": {
+                  "cost": "0.0"
+                },
+                "3 Years": {
+                  "cost": "0.0"
+                }
+              }
+            },
+            {
+              "productCode": "948",
+              "productName": "InCommon DV SSL Certificate Wildcard 90 Days",
+              "productTypeID": "14",
+              "subscriptionPrice": {
+                "1 Year": {
+                  "cost": "0.0"
+                },
+                "2 Years": {
+                  "cost": "0.0"
+                },
+                "3 Years": {
+                  "cost": "0.0"
+                }
+              }
+            },
+            {
+              "productCode": "971",
+              "productName": "InCommon DV SSL Certificate Wildcard",
+              "productTypeID": "14",
+              "subscriptionPrice": {
+                "1 Year": {
+                  "cost": "0.0"
+                },
+                "2 Years": {
+                  "cost": "0.0"
+                },
+                "3 Years": {
+                  "cost": "0.0"
+                }
+              }
+            },
+            {
+              "productCode": "961",
+              "productName": "InCommon DV SSL Certificate UCC 30 Days",
+              "productTypeID": "15",
+              "subscriptionPrice": {
+                "1 Year": {
+                  "cost": "0.0"
+                },
+                "2 Years": {
+                  "cost": "0.0"
+                },
+                "3 Years": {
+                  "cost": "0.0"
+                }
+              }
+            },
+            {
+              "productCode": "949",
+              "productName": "InCommon DV SSL Certificate UCC 90 Days",
+              "productTypeID": "15",
+              "subscriptionPrice": {
+                "1 Year": {
+                  "cost": "0.0"
+                },
+                "2 Years": {
+                  "cost": "0.0"
+                },
+                "3 Years": {
+                  "cost": "0.0"
+                }
+              }
+            },
+            {
+              "productCode": "972",
+              "productName": "InCommon DV SSL Certificate UCC",
+              "productTypeID": "15",
+              "subscriptionPrice": {
+                "1 Year": {
+                  "cost": "0.0"
+                },
+                "2 Years": {
+                  "cost": "0.0"
+                },
+                "3 Years": {
+                  "cost": "0.0"
+                }
+              }
+            },
+            {
+              "productCode": "962",
+              "productName": "InCommon DV SSL Certificate Wildcard UCC 30 Days",
+              "productTypeID": "21",
+              "subscriptionPrice": {
+                "1 Year": {
+                  "cost": "0.0"
+                },
+                "2 Years": {
+                  "cost": "0.0"
+                },
+                "3 Years": {
+                  "cost": "0.0"
+                }
+              }
+            },
+            {
+              "productCode": "950",
+              "productName": "InCommon DV SSL Certificate Wildcard UCC 90 Days",
+              "productTypeID": "21",
+              "subscriptionPrice": {
+                "1 Year": {
+                  "cost": "0.0"
+                },
+                "2 Years": {
+                  "cost": "0.0"
+                },
+                "3 Years": {
+                  "cost": "0.0"
+                }
+              }
+            },
+            {
+              "productCode": "973",
+              "productName": "InCommon DV SSL Certificate Wildcard UCC",
+              "productTypeID": "21",
+              "subscriptionPrice": {
+                "1 Year": {
+                  "cost": "0.0"
+                },
+                "2 Years": {
+                  "cost": "0.0"
+                },
+                "3 Years": {
+                  "cost": "0.0"
+                }
+              }
+            },
+            {
+              "productCode": "966",
+              "productName": "InCommon RSA IGTF Server 30 Days",
+              "productTypeID": "16",
+              "subscriptionPrice": {
+                "1 Year": {
+                  "cost": "0.0"
+                },
+                "2 Years": {
+                  "cost": "0.0"
+                },
+                "3 Years": {
+                  "cost": "0.0"
+                }
+              }
+            },
+            {
+              "productCode": "955",
+              "productName": "InCommon OV SSL 30 Days",
+              "productTypeID": "16",
+              "subscriptionPrice": {
+                "1 Year": {
+                  "cost": "0.0"
+                },
+                "2 Years": {
+                  "cost": "0.0"
+                },
+                "3 Years": {
+                  "cost": "0.0"
+                }
+              }
+            },
+            {
+              "productCode": "967",
+              "productName": "InCommon OV SSL 90 Days",
+              "productTypeID": "16",
+              "subscriptionPrice": {
+                "1 Year": {
+                  "cost": "0.0"
+                },
+                "2 Years": {
+                  "cost": "0.0"
+                },
+                "3 Years": {
+                  "cost": "0.0"
+                }
+              }
+            },
+            {
+              "productCode": "969",
+              "productName": "InCommon RSA IGTF Server 90 Days",
+              "productTypeID": "16",
+              "subscriptionPrice": {
+                "1 Year": {
+                  "cost": "0.0"
+                },
+                "2 Years": {
+                  "cost": "0.0"
+                },
+                "3 Years": {
+                  "cost": "0.0"
+                }
+              }
+            },
+            {
+              "productCode": "974",
+              "productName": "InCommon OV SSL",
+              "productTypeID": "16",
+              "subscriptionPrice": {
+                "1 Year": {
+                  "cost": "0.0"
+                },
+                "2 Years": {
+                  "cost": "0.0"
+                },
+                "3 Years": {
+                  "cost": "0.0"
+                }
+              }
+            },
+            {
+              "productCode": "980",
+              "productName": "InCommon RSA IGTF Server",
+              "productTypeID": "16",
+              "subscriptionPrice": {
+                "1 Year": {
+                  "cost": "0.0"
+                },
+                "2 Years": {
+                  "cost": "0.0"
+                },
+                "3 Years": {
+                  "cost": "0.0"
+                }
+              }
+            },
+            {
+              "productCode": "956",
+              "productName": "InCommon OV SSL Certificate Wildcard 30 Days",
+              "productTypeID": "17",
+              "subscriptionPrice": {
+                "1 Year": {
+                  "cost": "0.0"
+                },
+                "2 Years": {
+                  "cost": "0.0"
+                },
+                "3 Years": {
+                  "cost": "0.0"
+                }
+              }
+            },
+            {
+              "productCode": "968",
+              "productName": "InCommon OV SSL Certificate Wildcard 90 Days",
+              "productTypeID": "17",
+              "subscriptionPrice": {
+                "1 Year": {
+                  "cost": "0.0"
+                },
+                "2 Years": {
+                  "cost": "0.0"
+                },
+                "3 Years": {
+                  "cost": "0.0"
+                }
+              }
+            },
+            {
+              "productCode": "975",
+              "productName": "InCommon OV SSL Certificate Wildcard",
+              "productTypeID": "17",
+              "subscriptionPrice": {
+                "1 Year": {
+                  "cost": "0.0"
+                },
+                "2 Years": {
+                  "cost": "0.0"
+                },
+                "3 Years": {
+                  "cost": "0.0"
+                }
+              }
+            },
+            {
+              "productCode": "957",
+              "productName": "InCommon OV SSL Certificate UCC 30 Days",
+              "productTypeID": "18",
+              "subscriptionPrice": {
+                "1 Year": {
+                  "cost": "0.0"
+                },
+                "2 Years": {
+                  "cost": "0.0"
+                },
+                "3 Years": {
+                  "cost": "0.0"
+                }
+              }
+            },
+            {
+              "productCode": "945",
+              "productName": "InCommon OV SSL Certificate UCC 90 Days",
+              "productTypeID": "18",
+              "subscriptionPrice": {
+                "1 Year": {
+                  "cost": "0.0"
+                },
+                "2 Years": {
+                  "cost": "0.0"
+                },
+                "3 Years": {
+                  "cost": "0.0"
+                }
+              }
+            },
+            {
+              "productCode": "976",
+              "productName": "InCommon OV SSL Certificate UCC",
+              "productTypeID": "18",
+              "subscriptionPrice": {
+                "1 Year": {
+                  "cost": "0.0"
+                },
+                "2 Years": {
+                  "cost": "0.0"
+                },
+                "3 Years": {
+                  "cost": "0.0"
+                }
+              }
+            },
+            {
+              "productCode": "958",
+              "productName": "InCommon OV SSL Certificate Wildcard UCC 30 Days",
+              "productTypeID": "22",
+              "subscriptionPrice": {
+                "1 Year": {
+                  "cost": "0.0"
+                },
+                "2 Years": {
+                  "cost": "0.0"
+                },
+                "3 Years": {
+                  "cost": "0.0"
+                }
+              }
+            },
+            {
+              "productCode": "963",
+              "productName": "InCommon OV SSL Wildcard UCC 30 Days",
+              "productTypeID": "22",
+              "subscriptionPrice": {
+                "1 Year": {
+                  "cost": "0.0"
+                },
+                "2 Years": {
+                  "cost": "0.0"
+                },
+                "3 Years": {
+                  "cost": "0.0"
+                }
+              }
+            },
+            {
+              "productCode": "946",
+              "productName": "InCommon OV SSL Certificate Wildcard UCC 90 Days",
+              "productTypeID": "22",
+              "subscriptionPrice": {
+                "1 Year": {
+                  "cost": "0.0"
+                },
+                "2 Years": {
+                  "cost": "0.0"
+                },
+                "3 Years": {
+                  "cost": "0.0"
+                }
+              }
+            },
+            {
+              "productCode": "977",
+              "productName": "InCommon OV SSL Certificate Wildcard UCC",
+              "productTypeID": "22",
+              "subscriptionPrice": {
+                "1 Year": {
+                  "cost": "0.0"
+                },
+                "2 Years": {
+                  "cost": "0.0"
+                },
+                "3 Years": {
+                  "cost": "0.0"
+                }
+              }
+            },
+            {
+              "productCode": "964",
+              "productName": "InCommon EV SSL Certificate 30 Days",
+              "productTypeID": "19",
+              "subscriptionPrice": {
+                "1 Year": {
+                  "cost": "0.0"
+                },
+                "2 Years": {
+                  "cost": "0.0"
+                },
+                "3 Years": {
+                  "cost": "0.0"
+                }
+              }
+            },
+            {
+              "productCode": "952",
+              "productName": "InCommon EV SSL Certificate 90 Days",
+              "productTypeID": "19",
+              "subscriptionPrice": {
+                "1 Year": {
+                  "cost": "0.0"
+                },
+                "2 Years": {
+                  "cost": "0.0"
+                },
+                "3 Years": {
+                  "cost": "0.0"
+                }
+              }
+            },
+            {
+              "productCode": "978",
+              "productName": "InCommon EV SSL Certificate",
+              "productTypeID": "19",
+              "subscriptionPrice": {
+                "1 Year": {
+                  "cost": "0.0"
+                },
+                "2 Years": {
+                  "cost": "0.0"
+                },
+                "3 Years": {
+                  "cost": "0.0"
+                }
+              }
+            },
+            {
+              "productCode": "965",
+              "productName": "InCommon EV SSL Certificate UCC 30 Days",
+              "productTypeID": "20",
+              "subscriptionPrice": {
+                "1 Year": {
+                  "cost": "0.0"
+                },
+                "2 Years": {
+                  "cost": "0.0"
+                },
+                "3 Years": {
+                  "cost": "0.0"
+                }
+              }
+            },
+            {
+              "productCode": "953",
+              "productName": "InCommon EV SSL Certificate UCC 90 Days",
+              "productTypeID": "20",
+              "subscriptionPrice": {
+                "1 Year": {
+                  "cost": "0.0"
+                },
+                "2 Years": {
+                  "cost": "0.0"
+                },
+                "3 Years": {
+                  "cost": "0.0"
+                }
+              }
+            },
+            {
+              "productCode": "979",
+              "productName": "InCommon EV SSL Certificate UCC",
+              "productTypeID": "20",
+              "subscriptionPrice": {
+                "1 Year": {
+                  "cost": "0.0"
+                },
+                "2 Years": {
+                  "cost": "0.0"
+                },
+                "3 Years": {
+                  "cost": "0.0"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "categoryID": "8",
+          "categoryName": "Private PKI Products",
+          "currencyType": "USD",
+          "products": [
+            {
+              "price": "10.0",
+              "productCode": "149",
+              "productName": "Sandbox emSign Intranet SSL 1 Year",
+              "productTypeID": "39"
+            }
+          ]
+        }
+      ]
+    },
+    "headers": {
+      "Access-Control-Allow-Methods": "GET, POST",
+      "Cache-Control": "no-store, no-cache,no-store,private,must-revalidate,max-stale=0,post-check=0,pre-check=0",
+      "Connection": "keep-alive",
+      "Content-Security-Policy": "frame-ancestors 'self';manifest-src 'self';",
+      "Content-Type": "application/json",
+      "Date": "Fri, 03 Jul 2026 00:47:24 GMT",
+      "Expires": "Thu, 01 Jan 1970 00:00:00 GMT",
+      "Pragma": "no-cache, no-cache",
+      "Referrer-Policy": "origin-when-cross-origin",
+      "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+      "Transfer-Encoding": "chunked",
+      "Vary": "Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "X-API-Version": "2.0.0",
+      "X-Content-Type-Options": "nosniff",
+      "X-Frame-Options": "DENY",
+      "X-XSS-Protection": "0; mode=block"
+    },
+    "status": 200
+  }
+}

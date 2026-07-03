@@ -1,0 +1,347 @@
+{
+  "request": {
+    "method": "GET",
+    "params": null,
+    "path": "/api/certinext/v2/groups"
+  },
+  "response": {
+    "body": {
+      "groups": [
+        {
+          "accountBalance": "0.00",
+          "finance": "1",
+          "groupBalance": "",
+          "groupName": "Org-7d08cc",
+          "groupNumber": "2923784772",
+          "isDefaultGroup": "1",
+          "organizationDetails": [
+            {
+              "organizationName": "Org-7d08cc",
+              "organizationNumber": "2517111",
+              "validationFor": "1"
+            },
+            {
+              "organizationName": "Org-7d08cc",
+              "organizationNumber": "4651413",
+              "validationFor": "3"
+            },
+            {
+              "organizationName": "Org-7d08cc",
+              "organizationNumber": "8921215",
+              "validationFor": "2"
+            }
+          ]
+        },
+        {
+          "accountBalance": "0.00",
+          "finance": "1",
+          "groupBalance": "",
+          "groupName": "Org-d47d75",
+          "groupNumber": "9819599797",
+          "isDefaultGroup": "0",
+          "organizationDetails": [
+            {
+              "organizationName": "Org-7d08cc",
+              "organizationNumber": "2517111",
+              "validationFor": "1"
+            },
+            {
+              "organizationName": "Org-7d08cc",
+              "organizationNumber": "4651413",
+              "validationFor": "3"
+            },
+            {
+              "organizationName": "Org-7d08cc",
+              "organizationNumber": "8921215",
+              "validationFor": "2"
+            }
+          ]
+        },
+        {
+          "accountBalance": "0.00",
+          "finance": "1",
+          "groupBalance": "",
+          "groupName": "Org-2fd7dd",
+          "groupNumber": "7776559929",
+          "isDefaultGroup": "0",
+          "organizationDetails": [
+            {
+              "organizationName": "Org-7d08cc",
+              "organizationNumber": "2517111",
+              "validationFor": "1"
+            },
+            {
+              "organizationName": "Org-7d08cc",
+              "organizationNumber": "4651413",
+              "validationFor": "3"
+            },
+            {
+              "organizationName": "Org-7d08cc",
+              "organizationNumber": "8921215",
+              "validationFor": "2"
+            }
+          ]
+        },
+        {
+          "accountBalance": "0.00",
+          "finance": "1",
+          "groupBalance": "",
+          "groupName": "Org-868d10",
+          "groupNumber": "3632193782",
+          "isDefaultGroup": "0",
+          "organizationDetails": [
+            {
+              "organizationName": "Org-7d08cc",
+              "organizationNumber": "2517111",
+              "validationFor": "1"
+            },
+            {
+              "organizationName": "Org-7d08cc",
+              "organizationNumber": "4651413",
+              "validationFor": "3"
+            },
+            {
+              "organizationName": "Org-7d08cc",
+              "organizationNumber": "8921215",
+              "validationFor": "2"
+            }
+          ]
+        },
+        {
+          "accountBalance": "0.00",
+          "finance": "1",
+          "groupBalance": "",
+          "groupName": "Org-1d7c70",
+          "groupNumber": "2776188577",
+          "isDefaultGroup": "0",
+          "organizationDetails": [
+            {
+              "organizationName": "Org-7d08cc",
+              "organizationNumber": "2517111",
+              "validationFor": "1"
+            },
+            {
+              "organizationName": "Org-7d08cc",
+              "organizationNumber": "4651413",
+              "validationFor": "3"
+            },
+            {
+              "organizationName": "Org-7d08cc",
+              "organizationNumber": "8921215",
+              "validationFor": "2"
+            }
+          ]
+        },
+        {
+          "accountBalance": "0.00",
+          "finance": "1",
+          "groupBalance": "",
+          "groupName": "Org-1035ed",
+          "groupNumber": "8652152273",
+          "isDefaultGroup": "0",
+          "organizationDetails": [
+            {
+              "organizationName": "Org-7d08cc",
+              "organizationNumber": "2517111",
+              "validationFor": "1"
+            },
+            {
+              "organizationName": "Org-7d08cc",
+              "organizationNumber": "4651413",
+              "validationFor": "3"
+            },
+            {
+              "organizationName": "Org-7d08cc",
+              "organizationNumber": "8921215",
+              "validationFor": "2"
+            }
+          ]
+        },
+        {
+          "accountBalance": "0.00",
+          "finance": "1",
+          "groupBalance": "",
+          "groupName": "Org-b425a8",
+          "groupNumber": "8232162674",
+          "isDefaultGroup": "0",
+          "organizationDetails": [
+            {
+              "organizationName": "Org-7d08cc",
+              "organizationNumber": "2517111",
+              "validationFor": "1"
+            },
+            {
+              "organizationName": "Org-7d08cc",
+              "organizationNumber": "4651413",
+              "validationFor": "3"
+            },
+            {
+              "organizationName": "Org-7d08cc",
+              "organizationNumber": "8921215",
+              "validationFor": "2"
+            }
+          ]
+        },
+        {
+          "accountBalance": "0.00",
+          "finance": "1",
+          "groupBalance": "",
+          "groupName": "Org-a2e0a2",
+          "groupNumber": "7672748283",
+          "isDefaultGroup": "0",
+          "organizationDetails": [
+            {
+              "organizationName": "Org-7d08cc",
+              "organizationNumber": "2517111",
+              "validationFor": "1"
+            },
+            {
+              "organizationName": "Org-7d08cc",
+              "organizationNumber": "4651413",
+              "validationFor": "3"
+            },
+            {
+              "organizationName": "Org-7d08cc",
+              "organizationNumber": "8921215",
+              "validationFor": "2"
+            }
+          ]
+        },
+        {
+          "accountBalance": "0.00",
+          "finance": "1",
+          "groupBalance": "",
+          "groupName": "Org-cf0779",
+          "groupNumber": "8562571163",
+          "isDefaultGroup": "0",
+          "organizationDetails": [
+            {
+              "organizationName": "Org-7d08cc",
+              "organizationNumber": "2517111",
+              "validationFor": "1"
+            },
+            {
+              "organizationName": "Org-7d08cc",
+              "organizationNumber": "4651413",
+              "validationFor": "3"
+            },
+            {
+              "organizationName": "Org-7d08cc",
+              "organizationNumber": "8921215",
+              "validationFor": "2"
+            }
+          ]
+        },
+        {
+          "accountBalance": "0.00",
+          "finance": "1",
+          "groupBalance": "",
+          "groupName": "Org-67929c",
+          "groupNumber": "9557475144",
+          "isDefaultGroup": "0",
+          "organizationDetails": [
+            {
+              "organizationName": "Org-7d08cc",
+              "organizationNumber": "2517111",
+              "validationFor": "1"
+            },
+            {
+              "organizationName": "Org-7d08cc",
+              "organizationNumber": "4651413",
+              "validationFor": "3"
+            },
+            {
+              "organizationName": "Org-7d08cc",
+              "organizationNumber": "8921215",
+              "validationFor": "2"
+            }
+          ]
+        },
+        {
+          "accountBalance": "0.00",
+          "finance": "1",
+          "groupBalance": "",
+          "groupName": "Org-dd1273",
+          "groupNumber": "6523154596",
+          "isDefaultGroup": "0",
+          "organizationDetails": [
+            {
+              "organizationName": "Org-7d08cc",
+              "organizationNumber": "2517111",
+              "validationFor": "1"
+            },
+            {
+              "organizationName": "Org-7d08cc",
+              "organizationNumber": "4651413",
+              "validationFor": "3"
+            },
+            {
+              "organizationName": "Org-7d08cc",
+              "organizationNumber": "8921215",
+              "validationFor": "2"
+            }
+          ]
+        },
+        {
+          "accountBalance": "0.00",
+          "finance": "1",
+          "groupBalance": "",
+          "groupName": "Org-812cba",
+          "groupNumber": "6682871792",
+          "isDefaultGroup": "0",
+          "organizationDetails": [
+            {
+              "organizationName": "Org-7d08cc",
+              "organizationNumber": "2517111",
+              "validationFor": "1"
+            },
+            {
+              "organizationName": "Org-7d08cc",
+              "organizationNumber": "4651413",
+              "validationFor": "3"
+            },
+            {
+              "organizationName": "Org-7d08cc",
+              "organizationNumber": "8921215",
+              "validationFor": "2"
+            }
+          ]
+        },
+        {
+          "accountBalance": "0.00",
+          "finance": "1",
+          "groupBalance": "",
+          "groupName": "Org-04e7ff",
+          "groupNumber": "4415618943",
+          "isDefaultGroup": "0",
+          "organizationDetails": [
+            {
+              "organizationName": "Org-7d08cc",
+              "organizationNumber": "2517111",
+              "validationFor": "1"
+            }
+          ]
+        }
+      ]
+    },
+    "headers": {
+      "Access-Control-Allow-Methods": "GET, POST",
+      "Cache-Control": "no-store, no-cache,no-store,private,must-revalidate,max-stale=0,post-check=0,pre-check=0",
+      "Connection": "keep-alive",
+      "Content-Security-Policy": "frame-ancestors 'self';manifest-src 'self';",
+      "Content-Type": "application/json",
+      "Date": "Fri, 03 Jul 2026 00:47:24 GMT",
+      "Expires": "Thu, 01 Jan 1970 00:00:00 GMT",
+      "Pragma": "no-cache, no-cache",
+      "Referrer-Policy": "origin-when-cross-origin",
+      "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+      "Transfer-Encoding": "chunked",
+      "Vary": "Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "X-API-Version": "2.0.0",
+      "X-Content-Type-Options": "nosniff",
+      "X-Frame-Options": "DENY",
+      "X-XSS-Protection": "0; mode=block"
+    },
+    "status": 200
+  }
+}

@@ -1169,10 +1169,11 @@ Filter by status server-side (reduces data transferred):
 domains = sess.domain.get_list(domain_status="ACTIVE", dcv_status="PENDING,REJECTED,EXPIRED")
 ```
 
-> **Note:** The API `search` parameter is partially fixed (re-tested 2026-06-05):
-> exact FQDN matches now work, but substring searches (values without `.`) return
-> 0 results instead of matching domains. Use `pattern` (below) for reliable
-> filtering.
+> **Note:** The API `search` parameter behaves differently per environment
+> (re-tested 2026-07-02, probe R01): exact FQDN matches work everywhere; the
+> **sandbox** now also matches substrings correctly, but **production** still
+> returns 0 results for substring searches — and results are capped at the
+> server's ~50-row default page. Use `pattern` (below) for reliable filtering.
 
 Filter by name with a regex (applied client-side after the API response):
 
@@ -1200,10 +1201,11 @@ domains = sess.domain.get_list(domain_status="ACTIVE", pattern=r".*\.maine\.edu"
 verification. It fetches all domains and filters client-side using
 `domain.needs_dcv`.
 
-> **Note:** The API `domainStatus` and `dcvStatus` filter parameters return a
-> 400 error when used together — confirmed vendor bug (reported 2026-05-20).
-> Server-side status filtering is disabled until CertiNext notifies the fix is
-> deployed.
+> **Note:** Combining the API `domainStatus` and `dcvStatus` filter parameters
+> originally returned a 400 error (reported 2026-05-20), so this method fetches
+> all domains and filters client-side. Probe R02 confirmed the combination now
+> works in both environments (2026-07-02, GitLab issue #6); the switch to
+> server-side filtering is planned for the 1.0 refactor.
 
 ```python
 pending = sess.domain.get_pending_dcv()

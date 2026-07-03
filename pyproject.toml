@@ -79,6 +79,7 @@ include = ["certinext*"]
 testpaths = ["tests"]
 markers = [
     "integration: tests that call the live CertiNext sandbox API (requires keyring profile 'sandbox')",
+    "probe: live assumption-register probes (R01-R24) against sandbox or prod; env via CERTINEXT_PROBE_ENV",
 ]
 
 [tool.ruff]
