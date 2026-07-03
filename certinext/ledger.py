@@ -132,6 +132,33 @@ class LedgerAccessor:
         """
         self._client = client
 
+    def _fetch_page(self, page: int, size: int) -> tuple[list[Any], int | None]:
+        """Fetch one raw ledger page plus the server-reported total page count.
+
+        Args:
+            page: 1-based page number.
+            size: Number of records per page; maximum 100.
+
+        Returns:
+            ``(rows, total_pages)`` — ``total_pages`` is taken from the
+            wrapper dict's ``totalPages`` key and is ``None`` when the
+            response is a bare array (or the key is missing).
+
+        Raises:
+            CertiNextAPIError: On a non-2xx API response.
+        """
+        params: dict[str, Any] = {"page": page, "size": size}
+        result = self._client.get(_BASE, params=params)
+        if isinstance(result, list):
+            return result, None
+        raw: list[Any] = []
+        for val in result.values():
+            if isinstance(val, list):
+                raw = val
+                break
+        total_pages = result.get("totalPages")
+        return raw, total_pages if isinstance(total_pages, int) else None
+
     def get_page(
         self,
         page: int = 1,
@@ -139,28 +166,23 @@ class LedgerAccessor:
     ) -> list[LedgerRecord]:
         """Fetch a single page of ledger entries.
 
+        Note:
+            The server clamps out-of-range page numbers to the valid range
+            (confirmed 2026-07-02, probe R16): requesting a page past the
+            last one returns the *last page's* rows again, never an empty
+            list. Use :meth:`get_list` to fetch everything safely.
+
         Args:
             page: 1-based page number (default: 1).
             size: Number of records per page; maximum 100 (default: 100).
 
         Returns:
-            List of :class:`LedgerRecord` objects for this page. Returns an
-            empty list when past the last page.
+            List of :class:`LedgerRecord` objects for this page.
 
         Raises:
             CertiNextAPIError: On a non-2xx API response. Provides ``.status_code`` and ``.body``.
         """
-        params: dict[str, Any] = {"page": page, "size": size}
-        result = self._client.get(_BASE, params=params)
-        raw: list[Any]
-        if isinstance(result, list):
-            raw = result
-        else:
-            raw = []
-            for val in result.values():
-                if isinstance(val, list):
-                    raw = val
-                    break
+        raw, _ = self._fetch_page(page, size)
         return [LedgerRecord(item) for item in raw]
 
     def get_list(
@@ -169,8 +191,12 @@ class LedgerAccessor:
     ) -> list[LedgerRecord]:
         """Return all ledger entries by iterating through all pages automatically.
 
-        Stops when a page returns fewer records than ``page_size``, indicating
-        the last page has been reached.
+        Terminates on the wrapper's ``totalPages`` when the server provides
+        it. Short-page termination alone is unsafe because the server clamps
+        out-of-range pages to the last page instead of returning an empty
+        list: when the total is an exact multiple of ``page_size``, the page
+        after the last would repeat the last page forever. The short-page
+        rule remains only as a fallback for bare-array responses.
 
         Args:
             page_size: Records per page; maximum 100 (default: 100).
@@ -184,9 +210,12 @@ class LedgerAccessor:
         records: list[LedgerRecord] = []
         page = 1
         while True:
-            page_records = self.get_page(page=page, size=page_size)
-            records.extend(page_records)
-            if len(page_records) < page_size:
+            raw, total_pages = self._fetch_page(page, page_size)
+            records.extend(LedgerRecord(item) for item in raw)
+            if total_pages is not None:
+                if page >= total_pages:
+                    break
+            elif len(raw) < page_size:
                 break
             page += 1
         return records
