@@ -8,14 +8,14 @@
     "body": {
       "content": [
         {
-          "attemptId": "124730",
+          "attemptId": "364008",
           "attemptedAt": "2026-05-28T21:54:11Z",
           "failureClass": "UNKNOWN",
           "method": "dns-txt",
           "overallStatus": "VERIFIED"
         },
         {
-          "attemptId": "121988",
+          "attemptId": "161702",
           "attemptedAt": "2026-05-21T14:17:10Z",
           "failureClass": "UNKNOWN",
           "overallStatus": "VERIFIED"
@@ -32,7 +32,7 @@
       "Connection": "keep-alive",
       "Content-Security-Policy": "frame-ancestors 'self';manifest-src 'self';",
       "Content-Type": "application/json",
-      "Date": "Fri, 03 Jul 2026 00:47:32 GMT",
+      "Date": "Fri, 03 Jul 2026 01:23:55 GMT",
       "Expires": "Thu, 01 Jan 1970 00:00:00 GMT",
       "Pragma": "no-cache, no-cache",
       "Referrer-Policy": "origin-when-cross-origin",

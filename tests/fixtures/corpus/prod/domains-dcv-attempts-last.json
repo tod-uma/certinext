@@ -18,7 +18,7 @@
           "rirDiversityMet": true,
           "totalPerspectivesQueried": 0
         },
-        "domainId": "id-b82ee406",
+        "domainId": "48066",
         "domainName": "xeffb310.x3b1bdc5.x0fef5e0.x1ae89fe.edu",
         "expected": {
           "domainName": "xeffb310.x3b1bdc5.x0fef5e0.x1ae89fe.edu",
@@ -50,7 +50,7 @@
       "Connection": "keep-alive",
       "Content-Security-Policy": "frame-ancestors 'self';manifest-src 'self';",
       "Content-Type": "application/json",
-      "Date": "Fri, 03 Jul 2026 00:47:21 GMT",
+      "Date": "Fri, 03 Jul 2026 01:23:41 GMT",
       "Expires": "Thu, 01 Jan 1970 00:00:00 GMT",
       "Pragma": "no-cache, no-cache",
       "Referrer-Policy": "origin-when-cross-origin",

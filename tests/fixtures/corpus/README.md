@@ -30,7 +30,8 @@ for prod, `sandbox` profile for sandbox) or `CERTINEXT_[SANDBOX_]CLIENT_ID` /
 ## Sanitization is a manual gate
 
 The capture script pseudonymizes domain names (label-wise, hierarchy
-preserved), org and person names, emails, and identifiers with a
+preserved), org and person names, emails, phone numbers (digit-preserving),
+and identifiers (including the vendor's `*Number` variants) with a
 **deterministic** salted-hash mapping — recaptures of unchanged server state
 diff cleanly. Certificate PEM blobs are left as-is (public via CT logs), and
 geography fields (state, locality, country) are kept — they appear verbatim
