@@ -116,7 +116,7 @@ def mock_client() -> MagicMock:
 @pytest.fixture
 def order() -> OrderRecord:
     """An OrderRecord from SAMPLE_ORDER."""
-    return OrderRecord(dict(SAMPLE_ORDER))
+    return OrderRecord.model_validate(dict(SAMPLE_ORDER))
 
 
 @pytest.fixture
@@ -158,23 +158,23 @@ class TestOrderRecordProperties:
 
     def test_common_name_from_common_name_field(self):
         """common_name falls back to commonName (legacy field, still supported)."""
-        rec = OrderRecord(dict(SAMPLE_ORDER_COMMON_NAME_FIELD))
+        rec = OrderRecord.model_validate(dict(SAMPLE_ORDER_COMMON_NAME_FIELD))
         assert rec.common_name == "legacy.maine.edu"
 
     def test_common_name_from_domain_field(self):
         """common_name falls back to the domain field when domainName and commonName are absent."""
-        rec = OrderRecord(dict(SAMPLE_ORDER_DOMAIN_FIELD))
+        rec = OrderRecord.model_validate(dict(SAMPLE_ORDER_DOMAIN_FIELD))
         assert rec.common_name == "example.edu"
 
     def test_common_name_none_when_absent(self):
         """common_name returns None when no domain field is present."""
-        rec = OrderRecord(dict(SAMPLE_ORDER_NO_CN))
+        rec = OrderRecord.model_validate(dict(SAMPLE_ORDER_NO_CN))
         assert rec.common_name is None
 
     def test_as_dict_returns_raw_data(self, order: OrderRecord):
         """as_dict() returns the original raw data dict (identity, not a copy)."""
         raw = dict(SAMPLE_ORDER)
-        assert OrderRecord(raw).as_dict() is raw
+        assert OrderRecord.model_validate(raw).as_dict() is raw
 
     def test_to_row_returns_string_values(self, order: OrderRecord):
         """to_row() returns a dict where all values are strings."""
@@ -188,7 +188,7 @@ class TestOrderRecordProperties:
 
     def test_to_row_none_fields_become_empty_string(self):
         """to_row() converts None fields to empty strings."""
-        rec = OrderRecord({})
+        rec = OrderRecord.model_validate({})
         row = rec.to_row()
         assert all(v == "" for v in row.values())
 
@@ -324,12 +324,12 @@ class TestBuildRows:
     """Tests for the domain/order join in domain_cert_count._build_rows."""
 
     def _domain(self, data: dict) -> Domain:
-        return Domain(MagicMock(spec=CertiNextClient), data)
+        return Domain.from_payload(MagicMock(spec=CertiNextClient), data)
 
     def test_registered_domain_with_matching_order(self):
         """A registered domain with a matching order shows count 1."""
         domains = [self._domain(SAMPLE_DOMAIN_DATA)]
-        orders = [OrderRecord(dict(SAMPLE_ORDER))]
+        orders = [OrderRecord.model_validate(dict(SAMPLE_ORDER))]
         rows = _build_rows(domains, orders)
         maine_row = next(r for r in rows if r["domain"] == "maine.edu")
         assert maine_row["certificates"] == "1"
@@ -344,7 +344,7 @@ class TestBuildRows:
     def test_multiple_orders_same_domain(self):
         """Multiple orders for the same domain accumulate the count."""
         domains = [self._domain(SAMPLE_DOMAIN_DATA)]
-        orders = [OrderRecord(dict(SAMPLE_ORDER)), OrderRecord(dict(SAMPLE_ORDER))]
+        orders = [OrderRecord.model_validate(dict(SAMPLE_ORDER)), OrderRecord.model_validate(dict(SAMPLE_ORDER))]
         rows = _build_rows(domains, orders)
         maine_row = next(r for r in rows if r["domain"] == "maine.edu")
         assert maine_row["certificates"] == "2"
@@ -352,7 +352,9 @@ class TestBuildRows:
     def test_orphaned_order_appended(self):
         """An order whose CN is not in the domain registry appears as 'not registered'."""
         domains = [self._domain(SAMPLE_DOMAIN_DATA)]
-        orphan = OrderRecord({"orderNumber": "ORD-999", "certificateStatus": "issued", "commonName": "orphan.edu"})
+        orphan = OrderRecord.model_validate(
+            {"orderNumber": "ORD-999", "certificateStatus": "issued", "commonName": "orphan.edu"}
+        )
         rows = _build_rows(domains, [orphan])
         orphan_row = next((r for r in rows if "orphan.edu" in r["domain"]), None)
         assert orphan_row is not None
@@ -362,7 +364,7 @@ class TestBuildRows:
     def test_order_without_common_name_ignored(self):
         """An order with no common_name is excluded from counts."""
         domains = [self._domain(SAMPLE_DOMAIN_DATA)]
-        orders = [OrderRecord(dict(SAMPLE_ORDER_NO_CN))]
+        orders = [OrderRecord.model_validate(dict(SAMPLE_ORDER_NO_CN))]
         rows = _build_rows(domains, orders)
         maine_row = next(r for r in rows if r["domain"] == "maine.edu")
         assert maine_row["certificates"] == "0"
@@ -370,7 +372,7 @@ class TestBuildRows:
     def test_case_insensitive_matching(self):
         """Domain name matching is case-insensitive."""
         domains = [self._domain(SAMPLE_DOMAIN_DATA)]
-        order_upper = OrderRecord({**SAMPLE_ORDER, "commonName": "MAINE.EDU"})
+        order_upper = OrderRecord.model_validate({**SAMPLE_ORDER, "commonName": "MAINE.EDU"})
         rows = _build_rows(domains, [order_upper])
         maine_row = next(r for r in rows if r["domain"] == "maine.edu")
         assert maine_row["certificates"] == "1"
@@ -394,7 +396,9 @@ class TestBuildRows:
     def test_hostname_cert_matches_parent_domain(self):
         """A cert CN that is a hostname under a registered domain counts toward that domain."""
         domains = [self._domain(SAMPLE_DOMAIN_DATA)]  # maine.edu
-        order = OrderRecord({"orderNumber": "ORD-X", "certificateStatus": "issued", "commonName": "host.maine.edu"})
+        order = OrderRecord.model_validate(
+            {"orderNumber": "ORD-X", "certificateStatus": "issued", "commonName": "host.maine.edu"}
+        )
         rows = _build_rows(domains, [order])
         maine_row = next(r for r in rows if r["domain"] == "maine.edu")
         assert maine_row["certificates"] == "1"
@@ -403,7 +407,9 @@ class TestBuildRows:
         """A hostname under a registered subdomain counts toward that subdomain, not the apex."""
         domains = [self._domain(SAMPLE_DOMAIN_DATA), self._domain(SAMPLE_DOMAIN_DATA_2)]
         # SAMPLE_DOMAIN_DATA_2 is sub.maine.edu; cert CN is host.sub.maine.edu
-        order = OrderRecord({"orderNumber": "ORD-X", "certificateStatus": "issued", "commonName": "host.sub.maine.edu"})
+        order = OrderRecord.model_validate(
+            {"orderNumber": "ORD-X", "certificateStatus": "issued", "commonName": "host.sub.maine.edu"}
+        )
         rows = _build_rows(domains, [order])
         sub_row = next(r for r in rows if r["domain"] == "sub.maine.edu")
         maine_row = next(r for r in rows if r["domain"] == "maine.edu")
@@ -478,7 +484,7 @@ class TestBuildRowsCondense:
 
     def _domain(self, data: dict) -> Domain:
         """Build a Domain fixture."""
-        return Domain(MagicMock(spec=CertiNextClient), data)
+        return Domain.from_payload(MagicMock(spec=CertiNextClient), data)
 
     def test_condense_hides_subdomain_rows(self):
         """With condense=True, registered subdomains do not appear as rows."""
@@ -491,7 +497,7 @@ class TestBuildRowsCondense:
     def test_condense_rolls_up_direct_subdomain_certs(self):
         """Certs for a registered subdomain are counted under the apex when condensed."""
         domains = [self._domain(SAMPLE_DOMAIN_DATA), self._domain(SAMPLE_DOMAIN_DATA_2)]
-        orders = [OrderRecord(dict(SAMPLE_ORDER_EXPIRED))]  # CN = sub.maine.edu
+        orders = [OrderRecord.model_validate(dict(SAMPLE_ORDER_EXPIRED))]  # CN = sub.maine.edu
         rows = _build_rows(domains, orders, condense=True)
         maine_row = next(r for r in rows if r["domain"] == "maine.edu")
         assert maine_row["certificates"] == "1"
@@ -499,7 +505,9 @@ class TestBuildRowsCondense:
     def test_condense_rolls_up_hostname_certs(self):
         """Certs for a hostname under a subdomain roll up to the apex."""
         domains = [self._domain(SAMPLE_DOMAIN_DATA), self._domain(SAMPLE_DOMAIN_DATA_2)]
-        order = OrderRecord({"orderNumber": "ORD-X", "certificateStatus": "issued", "commonName": "host.sub.maine.edu"})
+        order = OrderRecord.model_validate(
+            {"orderNumber": "ORD-X", "certificateStatus": "issued", "commonName": "host.sub.maine.edu"}
+        )
         rows = _build_rows(domains, [order], condense=True)
         maine_row = next(r for r in rows if r["domain"] == "maine.edu")
         assert maine_row["certificates"] == "1"
@@ -508,8 +516,8 @@ class TestBuildRowsCondense:
         """Certs from multiple subdomains are all summed at the apex."""
         domains = [self._domain(SAMPLE_DOMAIN_DATA), self._domain(SAMPLE_DOMAIN_DATA_2)]
         orders = [
-            OrderRecord(dict(SAMPLE_ORDER)),           # CN = maine.edu (apex itself)
-            OrderRecord(dict(SAMPLE_ORDER_EXPIRED)),   # CN = sub.maine.edu
+            OrderRecord.model_validate(dict(SAMPLE_ORDER)),           # CN = maine.edu (apex itself)
+            OrderRecord.model_validate(dict(SAMPLE_ORDER_EXPIRED)),   # CN = sub.maine.edu
         ]
         rows = _build_rows(domains, orders, condense=True)
         maine_row = next(r for r in rows if r["domain"] == "maine.edu")
@@ -518,7 +526,9 @@ class TestBuildRowsCondense:
     def test_condense_preserves_orphans(self):
         """Orphaned orders still appear as '(not registered)' even with condense=True."""
         domains = [self._domain(SAMPLE_DOMAIN_DATA)]
-        orphan = OrderRecord({"orderNumber": "ORD-999", "certificateStatus": "issued", "commonName": "orphan.edu"})
+        orphan = OrderRecord.model_validate(
+            {"orderNumber": "ORD-999", "certificateStatus": "issued", "commonName": "orphan.edu"}
+        )
         rows = _build_rows(domains, [orphan], condense=True)
         orphan_row = next((r for r in rows if "orphan.edu" in r["domain"]), None)
         assert orphan_row is not None

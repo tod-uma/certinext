@@ -1198,14 +1198,17 @@ domains = sess.domain.get_list(domain_status="ACTIVE", pattern=r".*\.maine\.edu"
 #### List domains needing DCV
 
 `get_pending_dcv()` returns active domains that have not yet completed DCV
-verification. It fetches all domains and filters client-side using
-`domain.needs_dcv`.
+verification. It filters `domainStatus=ACTIVE` server-side and applies the
+DCV-status half (`domain.needs_dcv`, i.e. anything other than `VERIFIED`)
+client-side.
 
-> **Note:** Combining the API `domainStatus` and `dcvStatus` filter parameters
-> originally returned a 400 error (reported 2026-05-20), so this method fetches
-> all domains and filters client-side. Probe R02 confirmed the combination now
-> works in both environments (2026-07-02, GitLab issue #6); the switch to
-> server-side filtering is planned for the 1.0 refactor.
+> **Note:** Probe R02 confirmed the combined `domainStatus`+`dcvStatus` filter
+> is accepted in both environments (2026-07-02, GitLab issue #6), so the
+> `domainStatus=ACTIVE` half moved server-side in 1.0. The `dcvStatus` half
+> stays client-side deliberately: "needs DCV" means *anything other than
+> `VERIFIED`*, and the server cannot express that — `dcvStatus=EXPIRED` still
+> returns 400 (vendor #135290), and an allow-list filter would silently drop
+> unknown future statuses. Revisit when issue #6 settles the enum membership.
 
 ```python
 pending = sess.domain.get_pending_dcv()
@@ -1259,12 +1262,12 @@ print(domain)
 #   created:         2026-05-04 21:27:14+00:00
 
 repr(domain)
-# Domain(id='vuxwZgEXWWFXQQWC-...', name='maine.edu', status='ACTIVE', dcv_status='VERIFIED')
+# Domain(name='maine.edu', status='ACTIVE')
 ```
 
 #### DcvInfo
 
-`domain.get_dcv()` returns a `DcvInfo` dataclass with the following fields:
+`domain.get_dcv()` returns a `DcvInfo` model with the following fields:
 
 | Field | Type | Description |
 |---|---|---|
@@ -1289,7 +1292,7 @@ print(dcv.method)                  # e.g. "DNS-TXT" or "HTTP-URL"
 print(dcv.token)                   # challenge value to publish
 print(dcv.host)                    # sub-domain prefix for the challenge record
 
-result = domain.verify()           # trigger verification; returns raw API response dict
+result = domain.verify()           # trigger verification; returns a DcvVerifyResult summary
 domain.change_dcv_method("DNS-TXT")   # accepted values: "DNS-TXT", "HTTP-URL"
 attempt = domain.last_dcv_attempt()   # returns raw API response dict
 history = domain.dcv_attempt_history() # returns raw API response dict or list
@@ -1308,8 +1311,8 @@ sess = certinext.session(
     client_secret="YOUR_CLIENT_SECRET",
 )
 
-# Due to a vendor API bug, server-side status filtering is currently disabled.
-# get_pending_dcv() fetches all domains and filters client-side for needs_dcv.
+# get_pending_dcv() filters domainStatus=ACTIVE server-side; the DCV-status
+# half (needs_dcv, i.e. != VERIFIED) stays client-side (see note above).
 for domain in sess.domain.get_pending_dcv():
     print(f"Verifying {domain.name} ...")
     domain.verify()

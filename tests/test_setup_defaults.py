@@ -178,7 +178,7 @@ def test_prompt_menu_empty_keeps_current(monkeypatch: pytest.MonkeyPatch) -> Non
 
 def _org(locality: str = "", state_code: str = "") -> Organization:
     """Build a minimal Organization with just the location fields populated."""
-    return Organization(
+    return Organization.model_validate(
         {"organizationLocality": locality, "organizationStateCode": state_code}
     )
 
@@ -203,7 +203,9 @@ def test_org_location_empty() -> None:
 
 def _cat(*product_dicts: dict[str, Any]) -> ProductCategory:
     """Build a ProductCategory holding the given raw product dicts."""
-    return ProductCategory({"categoryName": "SSL/TLS Certificates", "products": list(product_dicts)})
+    return ProductCategory.model_validate(
+        {"categoryName": "SSL/TLS Certificates", "products": list(product_dicts)}
+    )
 
 
 def _pd(name: str, code: str) -> dict[str, Any]:

@@ -83,57 +83,57 @@ class TestDcvChallenge:
 
     def test_domain(self):
         """domain reads 'domain' field."""
-        c = DcvChallenge({"domain": "example.com", "method": "DNS-TXT"})
+        c = DcvChallenge.model_validate({"domain": "example.com", "method": "DNS-TXT"})
         assert c.domain == "example.com"
 
     def test_domain_falls_back_to_domain_name(self):
         """domain falls back to 'domainName'."""
-        c = DcvChallenge({"domainName": "example.com"})
+        c = DcvChallenge.model_validate({"domainName": "example.com"})
         assert c.domain == "example.com"
 
     def test_method_is_uppercase(self):
         """method is returned in upper case."""
-        c = DcvChallenge({"method": "dns-txt"})
+        c = DcvChallenge.model_validate({"method": "dns-txt"})
         assert c.method == "DNS-TXT"
 
     def test_method_reads_dcv_method(self):
         """method reads 'dcvMethod' when 'method' is absent."""
-        c = DcvChallenge({"dcvMethod": "HTTP-URL"})
+        c = DcvChallenge.model_validate({"dcvMethod": "HTTP-URL"})
         assert c.method == "HTTP-URL"
 
     def test_token_reads_txt_token(self):
         """token reads txtToken."""
-        c = DcvChallenge({"txtToken": "abc123"})
+        c = DcvChallenge.model_validate({"txtToken": "abc123"})
         assert c.token == "abc123"
 
     def test_token_reads_file_token(self):
         """token falls back to fileToken."""
-        c = DcvChallenge({"fileToken": "xyz789"})
+        c = DcvChallenge.model_validate({"fileToken": "xyz789"})
         assert c.token == "xyz789"
 
     def test_token_reads_dns_contents(self):
         """token falls back to dnsContents."""
-        c = DcvChallenge({"dnsContents": "token-value"})
+        c = DcvChallenge.model_validate({"dnsContents": "token-value"})
         assert c.token == "token-value"
 
     def test_host_reads_dns_host(self):
         """host reads dnsHost."""
-        c = DcvChallenge({"dnsHost": "_emudhra-challenge.example.com"})
+        c = DcvChallenge.model_validate({"dnsHost": "_emudhra-challenge.example.com"})
         assert c.host == "_emudhra-challenge.example.com"
 
     def test_value_aliases_token(self):
         """value returns the same as token when no explicit 'value' field."""
-        c = DcvChallenge({"txtToken": "mytoken"})
+        c = DcvChallenge.model_validate({"txtToken": "mytoken"})
         assert c.value == c.token
 
     def test_value_reads_direct_value_field(self):
         """value reads 'value' directly when present."""
-        c = DcvChallenge({"value": "direct-value"})
+        c = DcvChallenge.model_validate({"value": "direct-value"})
         assert c.value == "direct-value"
 
     def test_missing_fields_return_none(self):
         """Missing fields return None."""
-        c = DcvChallenge({})
+        c = DcvChallenge.model_validate({})
         assert c.domain is None
         assert c.method is None
         assert c.token is None
@@ -142,12 +142,12 @@ class TestDcvChallenge:
     def test_as_dict_returns_raw_data(self):
         """as_dict() returns the exact dict passed at construction."""
         data = {"domain": "example.com"}
-        c = DcvChallenge(data)
+        c = DcvChallenge.model_validate(data)
         assert c.as_dict() is data
 
     def test_repr_contains_domain_method_host(self):
         """repr() includes domain, method, and host."""
-        c = DcvChallenge({"domain": "example.com", "method": "DNS-TXT", "dnsHost": "_h.example.com"})
+        c = DcvChallenge.model_validate({"domain": "example.com", "method": "DNS-TXT", "dnsHost": "_h.example.com"})
         r = repr(c)
         assert "example.com" in r
         assert "DNS-TXT" in r
@@ -173,65 +173,65 @@ class TestCertificateDownload:
 
     def test_order_id(self):
         """order_id reads orderId."""
-        cert = CertificateDownload(self._DATA)
+        cert = CertificateDownload.model_validate(self._DATA)
         assert cert.order_id == "ORDER-001"
 
     def test_serial_number(self):
         """serial_number reads serialNumber."""
-        cert = CertificateDownload(self._DATA)
+        cert = CertificateDownload.model_validate(self._DATA)
         assert cert.serial_number == "1234ABCD"
 
     def test_subject(self):
         """subject reads subject."""
-        cert = CertificateDownload(self._DATA)
+        cert = CertificateDownload.model_validate(self._DATA)
         assert cert.subject == "CN=example.com"
 
     def test_issuer(self):
         """issuer reads issuer."""
-        cert = CertificateDownload(self._DATA)
+        cert = CertificateDownload.model_validate(self._DATA)
         assert cert.issuer == "CN=CertiNext CA"
 
     def test_not_before(self):
         """not_before reads notBefore."""
-        cert = CertificateDownload(self._DATA)
+        cert = CertificateDownload.model_validate(self._DATA)
         assert cert.not_before == "2026-05-27T00:00:00Z"
 
     def test_not_after(self):
         """not_after reads notAfter."""
-        cert = CertificateDownload(self._DATA)
+        cert = CertificateDownload.model_validate(self._DATA)
         assert cert.not_after == "2027-05-27T00:00:00Z"
 
     def test_certificate_pem(self):
         """certificate_pem reads certificatePem."""
-        cert = CertificateDownload(self._DATA)
+        cert = CertificateDownload.model_validate(self._DATA)
         assert cert.certificate_pem is not None
         assert cert.certificate_pem.startswith("-----BEGIN CERTIFICATE-----")
 
     def test_chain_pem_returns_list(self):
         """chain_pem reads chainPem as a list."""
-        cert = CertificateDownload(self._DATA)
+        cert = CertificateDownload.model_validate(self._DATA)
         assert len(cert.chain_pem) == 1
 
     def test_chain_pem_empty_when_missing(self):
         """chain_pem returns [] when chainPem is absent."""
-        cert = CertificateDownload({})
+        cert = CertificateDownload.model_validate({})
         assert cert.chain_pem == []
 
     def test_missing_fields_return_none(self):
         """Missing fields return None."""
-        cert = CertificateDownload({})
+        cert = CertificateDownload.model_validate({})
         assert cert.order_id is None
         assert cert.serial_number is None
         assert cert.certificate_pem is None
 
     def test_as_dict_returns_raw_data(self):
         """as_dict() returns the exact dict passed at construction."""
-        cert = CertificateDownload(self._DATA)
+        cert = CertificateDownload.model_validate(self._DATA)
         assert cert.as_dict() is self._DATA
 
     def test_repr_contains_order_and_dates(self):
         """repr() includes order_id, serial_number, and not_after."""
-        cert = CertificateDownload(self._DATA)
+        cert = CertificateDownload.model_validate(self._DATA)
         r = repr(cert)
         assert "ORDER-001" in r
         assert "1234ABCD" in r
@@ -246,72 +246,72 @@ class TestSslOrderProperties:
 
     def test_order_id(self):
         """order_id reads orderId."""
-        order = SslOrder(MagicMock(), _ORDER_DATA)
+        order = SslOrder.from_payload(MagicMock(), _ORDER_DATA)
         assert order.order_id == "ORDER-001"
 
     def test_request_id(self):
         """request_id reads requestId."""
-        order = SslOrder(MagicMock(), _ORDER_DATA)
+        order = SslOrder.from_payload(MagicMock(), _ORDER_DATA)
         assert order.request_id == "REQ-001"
 
     def test_status(self):
         """status reads status."""
-        order = SslOrder(MagicMock(), _ORDER_DATA)
+        order = SslOrder.from_payload(MagicMock(), _ORDER_DATA)
         assert order.status == "pending-dcv"
 
     def test_product_variant(self):
         """product_variant reads productVariant."""
-        order = SslOrder(MagicMock(), _ORDER_DATA)
+        order = SslOrder.from_payload(MagicMock(), _ORDER_DATA)
         assert order.product_variant == "dv"
 
     def test_domain(self):
         """domain reads domain."""
-        order = SslOrder(MagicMock(), _ORDER_DATA)
+        order = SslOrder.from_payload(MagicMock(), _ORDER_DATA)
         assert order.domain == "example.com"
 
     def test_additional_domains(self):
         """additional_domains reads additionalDomains."""
-        order = SslOrder(MagicMock(), _ORDER_DATA)
+        order = SslOrder.from_payload(MagicMock(), _ORDER_DATA)
         assert order.additional_domains == ["www.example.com"]
 
     def test_additional_domains_empty_when_missing(self):
         """additional_domains returns [] when the field is absent."""
-        order = SslOrder(MagicMock(), {})
+        order = SslOrder.from_payload(MagicMock(), {})
         assert order.additional_domains == []
 
     def test_created_at(self):
         """created_at reads createdAt."""
-        order = SslOrder(MagicMock(), _ORDER_DATA)
+        order = SslOrder.from_payload(MagicMock(), _ORDER_DATA)
         assert order.created_at == "2026-05-27T12:00:00Z"
 
     def test_tags(self):
         """tags reads the tags list."""
-        order = SslOrder(MagicMock(), _ORDER_DATA)
+        order = SslOrder.from_payload(MagicMock(), _ORDER_DATA)
         assert order.tags == ["foo", "bar"]
 
     def test_tags_empty_when_missing(self):
         """tags returns [] when the field is absent."""
-        order = SslOrder(MagicMock(), {})
+        order = SslOrder.from_payload(MagicMock(), {})
         assert order.tags == []
 
     def test_remarks(self):
         """remarks reads the remarks string."""
-        order = SslOrder(MagicMock(), _ORDER_DATA)
+        order = SslOrder.from_payload(MagicMock(), _ORDER_DATA)
         assert order.remarks == "some note"
 
     def test_remarks_none_when_missing(self):
         """remarks returns None when the field is absent."""
-        order = SslOrder(MagicMock(), {})
+        order = SslOrder.from_payload(MagicMock(), {})
         assert order.remarks is None
 
     def test_as_dict_returns_raw_data(self):
         """as_dict() returns the exact dict passed at construction."""
-        order = SslOrder(MagicMock(), _ORDER_DATA)
+        order = SslOrder.from_payload(MagicMock(), _ORDER_DATA)
         assert order.as_dict() is _ORDER_DATA
 
     def test_repr_contains_key_fields(self):
         """repr() includes order_id, domain, and status."""
-        order = SslOrder(MagicMock(), _ORDER_DATA)
+        order = SslOrder.from_payload(MagicMock(), _ORDER_DATA)
         r = repr(order)
         assert "ORDER-001" in r
         assert "example.com" in r
@@ -327,7 +327,7 @@ class TestSslOrderLifecycleMethods:
 
     def _make_order(self) -> tuple[SslOrder, MagicMock]:
         client, mock_session = _make_client()
-        order = SslOrder(client, _ORDER_DATA)
+        order = SslOrder.from_payload(client, _ORDER_DATA)
         return order, mock_session
 
     def test_refresh_calls_get_on_order_id(self):
@@ -485,7 +485,7 @@ class TestSslOrderReissue:
 
     def _make_order(self) -> tuple[SslOrder, MagicMock]:
         client, mock_session = _make_client()
-        order = SslOrder(client, _ORDER_DATA)
+        order = SslOrder.from_payload(client, _ORDER_DATA)
         return order, mock_session
 
     def test_reissue_rekey_posts_with_csr(self):
@@ -804,7 +804,7 @@ class TestSslAccessorGet:
 def _make_workflow(status: str = "pending-approval") -> tuple[OrderWorkflow, SslOrder, MagicMock]:
     """Return an (OrderWorkflow, SslOrder, mock_session) triple."""
     client, mock_session = _make_client()
-    order = SslOrder(client, {**_ORDER_DATA, "status": status})
+    order = SslOrder.from_payload(client, {**_ORDER_DATA, "status": status})
     wf = OrderWorkflow(order, signer_name="Jane Doe", signer_place="Portland, ME")
     return wf, order, mock_session
 
@@ -1124,14 +1124,14 @@ class TestCertificateDownloadAsPemChain:
 
     def test_leaf_first_order(self):
         """Chain is end-entity cert followed by intermediates, in order."""
-        cert = CertificateDownload({"certificatePem": _LEAF, "chainPem": [_INT1, _INT2]})
+        cert = CertificateDownload.model_validate({"certificatePem": _LEAF, "chainPem": [_INT1, _INT2]})
         chain = cert.as_pem_chain()
         assert chain == f"{_LEAF}\n{_INT1}\n{_INT2}\n"
         assert chain.index("LEAF") < chain.index("INT1") < chain.index("INT2")
 
     def test_single_trailing_newline(self):
         """Trailing/embedded whitespace is normalised to one final newline."""
-        cert = CertificateDownload({"certificatePem": _LEAF + "\n\n", "chainPem": [_INT1 + "\n"]})
+        cert = CertificateDownload.model_validate({"certificatePem": _LEAF + "\n\n", "chainPem": [_INT1 + "\n"]})
         chain = cert.as_pem_chain()
         assert chain == f"{_LEAF}\n{_INT1}\n"
         assert chain.endswith("\n")
@@ -1139,12 +1139,12 @@ class TestCertificateDownloadAsPemChain:
 
     def test_leaf_only_when_no_chain(self):
         """With no intermediates the chain is just the leaf plus a newline."""
-        cert = CertificateDownload({"certificatePem": _LEAF})
+        cert = CertificateDownload.model_validate({"certificatePem": _LEAF})
         assert cert.as_pem_chain() == f"{_LEAF}\n"
 
     def test_empty_when_no_certificate(self):
         """Returns an empty string when there is no certificate at all."""
-        assert CertificateDownload({}).as_pem_chain() == ""
+        assert CertificateDownload.model_validate({}).as_pem_chain() == ""
 
 
 # ---------------------------------------------------------------------------
@@ -1230,7 +1230,7 @@ class TestOrderWorkflowDownloadChain:
     def test_returns_fullchain(self):
         """download_chain() returns the leaf-first chain from the JSON download."""
         wf, _, _ = _make_workflow("issued")
-        download = CertificateDownload({"certificatePem": _LEAF, "chainPem": [_INT1]})
+        download = CertificateDownload.model_validate({"certificatePem": _LEAF, "chainPem": [_INT1]})
         with patch.object(wf.order, "download_certificate", return_value=download):
             chain = wf.download_chain()
         assert chain == f"{_LEAF}\n{_INT1}\n"
@@ -1238,7 +1238,7 @@ class TestOrderWorkflowDownloadChain:
     def test_retries_on_422_then_succeeds(self):
         """download_chain() retries when the first attempt returns 422."""
         wf, _, _ = _make_workflow("issued")
-        download = CertificateDownload({"certificatePem": _LEAF, "chainPem": []})
+        download = CertificateDownload.model_validate({"certificatePem": _LEAF, "chainPem": []})
         call_count = 0
 
         def side_effect() -> CertificateDownload:
@@ -1275,7 +1275,7 @@ class TestOrderWorkflowFromOrderId:
     def test_fetches_and_wraps_order(self):
         """from_order_id() fetches via session.ssl.get and wraps the result."""
         client, _ = _make_client()
-        order = SslOrder(client, _ORDER_DATA)
+        order = SslOrder.from_payload(client, _ORDER_DATA)
         session = MagicMock()
         session.ssl.get.return_value = order
         wf = OrderWorkflow.from_order_id(

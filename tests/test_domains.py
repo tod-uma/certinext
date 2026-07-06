@@ -70,7 +70,7 @@ class TestDomainProperties:
 
     def test_created_at_none_when_missing(self, mock_client: MagicMock):
         """created_at returns None when the createdAt field is absent."""
-        d = Domain(mock_client, {"domainId": "abc"})
+        d = Domain.from_payload(mock_client, {"domainId": "abc"})
         assert d.created_at is None
 
     def test_name_setter(self, domain: Domain):
@@ -80,47 +80,47 @@ class TestDomainProperties:
 
     def test_dcv_expires_from_valid_till(self, mock_client: MagicMock):
         """dcv_expires reads validTill and returns a UTC-aware datetime."""
-        d = Domain(mock_client, dict(SAMPLE_DOMAIN_DATA))
+        d = Domain.from_payload(mock_client, dict(SAMPLE_DOMAIN_DATA))
         exp = d.dcv_expires
         assert exp is not None
         assert exp == datetime(2099, 12, 31, 0, 0, 0, tzinfo=timezone.utc)
 
     def test_dcv_expires_none_when_missing(self, mock_client: MagicMock):
         """dcv_expires returns None when validTill is absent (e.g. PENDING domain)."""
-        d = Domain(mock_client, dict(SAMPLE_DOMAIN_DATA_2))
+        d = Domain.from_payload(mock_client, dict(SAMPLE_DOMAIN_DATA_2))
         assert d.dcv_expires is None
 
     def test_verified_at_from_detail_response(self, mock_client: MagicMock):
         """verified_at reads verifiedAt from the detail-endpoint response shape."""
-        d = Domain(mock_client, dict(SAMPLE_DOMAIN_DETAIL_DATA))
+        d = Domain.from_payload(mock_client, dict(SAMPLE_DOMAIN_DETAIL_DATA))
         vat = d.verified_at
         assert vat is not None
         assert vat == datetime(2026, 5, 29, 18, 59, 0, tzinfo=timezone.utc)
 
     def test_verified_at_none_when_missing(self, mock_client: MagicMock):
         """verified_at returns None when verifiedAt is absent (e.g. PENDING domain)."""
-        d = Domain(mock_client, dict(SAMPLE_DOMAIN_DATA_2))
+        d = Domain.from_payload(mock_client, dict(SAMPLE_DOMAIN_DATA_2))
         assert d.verified_at is None
 
     def test_dcv_expires_soon_true_within_threshold(self, mock_client: MagicMock):
         """dcv_expires_soon returns True when expiry is within the given days."""
         # PAST_VALID_TILL is always in the past, so always within any positive threshold.
-        d = Domain(mock_client, {"validTill": PAST_VALID_TILL})
+        d = Domain.from_payload(mock_client, {"validTill": PAST_VALID_TILL})
         assert d.dcv_expires_soon(30) is True
 
     def test_dcv_expires_soon_false_far_future(self, mock_client: MagicMock):
         """dcv_expires_soon returns False when expiry is far in the future."""
-        d = Domain(mock_client, {"validTill": FAR_FUTURE_VALID_TILL})
+        d = Domain.from_payload(mock_client, {"validTill": FAR_FUTURE_VALID_TILL})
         assert d.dcv_expires_soon(30) is False
 
     def test_dcv_expires_soon_false_when_no_expiry(self, mock_client: MagicMock):
         """dcv_expires_soon returns False when dcv_expires is None."""
-        d = Domain(mock_client, dict(SAMPLE_DOMAIN_DATA_2))
+        d = Domain.from_payload(mock_client, dict(SAMPLE_DOMAIN_DATA_2))
         assert d.dcv_expires_soon(30) is False
 
     def test_missing_fields_return_none(self, mock_client: MagicMock):
         """All properties return None when constructed with an empty dict."""
-        d = Domain(mock_client, {})
+        d = Domain.from_payload(mock_client, {})
         assert d.id is None
         assert d.name is None
         assert d.organization_id is None
@@ -169,7 +169,7 @@ class TestDomainHelpers:
     def test_as_dict_returns_raw_data(self, domain: Domain):
         """as_dict() returns the same dict that was passed to the constructor."""
         raw = dict(SAMPLE_DOMAIN_DATA)
-        d = Domain(MagicMock(), raw)
+        d = Domain.from_payload(MagicMock(), raw)
         assert d.as_dict() is raw
 
     def test_to_row_keys(self, domain: Domain):
@@ -190,7 +190,7 @@ class TestDomainNeedsDcv:
     """Domain.needs_dcv reflects whether a domain requires DCV verification."""
 
     def _domain(self, client: MagicMock, status: str, dcv_status: str) -> Domain:
-        return Domain(client, {"domainId": "x", "status": status, "dcvStatus": dcv_status})
+        return Domain.from_payload(client, {"domainId": "x", "status": status, "dcvStatus": dcv_status})
 
     def test_active_pending_needs_dcv(self, mock_client: MagicMock):
         """ACTIVE + PENDING → needs_dcv is True."""
@@ -215,12 +215,12 @@ class TestDomainNeedsDcv:
     def test_sample_domain_data_2_needs_dcv(self, mock_client: MagicMock):
         """SAMPLE_DOMAIN_DATA_2 (ACTIVE/PENDING) has needs_dcv True."""
         from tests.conftest import SAMPLE_DOMAIN_DATA_2
-        d = Domain(mock_client, dict(SAMPLE_DOMAIN_DATA_2))
+        d = Domain.from_payload(mock_client, dict(SAMPLE_DOMAIN_DATA_2))
         assert d.needs_dcv is True
 
     def test_missing_status_does_not_need_dcv(self, mock_client: MagicMock):
         """Domain with no status field has needs_dcv False (None != 'ACTIVE')."""
-        d = Domain(mock_client, {})
+        d = Domain.from_payload(mock_client, {})
         assert d.needs_dcv is False
 
 
@@ -559,17 +559,25 @@ class TestDomainAccessorGetPendingDcv:
         result = accessor.get_pending_dcv()
         assert all(isinstance(d, Domain) for d in result)
 
-    def test_calls_list_with_no_server_side_filters(self, accessor: DomainAccessor, mock_client: MagicMock):
-        """get_pending_dcv() fetches all domains without server-side status filters.
+    def test_filters_domain_status_server_side_only(self, accessor: DomainAccessor, mock_client: MagicMock):
+        """get_pending_dcv() sends domainStatus=ACTIVE server-side and no dcvStatus (R02).
 
-        The API returns 400 when domainStatus and dcvStatus are combined, so
-        filtering is done client-side via needs_dcv instead.
+        The dcvStatus half stays client-side deliberately: needs_dcv means
+        anything other than VERIFIED, which the server cannot express —
+        dcvStatus=EXPIRED still 400s (vendor #135290) and unknown future
+        statuses would be silently dropped by an allow-list filter.
         """
         mock_client.get.return_value = []
         accessor.get_pending_dcv()
         mock_client.get.assert_called_once_with(
             "/api/certinext/v2/domains",
-            params={"sortBy": "domainName", "sortDir": "asc", "limit": 200, "offset": 0},
+            params={
+                "sortBy": "domainName",
+                "sortDir": "asc",
+                "limit": 200,
+                "domainStatus": "ACTIVE",
+                "offset": 0,
+            },
         )
 
 

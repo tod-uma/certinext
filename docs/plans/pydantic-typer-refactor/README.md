@@ -26,7 +26,7 @@ the table. Wishlist issues #7–#12 are deliberately *outside* the milestone
 | Phase | Document | Issue | Status | depends-on | implements-adr |
 | --- | --- | --- | --- | --- | --- |
 | 0 — Guardrails & probe suite (**lands on `main`**) | [phase-0-guardrails-and-probe-suite.md](phase-0-guardrails-and-probe-suite.md) | #13 | planned | — | 0005 |
-| 1 — Pydantic models | [phase-1-pydantic-models.md](phase-1-pydantic-models.md) | #14 | planned | phase-0 | 0003, 0005 |
+| 1 — Pydantic models | [phase-1-pydantic-models.md](phase-1-pydantic-models.md) | #14 | done | phase-0 | 0003, 0005 |
 | 2 — httpx transport & exceptions | [phase-2-httpx-transport.md](phase-2-httpx-transport.md) | #15 | planned | phase-1 | 0003 |
 | 3 — pydantic-settings config | [phase-3-pydantic-settings-config.md](phase-3-pydantic-settings-config.md) | #16 | planned | phase-0 | 0003 |
 | 4 — typer CLI + rich | [phase-4-typer-cli.md](phase-4-typer-cli.md) | #17 | planned | phase-1, phase-2, phase-3 | 0003, 0004 |

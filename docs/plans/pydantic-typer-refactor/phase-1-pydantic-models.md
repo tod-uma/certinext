@@ -1,5 +1,5 @@
 ---
-status: planned
+status: done
 depends-on: [phase-0]
 implements-adr: [0003, 0005]
 ---
@@ -97,6 +97,77 @@ SslOrder), `csr.py` (CsrInfo). Accessors keep their method signatures;
   branch installed (`uv pip install -e ../python-libs/certinext` overriding
   the pin locally) — its mocks encode the frozen surface.
 - Grep gate: no `self._data.get(` left in migrated modules.
+
+## Implementation record (2026-07-06)
+
+Implemented on `feat/pydantic-typer-refactor`. Verification: 731 unit tests
+green (wire-param paging contract carried over verbatim), full corpus parses
+(both env trees, all files registered or explicitly excluded), `mypy
+certinext` and pyright clean, grep gate passes (no `self._data` left),
+`ums-certinext-scripts` suite 111/111 green with the branch installed over
+the pin. Decisions made where the plan left them to the implementer:
+
+- **Layout:** `certinext/models/` package with per-API-area modules
+  (`models.catalog` ↔ `certinext.catalog`, ...); legacy modules re-export
+  everything, so no import path changes. URL constants used by verb methods
+  (`_ORGS_BASE`, `_BASE`, `_SSL_BASE`) moved with the models.
+- **`as_dict()` stashes, it does not reconstruct.** A wrap-mode model
+  validator stores the original payload dict by reference in a `_raw`
+  private attribute; `as_dict()` returns it verbatim.
+
+  <details>
+  <summary>Why stash instead of reconstructing from aliases + extras?</summary>
+
+  - Reconstruction loses which alias the wire actually used and returns
+    validator-coerced values instead of wire values.
+  - The 0.3.x tests assert `as_dict() is data` (identity, not equality);
+    stashing preserves that for free.
+  - By-reference (not a copy) also preserves the 0.3.x behavior where
+    `Organization._ensure_detail()` merges detail fields into the caller's
+    dict in place.
+  </details>
+
+- **Falsy-or chains use before-validators, not `AliasChoices`.**
+  `AliasChoices` only falls through on *absent* keys; the 0.3.x chains
+  (`OrderRecord.common_name`, `DcvChallenge`, `DcvInfo.from_wire`) fall
+  through on *falsy values* and end in `or None`/`""`. Where absent-key
+  fallback is genuinely sufficient (`CustomField.field_name/display_name`,
+  `LedgerRecord.transaction_date/transaction_type`), `AliasChoices` is used
+  as the plan intended.
+- **Base config adds `coerce_numbers_to_str=True`** — pydantic v2 lax mode
+  rejects int-to-str, so a vendor drift from `"842"` to `842` would raise
+  `ValidationError` on every string field without it (ADR 0005 violation).
+- **Status fields are typed `str | None`.** No enum classes existed in 0.3.x
+  (statuses are strings checked against constants) and issue #6 blocks
+  membership changes, so the Literals (`DomainStatus`, `SslOrderStatus`, ...)
+  remain documentation types. The `lenient_enum` helper shipped in
+  `models._base` for when #6 settles.
+- **Verb-method models** (`Domain`, `SslOrder`, `Organization`) carry the
+  client in a `PrivateAttr` set by a `from_payload()` classmethod;
+  `refresh()`-style methods re-validate in place via the shared base
+  `_replace_payload()`. Organization's lazy detail fetch is preserved
+  as-is; one documented divergence: after the detail merge, *list-level*
+  model fields keep their list-response values (detail-only properties read
+  the merged raw dict exactly as before).
+- **`CsrInfo` became a plain `BaseModel`**, not a `CertiNextModel` — it is
+  built from `cryptography` parsing, not a wire payload; the leniency
+  machinery does not apply.
+- **`coerce_flag` makes the string `"0"` falsy** for boolean flags
+  (`CustomField.required`, `SslOrder.csr_submitted`/`interim_dv_issued`),
+  a deliberate deviation from 0.3.x `bool()` truthiness (where
+  `bool("0") is True` was a latent bug).
+- **R02 (conditional scope): partial switch.** `domainStatus=ACTIVE` moved
+  server-side in `get_pending_dcv()` — it exactly matches the first conjunct
+  of `needs_dcv`. The `dcvStatus` half stays client-side: `needs_dcv` means
+  *anything ≠ VERIFIED*, which the server cannot express (`dcvStatus=EXPIRED`
+  still 400s, vendor #135290; an allow-list filter would silently drop
+  unknown future statuses). Revisit when issue #6 settles enum membership.
+- **Corpus gate:** `tests/test_corpus_models.py` maps every corpus file to a
+  model + extractor; unregistered files fail loudly. `reports-ledger.json`
+  is registered but waived non-empty (`EMPTY_OK`) — the account genuinely has
+  `totalElements=0` in both environments. `domains-dcv.json` is covered by a
+  dedicated `DcvInfo.from_wire` test; the healthcheck capture is permanently
+  excluded (report artifact, not an API payload).
 
 ## Documentation expectations
 

@@ -22,93 +22,11 @@ from typing import Any
 
 from .client import CertiNextClient
 from .exceptions import CertiNextAPIError  # noqa: F401 — referenced in Raises docstrings
+from .models.ledger import LedgerRecord
+
+__all__ = ["LedgerAccessor", "LedgerRecord"]
 
 _BASE = "/api/certinext/v2/reports/ledger"
-
-
-class LedgerRecord:
-    """Represents a single row from the CertiNext ledger statement report.
-
-    Instances are returned by :class:`LedgerAccessor` methods and should not
-    be constructed directly. Common fields are promoted to typed properties;
-    all raw API fields are accessible via :meth:`as_dict`.
-
-    The exact set of fields returned depends on the API version and account
-    type. Properties that are not present in the response return ``None``.
-
-    Example::
-
-        sess = certinext.session(client_id="...", client_secret="...")
-        for entry in sess.ledger.get_list():
-            print(entry.transaction_date, entry.description, entry.credit)
-    """
-
-    def __init__(self, data: dict[str, Any]) -> None:
-        """
-        Args:
-            data: Raw API response dict for this ledger row.
-        """
-        self._data: dict[str, Any] = data
-
-    @property
-    def transaction_date(self) -> str | None:
-        """Date and time of the transaction as an ISO 8601 string."""
-        return self._data.get("transactionDate") or self._data.get("date")
-
-    @property
-    def description(self) -> str | None:
-        """Human-readable description of the transaction."""
-        return self._data.get("description")
-
-    @property
-    def order_number(self) -> str | None:
-        """Order number associated with this transaction, if any."""
-        return self._data.get("orderNumber")
-
-    @property
-    def transaction_type(self) -> str | None:
-        """Type of transaction (e.g. ``"PURCHASE"``, ``"RENEWAL"``, ``"REFUND"``)."""
-        return self._data.get("transactionType") or self._data.get("type")
-
-    @property
-    def debit(self) -> str | None:
-        """Debit amount as a string, if applicable."""
-        return self._data.get("debit")
-
-    @property
-    def credit(self) -> str | None:
-        """Credit amount as a string, if applicable."""
-        return self._data.get("credit")
-
-    @property
-    def balance(self) -> str | None:
-        """Account balance after this transaction."""
-        return self._data.get("balance")
-
-    def as_dict(self) -> dict[str, Any]:
-        """Return the raw API response dict for this ledger row."""
-        return self._data
-
-    def to_row(self) -> dict[str, str]:
-        """Return a flat ``dict[str, str]`` suitable for tabular display."""
-        def _s(val: Any) -> str:
-            return str(val) if val is not None else ""
-        return {
-            "transaction_date": _s(self.transaction_date),
-            "description": _s(self.description),
-            "order_number": _s(self.order_number),
-            "transaction_type": _s(self.transaction_type),
-            "debit": _s(self.debit),
-            "credit": _s(self.credit),
-            "balance": _s(self.balance),
-        }
-
-    def __repr__(self) -> str:
-        """Return a concise developer representation."""
-        return (
-            f"LedgerRecord(transaction_date={self.transaction_date!r}, "
-            f"description={self.description!r})"
-        )
 
 
 class LedgerAccessor:
@@ -183,7 +101,7 @@ class LedgerAccessor:
             CertiNextAPIError: On a non-2xx API response. Provides ``.status_code`` and ``.body``.
         """
         raw, _ = self._fetch_page(page, size)
-        return [LedgerRecord(item) for item in raw]
+        return [LedgerRecord.model_validate(item) for item in raw if isinstance(item, dict)]
 
     def get_list(
         self,
@@ -211,7 +129,7 @@ class LedgerAccessor:
         page = 1
         while True:
             raw, total_pages = self._fetch_page(page, page_size)
-            records.extend(LedgerRecord(item) for item in raw)
+            records.extend(LedgerRecord.model_validate(item) for item in raw if isinstance(item, dict))
             if total_pages is not None:
                 if page >= total_pages:
                     break

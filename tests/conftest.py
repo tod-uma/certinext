@@ -94,7 +94,7 @@ def mock_client() -> MagicMock:
 @pytest.fixture
 def domain(mock_client: MagicMock) -> Domain:
     """A Domain instance backed by mock_client and SAMPLE_DOMAIN_DATA."""
-    return Domain(mock_client, dict(SAMPLE_DOMAIN_DATA))
+    return Domain.from_payload(mock_client, dict(SAMPLE_DOMAIN_DATA))
 
 
 @pytest.fixture
@@ -118,4 +118,4 @@ def domains_list_data() -> list[dict]:
 @pytest.fixture
 def domains_list(mock_client: MagicMock, domains_list_data: list[dict]) -> list[Domain]:
     """43 Domain objects built from the anonymized fixture data."""
-    return [Domain(mock_client, item) for item in domains_list_data]
+    return [Domain.from_payload(mock_client, item) for item in domains_list_data]
