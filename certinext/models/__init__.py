@@ -23,6 +23,15 @@ documented public API for 1.0.
 from ._base import CertiNextModel, coerce_flag, lenient_enum
 from .accounts import AccountInfo, Group, Organization
 from .catalog import CustomField, Product, ProductCategory
+from .domains import (
+    VALID_DCV_METHODS,
+    DcvInfo,
+    DcvMethod,
+    DcvStatus,
+    DcvVerifyResult,
+    Domain,
+    DomainStatus,
+)
 from .ledger import LedgerRecord
 from .orders import CertificateStatus, OrderRecord
 
@@ -39,4 +48,11 @@ __all__ = [
     "LedgerRecord",
     "CertificateStatus",
     "OrderRecord",
+    "VALID_DCV_METHODS",
+    "DcvInfo",
+    "DcvMethod",
+    "DcvStatus",
+    "DcvVerifyResult",
+    "Domain",
+    "DomainStatus",
 ]

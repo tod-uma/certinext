@@ -36,6 +36,7 @@ import pytest
 from certinext.models import CertiNextModel
 from certinext.models.accounts import AccountInfo, Group, Organization
 from certinext.models.catalog import ProductCategory
+from certinext.models.domains import DcvInfo, DcvVerifyResult, Domain
 from certinext.models.ledger import LedgerRecord
 from certinext.models.orders import OrderRecord
 
@@ -98,6 +99,11 @@ REGISTRY: dict[str, tuple[type[CertiNextModel], Callable[[Any], list[dict[str, A
     "organizations-detail.json": (Organization, _single),
     "reports-ledger.json": (LedgerRecord, _wrapped("content")),
     "reports-orders.json": (OrderRecord, _wrapped("content")),
+    "domains-list.json": (Domain, _wrapped("content")),
+    "domains-list-default.json": (Domain, _wrapped("content")),
+    "domains-detail.json": (Domain, _single),
+    "domains-dcv-attempts.json": (DcvVerifyResult, _wrapped("content")),
+    "domains-dcv-attempts-last.json": (DcvVerifyResult, _single),
 }
 
 # Registered files whose captured payload legitimately has zero rows (the
@@ -110,12 +116,7 @@ EMPTY_OK: dict[str, str] = {
 # progress) or that intentionally have no row model. Files listed with a
 # reason string are permanent exclusions; the rest must move to REGISTRY.
 NOT_YET_COVERED: dict[str, str] = {
-    "domains-list.json": "pending: domains migration",
-    "domains-list-default.json": "pending: domains migration",
-    "domains-detail.json": "pending: domains migration",
-    "domains-dcv.json": "pending: domains migration",
-    "domains-dcv-attempts.json": "pending: domains migration",
-    "domains-dcv-attempts-last.json": "pending: domains migration",
+    "domains-dcv.json": "covered by test_corpus_dcv_info_from_wire (DcvInfo is a value object, not a row model)",
     "ssl-certificates-detail.json": "pending: ssl_certificates migration",
     "ssl-certificates-certificate.json": "pending: ssl_certificates migration",
     "healthcheck-2026-07-02.json": "permanent: healthcheck report artifact, not an API payload",
@@ -142,6 +143,15 @@ def test_corpus_rows_parse(env: str, filename: str) -> None:
         instance = model_cls.model_validate(row)
         # ADR 0005 escape hatch: the exact wire dict stays reachable.
         assert instance.as_dict() is row
+
+
+@pytest.mark.parametrize("env", _ENVS)
+def test_corpus_dcv_info_from_wire(env: str) -> None:
+    """DcvInfo.from_wire parses the captured DCV payload from both environments."""
+    body = _load_body(env, "domains-dcv.json")
+    assert isinstance(body, dict)
+    info = DcvInfo.from_wire(body)
+    assert info.method == info.method.upper()
 
 
 @pytest.mark.parametrize("env", _ENVS)

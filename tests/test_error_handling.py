@@ -36,7 +36,7 @@ from certinext.exceptions import (
 
 def _domain(client: MagicMock, data: dict) -> Domain:
     """Construct a Domain from a mock client and a raw data dict."""
-    return Domain(client, data)
+    return Domain.from_payload(client, data)
 
 
 def _make_auth() -> OAuth2ClientCredentials:
@@ -162,28 +162,28 @@ class TestDomainBadDataFixture:
     ):
         """Every entry in the bad-data fixture can be wrapped in a Domain without raising."""
         for entry in bad_domain_data:
-            Domain(mock_client, entry)  # must not raise
+            Domain.from_payload(mock_client, entry)  # must not raise
 
     def test_all_bad_entries_support_str(
         self, mock_client: MagicMock, bad_domain_data: list[dict]
     ):
         """str() succeeds for every bad-data entry."""
         for entry in bad_domain_data:
-            str(Domain(mock_client, entry))  # must not raise
+            str(Domain.from_payload(mock_client, entry))  # must not raise
 
     def test_all_bad_entries_support_repr(
         self, mock_client: MagicMock, bad_domain_data: list[dict]
     ):
         """repr() succeeds for every bad-data entry."""
         for entry in bad_domain_data:
-            repr(Domain(mock_client, entry))  # must not raise
+            repr(Domain.from_payload(mock_client, entry))  # must not raise
 
     def test_all_bad_entries_support_to_row(
         self, mock_client: MagicMock, bad_domain_data: list[dict]
     ):
         """to_row() succeeds for every bad-data entry and returns only strings."""
         for entry in bad_domain_data:
-            row = Domain(mock_client, entry).to_row()
+            row = Domain.from_payload(mock_client, entry).to_row()
             assert all(isinstance(v, str) for v in row.values())
 
     def test_all_bad_entries_created_at_is_none_or_datetime(
@@ -192,7 +192,7 @@ class TestDomainBadDataFixture:
         """created_at is either None or a datetime — never raises."""
         from datetime import datetime
         for entry in bad_domain_data:
-            result = Domain(mock_client, entry).created_at
+            result = Domain.from_payload(mock_client, entry).created_at
             assert result is None or isinstance(result, datetime)
 
 
@@ -408,7 +408,7 @@ class TestDcvMethodValidation:
     """get_dcv() rejects unknown DCV methods; change_dcv_method() validates input."""
 
     def _domain_with_id(self, client: MagicMock) -> Domain:
-        return Domain(client, {"domainId": "abc", "domainName": "test.example.edu"})
+        return Domain.from_payload(client, {"domainId": "abc", "domainName": "test.example.edu"})
 
     # get_dcv — API response validation
 

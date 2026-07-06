@@ -13,18 +13,36 @@
 # limitations under the License.
 
 import re
-from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
-from typing import Any, Literal, cast
+from typing import Any
 
 import structlog
 
 from .client import CertiNextClient
 from .exceptions import CertiNextAPIError  # noqa: F401 — referenced in Raises docstrings
+from .models.domains import (
+    _BASE,
+    VALID_DCV_METHODS,
+    DcvInfo,
+    DcvMethod,
+    DcvStatus,
+    DcvVerifyResult,
+    Domain,
+    DomainStatus,
+)
+
+__all__ = [
+    "VALID_DCV_METHODS",
+    "DcvInfo",
+    "DcvMethod",
+    "DcvStatus",
+    "DcvVerifyResult",
+    "Domain",
+    "DomainAccessor",
+    "DomainStatus",
+    "filter_needs_dcv",
+]
 
 log = structlog.get_logger()
-
-_BASE = "/api/certinext/v2/domains"
 
 # get_list() with no offset/limit is meant to return the whole account, but
 # passing no `limit` at all just gets the server's own default page size back
@@ -42,106 +60,6 @@ _LIST_PAGE_SIZE = 200
 # _LIST_PAGE_SIZE rows per page this allows 200,000 domains -- far beyond any
 # real account.
 _MAX_LIST_PAGES = 1000
-
-DomainStatus = Literal["ACTIVE", "INACTIVE", "EXPIRED", "REVOKED"]
-"""Valid values returned by :attr:`Domain.status`."""
-
-DcvStatus = Literal["VERIFIED", "PENDING", "REJECTED", "EXPIRED"]
-"""Valid values returned by :attr:`Domain.dcv_status`."""
-
-DcvMethod = Literal["DNS-TXT", "HTTP-URL"]
-"""Valid DCV method strings accepted by :meth:`Domain.change_dcv_method`."""
-
-VALID_DCV_METHODS: frozenset[str] = frozenset({"DNS-TXT", "HTTP-URL"})
-
-
-@dataclass
-class DcvInfo:
-    """Parsed DCV configuration returned by :meth:`Domain.get_dcv`.
-
-    Normalises the raw API response so callers don't need to handle multiple
-    field name variants or case differences.
-
-    Attributes:
-        method: DCV method in upper case, e.g. ``DNS-TXT`` or ``HTTP-URL``.
-        token:  Challenge value to publish. For DNS-TXT this is the TXT record
-                content (``txtToken``); for HTTP-URL it is the file token
-                (``fileToken``).
-        host:   Sub-domain prefix for the challenge record. The Domains API
-                does not return this field; the DNS-TXT challenge is implicitly
-                placed at ``_emudhra-challenge.<domain>``.
-    """
-
-    method: str
-    token: str
-    host: str
-
-
-class DcvVerifyResult:
-    """Summary of a DCV verification trigger returned by :meth:`Domain.verify`.
-
-    Wraps the raw multi-perspective diagnostic response and exposes only the
-    fields that matter for logging and decision-making. The raw response data
-    is available via :attr:`raw` when deeper inspection is needed.
-
-    Attributes:
-        overall_status: Top-level outcome — typically ``"VERIFIED"`` or
-            ``"PENDING"``.
-        agreed: ``True`` when all queried perspectives reached consensus.
-        perspectives_queried: Number of geographic perspectives that checked
-            the challenge record.
-    """
-
-    def __init__(self, raw: dict[str, Any]) -> None:
-        """
-        Args:
-            raw: The raw API response dict from the verify endpoint.
-        """
-        self.raw = raw
-        consensus: dict[str, Any] = (raw.get("diagnostics") or {}).get("consensus") or {}
-        self.overall_status: str = str(raw.get("overallStatus") or raw.get("status") or "unknown")
-        self.agreed: bool = bool(consensus.get("agreed", False))
-        self.perspectives_queried: int = int(consensus.get("totalPerspectivesQueried", 0))
-
-    def __str__(self) -> str:
-        """Return a short human-readable summary of the verification result."""
-        return (
-            f"overall_status={self.overall_status} "
-            f"agreed={self.agreed} "
-            f"perspectives={self.perspectives_queried}"
-        )
-
-    def __repr__(self) -> str:
-        """Return a developer-friendly representation."""
-        return f"DcvVerifyResult({self!s})"
-
-
-def _has_ns_records(name: str) -> bool:
-    """Return True if name has its own NS records, indicating a DNS zone boundary.
-
-    Requires dnspython (``pip install certinext[dns]``). Returns ``False``
-    when dnspython is not installed or the query fails, erring on the side of
-    assuming the parent covers the domain.
-
-    Args:
-        name: Fully-qualified domain name to query for NS records.
-
-    Returns:
-        ``True`` if NS records were found, ``False`` otherwise or on error.
-    """
-    try:
-        import dns.resolver
-        dns.resolver.resolve(name, "NS")
-        return True
-    except ImportError:
-        log.debug(
-            "dnspython not installed - skipping NS check",
-            domain=name,
-        )
-        return False
-    except Exception:
-        return False
-
 
 def _extract_domain_rows(result: dict[str, Any] | list[Any]) -> list[Any]:
     """Return the list of raw domain rows from a Domains API response.
@@ -162,399 +80,6 @@ def _extract_domain_rows(result: dict[str, Any] | list[Any]) -> list[Any]:
         if isinstance(val, list):
             return val
     return []
-
-
-class Domain:
-    """Represents a single CertiNext domain resource.
-
-    Instances are returned by `DomainAccessor` methods and should not be
-    constructed directly. All API response fields are exposed as read-only
-    properties; mutable fields (`name`, `dcv_method`) also have setters that
-    update the local object — call the appropriate API method to persist
-    changes to the server.
-
-    Supports ``str()`` for human-readable output and ``repr()`` for a concise
-    developer representation, so you can use ``print(domain)`` directly.
-
-    Example::
-
-        sess = certinext.session(client_id="...", client_secret="...")
-        domain = sess.domain.get("maine.edu")
-        print(domain)
-        domain.verify()
-    """
-
-    def __init__(self, client: CertiNextClient, data: dict[str, Any]) -> None:
-        """
-        Args:
-            client: The underlying HTTP client used to make subsequent API calls.
-            data: Raw API response dict for this domain.
-        """
-        self._client = client
-        self._data: dict[str, Any] = data
-
-    # --- properties ---
-
-    @property
-    def id(self) -> str | None:
-        """Unique domain ID assigned by CertiNext."""
-        return self._data.get("domainId")
-
-    @property
-    def name(self) -> str | None:
-        """Fully-qualified domain name (e.g. ``maine.edu``)."""
-        return self._data.get("domainName")
-
-    @name.setter
-    def name(self, value: str) -> None:
-        """Update the domain name in the local object only — does not call the API.
-
-        Note:
-            The CertiNext API does not provide a rename endpoint. This setter
-            exists for internal use only; changes do not persist to the server.
-        """
-        self._data["domainName"] = value
-
-    @property
-    def organization_id(self) -> str | None:
-        """ID of the organization this domain belongs to."""
-        return self._data.get("organizationId")
-
-    @property
-    def organization_name(self) -> str | None:
-        """Display name of the organization this domain belongs to."""
-        return self._data.get("organizationName")
-
-    @property
-    def status(self) -> DomainStatus | None:
-        """Domain status. One of ``ACTIVE``, ``INACTIVE``, ``EXPIRED``, ``REVOKED``."""
-        return self._data.get("status")
-
-    @property
-    def dcv_status(self) -> DcvStatus | None:
-        """DCV status. One of ``VERIFIED``, ``PENDING``, ``REJECTED``, ``EXPIRED``."""
-        return self._data.get("dcvStatus")
-
-    @property
-    def created_at(self) -> datetime | None:
-        """Creation timestamp as a timezone-aware UTC ``datetime``, or ``None``.
-
-        Returns ``None`` when the field is absent, null, or not a parseable
-        ISO 8601 string.
-        """
-        raw = self._data.get("createdAt")
-        if not raw:
-            return None
-        try:
-            return datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
-        except (ValueError, TypeError):
-            return None
-
-    @property
-    def verified_at(self) -> datetime | None:
-        """Timestamp when DCV was last completed, as a timezone-aware UTC datetime.
-
-        Returns ``None`` when the field is absent (domain not yet verified) or
-        not a parseable ISO 8601 string.
-        """
-        raw = self._data.get("verifiedAt")
-        if not raw:
-            return None
-        try:
-            return datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
-        except (ValueError, TypeError):
-            return None
-
-    @property
-    def dcv_expires(self) -> datetime | None:
-        """DCV token expiry as a timezone-aware UTC ``datetime``, or ``None``.
-
-        The API returns this as ``validTill`` at the top level of the domain
-        detail response.  Only present after DCV has been completed; ``None``
-        for domains in PENDING or REJECTED state.
-
-        Returns ``None`` when the field is absent, null, or not a parseable
-        ISO 8601 string.
-        """
-        raw = self._data.get("validTill")
-        if not raw:
-            return None
-        try:
-            return datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
-        except (ValueError, TypeError):
-            return None
-
-    # --- dunder methods ---
-
-    def __str__(self) -> str:
-        """Return a human-readable multi-line summary of the domain."""
-        def row(label: str, value: Any) -> str:
-            return f"  {label:<16} {value or ''}"
-        lines = [f"Domain: {self.name or '(unknown)'}"]
-        lines.append(row("id:", self.id))
-        lines.append(row("status:", self.status))
-        lines.append(row("dcv_status:", self.dcv_status))
-        if self.dcv_expires:
-            lines.append(row("dcv_expires:", self.dcv_expires))
-        lines.append(row("organization:", self.organization_name))
-        if self.created_at:
-            lines.append(row("created:", self.created_at))
-        return "\n".join(lines)
-
-    def __repr__(self) -> str:
-        """Return a concise developer representation of the domain."""
-        return f"Domain(name={self.name!r}, status={self.status!r})"
-
-    # --- public helpers ---
-
-    @property
-    def needs_dcv(self) -> bool:
-        """Return True if this domain is active and not yet DCV-verified."""
-        return self.status == "ACTIVE" and self.dcv_status != "VERIFIED"
-
-    def dcv_expires_soon(self, days: int = 30) -> bool:
-        """Return True if the DCV token expires within ``days`` days.
-
-        Useful for building proactive renewal workflows — call this before
-        :meth:`verify` to avoid letting DCV lapse.  Returns ``False`` when
-        :attr:`dcv_expires` is ``None`` (field not present in the API
-        response or domain has no active DCV token).
-
-        Args:
-            days: Number of days ahead to check. Default is 30.
-
-        Returns:
-            ``True`` if the DCV expiry is known and within ``days`` days
-            from now (including already-expired tokens).
-        """
-        exp = self.dcv_expires
-        if exp is None:
-            return False
-        return exp <= datetime.now(timezone.utc) + timedelta(days=days)
-
-    def dcv_covering_parent(
-        self,
-        all_domain_names: set[str],
-        *,
-        check_ns: bool = True,
-    ) -> str | None:
-        """Return the closest registered ancestor that covers this domain's DCV, or None.
-
-        CertiNext propagates DCV verification down the domain tree: once a
-        parent is verified, its subdomains inherit that status automatically.
-        This method finds the closest ancestor in *all_domain_names* that
-        provides that coverage.
-
-        However, propagation stops at DNS zone boundaries.  A subdomain that
-        has its own NS records forms a separate DNS zone and **will not**
-        inherit DCV from its parent — it must be validated directly.  When
-        *check_ns* is ``True`` an NS DNS lookup is performed; if NS records
-        are found ``None`` is returned even when a parent exists in
-        *all_domain_names*.  Requires ``dnspython``
-        (``pip install certinext[dns]``); falls back gracefully when not
-        installed.
-
-        .. note::
-
-            Zone-boundary behaviour confirmed by members of the InCommon
-            cert-users mailing list (2026-06-01):
-
-            - **Cory Gekoski, University of Maryland** — identified the
-              pattern: subdomains with MX records pointing to their own DNS
-              servers failed to inherit DCV while those sharing the parent's
-              DNS succeeded, suggesting a zone-delegation root cause.
-            - **Blake Bourgeois, Louisiana State University** — confirmed the
-              definitive indicator: every subdomain that did not inherit DCV
-              had its own NS records (a distinct DNS subzone), regardless of
-              MX configuration.
-
-        Args:
-            all_domain_names: Set of all registered domain names (typically
-                the full account list). Used to identify covering ancestors.
-            check_ns: When ``True`` (the default), query DNS for NS records
-                to detect zone boundaries. Set to ``False`` to skip DNS
-                lookups (useful in tests or environments without DNS access).
-
-        Returns:
-            The covering ancestor domain name, or ``None`` if no ancestor is
-            registered or this domain is a DNS zone boundary.
-        """
-        if check_ns and _has_ns_records(self.name or ""):
-            log.debug(
-                "has NS records (DNS zone boundary) - DCV will not propagate from parent",
-                domain=self.name,
-            )
-            return None
-        labels = (self.name or "").split(".")
-        for i in range(1, len(labels) - 1):
-            parent = ".".join(labels[i:])
-            if parent in all_domain_names:
-                return parent
-        return None
-
-    def as_dict(self) -> dict[str, Any]:
-        """Return the raw API response dict for this domain."""
-        return self._data
-
-    def to_row(self) -> dict[str, str]:
-        """Return a flat ``dict[str, str]`` of key fields suitable for tabular display."""
-        def _s(val: Any) -> str:
-            return str(val) if val is not None else ""
-        return {
-            "name": _s(self.name),
-            "status": _s(self.status),
-            "dcv_status": _s(self.dcv_status),
-            "dcv_expires": self.dcv_expires.isoformat() if self.dcv_expires else "",
-            "organization": _s(self.organization_name),
-            "created_at": self.created_at.isoformat() if self.created_at else "",
-            "id": _s(self.id),
-        }
-
-    # --- API methods ---
-
-    def refresh(self) -> "Domain":
-        """Re-fetch this domain from the API and update all properties in place.
-
-        Returns:
-            ``self``, allowing method chaining.
-        """
-        result = self._client.get(f"{_BASE}/{self.id}")
-        if isinstance(result, dict):
-            self._data = result
-        return self
-
-    def deactivate(self) -> "Domain":
-        """Deactivate this domain and update properties from the API response.
-
-        Returns:
-            ``self``, allowing method chaining.
-
-        Raises:
-            CertiNextAPIError: On a non-2xx API response. Provides ``.status_code`` and ``.body``.
-        """
-        self._data = self._client.post(f"{_BASE}/{self.id}/deactivate")
-        return self
-
-    def get_dcv(self) -> DcvInfo:
-        """Return the current Domain Control Validation configuration from the API.
-
-        Returns:
-            :class:`DcvInfo` with normalised ``method``, ``token``, and ``host``.
-
-        Raises:
-            CertiNextAPIError: On a non-2xx API response. Provides ``.status_code`` and ``.body``.
-        """
-        result: dict[str, Any] | list[Any] = self._client.get(f"{_BASE}/{self.id}/dcv")
-        raw: dict[str, Any] = result if isinstance(result, dict) else {}
-        method = (raw.get("dcvMethod") or raw.get("method") or "").upper()
-        if method and method not in VALID_DCV_METHODS:
-            raise ValueError(
-                f"Unexpected DCV method {method!r} from API; "
-                f"expected one of {sorted(VALID_DCV_METHODS)}"
-            )
-        token = raw.get("txtToken") or raw.get("fileToken") or raw.get("token") or raw.get("dnsContents") or ""
-        host = raw.get("dnsHost") or raw.get("host") or ""
-        return DcvInfo(method=method, token=token, host=host)
-
-    def verify(self) -> DcvVerifyResult:
-        """Trigger DCV verification for this domain.
-
-        Returns:
-            A :class:`DcvVerifyResult` summarising the outcome. Call
-            :meth:`refresh` and check :attr:`dcv_status` to confirm the
-            final status once the CA has processed the result.
-
-        Raises:
-            CertiNextAPIError: On a non-2xx API response. Provides ``.status_code`` and ``.body``.
-        """
-        raw: Any = self._client.post(f"{_BASE}/{self.id}/dcv/verify")
-        return DcvVerifyResult(raw if isinstance(raw, dict) else {})
-
-    def change_dcv_method(self, method: DcvMethod) -> dict[str, Any]:
-        """Change the DCV method for this domain.
-
-        Args:
-            method: The new DCV method. Must be ``"DNS-TXT"`` or ``"HTTP-URL"``.
-                    Case-insensitive; normalized to upper case before validation
-                    and to lower case before sending to the API.
-
-        Returns:
-            Raw API response dict containing the updated DCV configuration.
-
-        Raises:
-            ValueError: If ``method`` is not one of the accepted DCV methods.
-            CertiNextAPIError: On a non-2xx API response. Provides ``.status_code`` and ``.body``.
-        """
-        method_upper = method.upper()
-        if method_upper not in VALID_DCV_METHODS:
-            raise ValueError(
-                f"Invalid DCV method {method_upper!r}; must be one of {sorted(VALID_DCV_METHODS)}"
-            )
-        return self._client.patch(
-            f"{_BASE}/{self.id}/dcv/method", json={"dcvMethod": method_upper.lower()}
-        )
-
-    def reinitiate_dcv(self) -> DcvInfo:
-        """Reset the DCV challenge and return a fresh set of credentials.
-
-        Calls :meth:`change_dcv_method` with the domain's current method to
-        force the API to issue a new challenge token, even when the method is
-        unchanged.  Use this when:
-
-        - The domain is ``VERIFIED`` but the challenge token (``tokenExpiry``)
-          has lapsed — :meth:`get_dcv` returns an empty token in this state.
-        - You want to proactively revalidate a domain approaching DCV expiry
-          (``validTill``) before it becomes ``EXPIRED``.
-
-        The API issues a fresh ``tokenExpiry`` and new token value.  The
-        previously published TXT or HTTP challenge artifact becomes **invalid**
-        after this call — the old token will not satisfy a subsequent
-        :meth:`verify` call.  Publish the returned token and call
-        :meth:`verify` to complete revalidation.
-
-        Returns:
-            Fresh :class:`DcvInfo` with a new ``token`` and ``host`` for the
-            same DCV method.
-
-        Raises:
-            ValueError: If the current DCV method cannot be determined or is
-                not one of the accepted values (``"DNS-TXT"``, ``"HTTP-URL"``).
-            CertiNextAPIError: On a non-2xx API response.
-        """
-        current = self.get_dcv()
-        if not current.method or current.method not in VALID_DCV_METHODS:
-            raise ValueError(
-                f"Cannot reinitiate DCV for {self.name!r}: "
-                f"current method {current.method!r} is not in "
-                f"{sorted(VALID_DCV_METHODS)}"
-            )
-        self.change_dcv_method(cast(DcvMethod, current.method))
-        return self.get_dcv()
-
-    def last_dcv_attempt(self) -> dict[str, Any]:
-        """Return details of the most recent DCV attempt for this domain.
-
-        Returns:
-            Raw API response dict. Contains attempt metadata such as timestamp
-            and result; exact keys depend on the API version.
-
-        Raises:
-            CertiNextAPIError: On a non-2xx API response. Provides ``.status_code`` and ``.body``.
-        """
-        result = self._client.get(f"{_BASE}/{self.id}/dcv/attempts/last")
-        return result if isinstance(result, dict) else {}
-
-    def dcv_attempt_history(self) -> dict[str, Any] | list[Any]:
-        """Return the full DCV attempt history for this domain.
-
-        Returns:
-            Raw API response. May be a list of attempt dicts or a wrapper dict
-            depending on the API version; iterate defensively.
-
-        Raises:
-            CertiNextAPIError: On a non-2xx API response. Provides ``.status_code`` and ``.body``.
-        """
-        return self._client.get(f"{_BASE}/{self.id}/dcv/attempts")
 
 
 def filter_needs_dcv(
@@ -715,7 +240,7 @@ class DomainAccessor:
         if dcv_status is not None:
             params["dcvStatus"] = dcv_status
         result = self._client.get(_BASE, params=params or None)
-        return [Domain(self._client, item) for item in _extract_domain_rows(result)]
+        return [Domain.from_payload(self._client, item) for item in _extract_domain_rows(result)]
 
     def _get_all_domains(
         self,
@@ -756,7 +281,7 @@ class DomainAccessor:
             if not raw:
                 break
             for item in raw:
-                domain = Domain(self._client, item)
+                domain = Domain.from_payload(self._client, item)
                 key = domain.id or domain.name or ""
                 if key in seen:
                     continue
@@ -833,7 +358,7 @@ class DomainAccessor:
         result = self._client.get(f"{_BASE}/{domain_id_or_name}")
         if not isinstance(result, dict):
             raise ValueError(f"Unexpected list response for domain {domain_id_or_name!r}")
-        return Domain(self._client, result)
+        return Domain.from_payload(self._client, result)
 
     def create(
         self,
@@ -856,7 +381,7 @@ class DomainAccessor:
         body: dict[str, Any] = {"name": name}
         if organization_id is not None:
             body["organizationId"] = organization_id
-        return Domain(self._client, self._client.post(_BASE, json=body))
+        return Domain.from_payload(self._client, self._client.post(_BASE, json=body))
 
     def deactivate(self, domain_id: str) -> Domain:
         """Deactivate a domain by its ID.
@@ -875,4 +400,4 @@ class DomainAccessor:
             CertiNextAPIError: On a non-2xx API response. Provides ``.status_code`` and ``.body``.
         """
         data = self._client.post(f"{_BASE}/{domain_id}/deactivate")
-        return Domain(self._client, data)
+        return Domain.from_payload(self._client, data)

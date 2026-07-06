@@ -324,7 +324,7 @@ class TestBuildRows:
     """Tests for the domain/order join in domain_cert_count._build_rows."""
 
     def _domain(self, data: dict) -> Domain:
-        return Domain(MagicMock(spec=CertiNextClient), data)
+        return Domain.from_payload(MagicMock(spec=CertiNextClient), data)
 
     def test_registered_domain_with_matching_order(self):
         """A registered domain with a matching order shows count 1."""
@@ -484,7 +484,7 @@ class TestBuildRowsCondense:
 
     def _domain(self, data: dict) -> Domain:
         """Build a Domain fixture."""
-        return Domain(MagicMock(spec=CertiNextClient), data)
+        return Domain.from_payload(MagicMock(spec=CertiNextClient), data)
 
     def test_condense_hides_subdomain_rows(self):
         """With condense=True, registered subdomains do not appear as rows."""
