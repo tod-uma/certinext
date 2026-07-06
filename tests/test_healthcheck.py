@@ -18,7 +18,8 @@ from collections.abc import Callable
 from typing import Any
 from unittest.mock import MagicMock
 
-import requests
+import httpx
+from pydantic import BaseModel, ValidationError
 
 from certinext.exceptions import (
     CertiNextAPIError,
@@ -161,14 +162,34 @@ class TestClassifyOutcomes:
         assert result.http_status == 429
 
     def test_network_on_connection_error(self):
-        """A requests ConnectionError (no HTTP response) is NETWORK."""
-        result = _classify(_raise(requests.ConnectionError("connection refused")))
+        """An httpx ConnectError (no HTTP response) is NETWORK."""
+        result = _classify(_raise(httpx.ConnectError("connection refused")))
         assert result.outcome == Outcome.NETWORK
 
     def test_network_on_timeout(self):
-        """A requests Timeout is NETWORK."""
-        result = _classify(_raise(requests.Timeout("timed out")))
+        """An httpx ReadTimeout is NETWORK."""
+        result = _classify(_raise(httpx.ReadTimeout("timed out")))
         assert result.outcome == Outcome.NETWORK
+
+    def test_server_bug_on_validation_error(self):
+        """A pydantic ValidationError (2xx with drifted shape) is SERVER_BUG, not PASS.
+
+        ValidationError subclasses ValueError, so this guards the catch order in
+        classify(): shape drift must not be misread as a benign parse note.
+        """
+
+        class _Shape(BaseModel):
+            count: int
+
+        try:
+            _Shape.model_validate({"count": "not-an-int"})
+            raise AssertionError("model_validate must raise")
+        except ValidationError as exc:
+            err = exc
+
+        result = _classify(_raise(err))
+        assert result.outcome == Outcome.SERVER_BUG
+        assert "shape drift" in result.message
 
     def test_skipped_when_required_input_missing(self):
         """A Tier-2 probe whose input is absent is SKIPPED — the call never runs."""

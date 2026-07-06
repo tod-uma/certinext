@@ -32,7 +32,7 @@ Python library and CLI scripts for managing your [CertiNext](https://us.certinex
 - Python 3.10+ (installed automatically when using uv — see [Installation](#installation))
 - A CertiNext account with OAuth API credentials (account number + client secret)
 
-**Runtime dependencies** (`requests`, `tabulate`, `structlog`) are installed automatically. `structlog` provides structured logging for the CLI tools and library internals — in cron or redirected contexts all output is emitted as JSON; in a terminal it uses a human-readable format. If you use certinext purely as a library and have a strong reason to exclude `structlog`, open an issue and we'll consider making it optional.
+**Runtime dependencies** (`httpx`, `pydantic`, `tabulate`, `structlog`) are installed automatically. `structlog` provides structured logging for the CLI tools and library internals — in cron or redirected contexts all output is emitted as JSON; in a terminal it uses a human-readable format. If you use certinext purely as a library and have a strong reason to exclude `structlog`, open an issue and we'll consider making it optional.
 
 ## Installation
 
@@ -1574,6 +1574,37 @@ order.cancel()
 order.revoke(reason="keyCompromise")
 order.reissue("rekey", csr=new_csr_pem)
 ```
+
+### Error handling
+
+All API errors raise `CertiNextAPIError` (or a typed subclass), which carries
+`.status_code`, `.body`, `.ems_code`, and `.field_errors`. Typed subclasses
+cover the statuses worth branching on: `CertiNextNotFoundError` (404),
+`CertiNextConflictError` (409, with `.existing_domain_id`), and
+`CertiNextRateLimitError` (429, with `.retry_after`).
+
+Since 1.0, `CertiNextAPIError` subclasses plain `Exception` — deliberately
+*not* the HTTP library's error type — so API errors and transport failures
+are separate hierarchies:
+
+```python
+import httpx
+from certinext.exceptions import CertiNextAPIError
+
+try:
+    domain = sess.domain.get("example.edu")
+except CertiNextAPIError as exc:      # the API answered with an error
+    print(f"API error {exc.status_code}: {exc.ems_code or exc.body}")
+except httpx.HTTPError as exc:        # timeout, DNS, connection refused, ...
+    print(f"network problem: {exc}")
+```
+
+> **Migrating from 0.3.x:** `CertiNextAPIError` used to subclass
+> `requests.HTTPError`, so `except requests.HTTPError:` (or
+> `requests.RequestException`) caught API errors too. That no longer works —
+> catch `CertiNextAPIError` for API errors and `httpx.HTTPError` for
+> transport failures, as above. Code that already caught `CertiNextAPIError`
+> needs no changes.
 
 ---
 

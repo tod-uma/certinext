@@ -48,7 +48,8 @@ def _make_client() -> tuple[CertiNextClient, MagicMock]:
 
 def _ok_response(payload: object) -> MagicMock:
     resp = MagicMock()
-    resp.raise_for_status.return_value = None
+    resp.status_code = 200
+    resp.is_error = False
     resp.json.return_value = payload
     resp.content = b"{}"
     return resp
@@ -56,7 +57,8 @@ def _ok_response(payload: object) -> MagicMock:
 
 def _ok_bytes_response(content: bytes) -> MagicMock:
     resp = MagicMock()
-    resp.raise_for_status.return_value = None
+    resp.status_code = 200
+    resp.is_error = False
     resp.content = content
     return resp
 
@@ -884,7 +886,7 @@ class TestOrderWorkflowSubmitCsr:
         wf, _, mock_session = _make_workflow("pending-approval")
         resp_422 = MagicMock()
         resp_422.status_code = 422
-        resp_422.raise_for_status.side_effect = Exception("422")
+        resp_422.is_error = True
         resp_422.json.return_value = {}
         resp_422.content = b"{}"
 
@@ -1016,7 +1018,7 @@ class TestOrderWorkflowDownload:
         wf, _, mock_session = _make_workflow("issued")
         resp_422 = MagicMock()
         resp_422.status_code = 422
-        resp_422.raise_for_status.return_value = None
+        resp_422.is_error = True
 
         cert_bytes = b"-----BEGIN CERTIFICATE-----\nABC\n-----END CERTIFICATE-----\n"
         call_count = 0

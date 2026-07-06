@@ -266,7 +266,7 @@ def _setup_logging(verbose: int) -> None:
     """Route all output — structlog and third-party stdlib — through a shared renderer.
 
     Uses structlog.stdlib.ProcessorFormatter as the single stdlib handler formatter so
-    native structlog calls and foreign stdlib records (urllib3, requests, keyring) both
+    native structlog calls and foreign stdlib records (httpx, httpcore, keyring) both
     pass through the same renderer.
 
     TTY (interactive): ConsoleRenderer with local HH:MM:SS timestamps.
@@ -325,7 +325,10 @@ def _setup_logging(verbose: int) -> None:
     logging.basicConfig(handlers=[handler], level=level, force=True)
 
     if verbose < 4:
-        logging.getLogger("urllib3").setLevel(logging.WARNING)
+        # httpx logs one INFO line per request; keep it quiet unless -vvvv
+        # (urllib3, its predecessor here, only logged at DEBUG).
+        logging.getLogger("httpx").setLevel(logging.WARNING)
+        logging.getLogger("httpcore").setLevel(logging.WARNING)
         logging.getLogger("keyring").setLevel(logging.WARNING)
         logging.getLogger("jaraco").setLevel(logging.WARNING)
         logging.getLogger("win32ctypes").setLevel(logging.WARNING)

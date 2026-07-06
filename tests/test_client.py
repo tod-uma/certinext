@@ -18,14 +18,13 @@ from typing import cast
 from unittest.mock import MagicMock
 
 import pytest
-import requests
 
 from certinext.client import CertiNextClient
-from certinext.exceptions import CertiNextAPIError
+from certinext.exceptions import CertiNextAPIError, CertiNextNotFoundError
 
 
 def _make_client() -> tuple[CertiNextClient, MagicMock]:
-    """Return a CertiNextClient with auth and session mocked out."""
+    """Return a CertiNextClient with auth and the httpx client mocked out."""
     client = CertiNextClient(
         base_url="https://us-api.certinext.io",
         token_url="https://us-api.certinext.io/oauth/token",
@@ -42,8 +41,20 @@ def _make_client() -> tuple[CertiNextClient, MagicMock]:
 def _ok_response(payload: object = None) -> MagicMock:
     """Return a mock response with a 200 status and the given JSON payload."""
     resp = MagicMock()
-    resp.raise_for_status.return_value = None
+    resp.status_code = 200
+    resp.is_error = False
     resp.json.return_value = payload if payload is not None else {}
+    resp.content = b"{}"
+    return resp
+
+
+def _error_response(status_code: int, body: dict | None = None) -> MagicMock:
+    """Return a mock response with a 4xx/5xx status and an RFC 7807 JSON body."""
+    resp = MagicMock()
+    resp.status_code = status_code
+    resp.is_error = True
+    resp.headers = {}
+    resp.json.return_value = body if body is not None else {"status": status_code}
     resp.content = b"{}"
     return resp
 
@@ -88,12 +99,10 @@ class TestGet:
         assert kwargs["params"] == {"limit": 10}
 
     def test_raises_on_http_error(self):
-        """get() propagates HTTPError when raise_for_status raises."""
+        """get() raises CertiNextAPIError on a 4xx response."""
         client, mock_session = _make_client()
-        resp = MagicMock()
-        resp.raise_for_status.side_effect = requests.HTTPError("404")
-        mock_session.get.return_value = resp
-        with pytest.raises(requests.HTTPError):
+        mock_session.get.return_value = _error_response(404, {"title": "Not Found"})
+        with pytest.raises(CertiNextNotFoundError):
             client.get("/api/certinext/v2/domains/missing")
 
 
@@ -123,7 +132,8 @@ class TestDelete:
         """delete() returns None when the response has no content."""
         client, mock_session = _make_client()
         resp = MagicMock()
-        resp.raise_for_status.return_value = None
+        resp.status_code = 204
+        resp.is_error = False
         resp.content = b""
         mock_session.delete.return_value = resp
         result = client.delete("/api/certinext/v2/domains/abc")
@@ -133,7 +143,8 @@ class TestDelete:
         """delete() returns the parsed JSON body when content is present."""
         client, mock_session = _make_client()
         resp = MagicMock()
-        resp.raise_for_status.return_value = None
+        resp.status_code = 200
+        resp.is_error = False
         resp.content = b'{"status": "deleted"}'
         resp.json.return_value = {"status": "deleted"}
         mock_session.delete.return_value = resp
@@ -175,7 +186,8 @@ class TestGetBytes:
         """get_bytes() constructs the full URL from base_url and path."""
         client, mock_session = _make_client()
         resp = MagicMock()
-        resp.raise_for_status.return_value = None
+        resp.status_code = 200
+        resp.is_error = False
         resp.content = b"-----BEGIN CERTIFICATE-----\n..."
         mock_session.get.return_value = resp
         client.get_bytes("/api/certinext/v2/ssl/ORDER-1/certificate", accept="application/x-pem-file")
@@ -186,7 +198,8 @@ class TestGetBytes:
         """get_bytes() sends the Accept header provided by the caller."""
         client, mock_session = _make_client()
         resp = MagicMock()
-        resp.raise_for_status.return_value = None
+        resp.status_code = 200
+        resp.is_error = False
         resp.content = b"\x30\x82"
         mock_session.get.return_value = resp
         client.get_bytes(
@@ -200,7 +213,8 @@ class TestGetBytes:
         """get_bytes() returns the response content as bytes."""
         client, mock_session = _make_client()
         resp = MagicMock()
-        resp.raise_for_status.return_value = None
+        resp.status_code = 200
+        resp.is_error = False
         resp.content = b"raw-cert-bytes"
         mock_session.get.return_value = resp
         result = client.get_bytes("/api/certinext/v2/ssl/ORDER-1/certificate", accept="application/pkix-cert")
@@ -210,7 +224,8 @@ class TestGetBytes:
         """get_bytes() forwards the params argument."""
         client, mock_session = _make_client()
         resp = MagicMock()
-        resp.raise_for_status.return_value = None
+        resp.status_code = 200
+        resp.is_error = False
         resp.content = b""
         mock_session.get.return_value = resp
         client.get_bytes("/path", accept="application/x-pem-file", params={"format": "pem"})
@@ -222,7 +237,8 @@ def _401_response() -> MagicMock:
     """Return a mock 401 response with ACCESS_TOKEN_REVOKED body."""
     resp = MagicMock()
     resp.status_code = 401
-    resp.raise_for_status.side_effect = requests.HTTPError("401")
+    resp.is_error = True
+    resp.headers = {}
     resp.json.return_value = {"error": "ACCESS_TOKEN_REVOKED"}
     resp.text = "ACCESS_TOKEN_REVOKED"
     resp.content = b'{"error":"ACCESS_TOKEN_REVOKED"}'
@@ -260,12 +276,7 @@ class TestTokenRefreshOn401:
     def test_non_401_error_not_retried(self):
         """get() does not retry on non-401 errors (e.g. 404)."""
         client, mock_session = _make_client()
-        resp_404 = MagicMock()
-        resp_404.status_code = 404
-        resp_404.raise_for_status.side_effect = requests.HTTPError("404")
-        resp_404.json.return_value = {"detail": "Not found"}
-        resp_404.content = b'{"detail":"Not found"}'
-        mock_session.get.return_value = resp_404
+        mock_session.get.return_value = _error_response(404, {"detail": "Not found"})
         with pytest.raises(CertiNextAPIError):
             client.get("/api/certinext/v2/missing")
         assert mock_session.get.call_count == 1

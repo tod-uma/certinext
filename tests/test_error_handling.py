@@ -18,7 +18,6 @@ from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
 import pytest
-import requests
 
 from certinext.auth import OAuth2ClientCredentials
 from certinext.client import CertiNextClient
@@ -49,12 +48,13 @@ def _make_auth() -> OAuth2ClientCredentials:
 
 
 def _make_http_error_response(status_code: int) -> MagicMock:
-    """Return a mock response that raises HTTPError on raise_for_status."""
+    """Return a mock 4xx/5xx response with a non-JSON body."""
     resp = MagicMock()
     resp.status_code = status_code
-    resp.raise_for_status.side_effect = requests.HTTPError(
-        f"{status_code} Error", response=resp
-    )
+    resp.is_error = True
+    resp.headers = {}
+    resp.json.side_effect = ValueError("No JSON")
+    resp.text = f"{status_code} Error"
     return resp
 
 
@@ -262,13 +262,13 @@ class TestAuthErrorMessages:
         """RuntimeError from a failed token request includes the HTTP status code."""
         auth = _make_auth()
         bad_resp = MagicMock()
-        bad_resp.ok = False
+        bad_resp.is_success = False
         bad_resp.status_code = 401
-        bad_resp.reason = "Unauthorized"
+        bad_resp.reason_phrase = "Unauthorized"
         bad_resp.url = "https://us-api.certinext.io/oauth/token"
         bad_resp.text = '{"error": "invalid_client"}'
 
-        with patch("certinext.auth.requests.post", return_value=bad_resp):
+        with patch("certinext.auth.httpx.post", return_value=bad_resp):
             with pytest.raises(RuntimeError, match="401"):
                 auth.get_token()
 
@@ -276,13 +276,13 @@ class TestAuthErrorMessages:
         """RuntimeError from a failed token request includes the endpoint URL."""
         auth = _make_auth()
         bad_resp = MagicMock()
-        bad_resp.ok = False
+        bad_resp.is_success = False
         bad_resp.status_code = 401
-        bad_resp.reason = "Unauthorized"
+        bad_resp.reason_phrase = "Unauthorized"
         bad_resp.url = "https://us-api.certinext.io/oauth/token"
         bad_resp.text = ""
 
-        with patch("certinext.auth.requests.post", return_value=bad_resp):
+        with patch("certinext.auth.httpx.post", return_value=bad_resp):
             with pytest.raises(RuntimeError, match="us-api.certinext.io"):
                 auth.get_token()
 
@@ -290,13 +290,13 @@ class TestAuthErrorMessages:
         """RuntimeError from a non-JSON response includes the raw response body."""
         auth = _make_auth()
         bad_resp = MagicMock()
-        bad_resp.ok = True
+        bad_resp.is_success = True
         bad_resp.status_code = 200
         bad_resp.url = "https://us-api.certinext.io/oauth/token"
         bad_resp.text = "<html>Service Unavailable</html>"
         bad_resp.json.side_effect = ValueError("No JSON")
 
-        with patch("certinext.auth.requests.post", return_value=bad_resp):
+        with patch("certinext.auth.httpx.post", return_value=bad_resp):
             with pytest.raises(RuntimeError, match="non-JSON"):
                 auth.get_token()
 
@@ -304,13 +304,13 @@ class TestAuthErrorMessages:
         """A 403 Forbidden response raises RuntimeError."""
         auth = _make_auth()
         bad_resp = MagicMock()
-        bad_resp.ok = False
+        bad_resp.is_success = False
         bad_resp.status_code = 403
-        bad_resp.reason = "Forbidden"
+        bad_resp.reason_phrase = "Forbidden"
         bad_resp.url = "https://us-api.certinext.io/oauth/token"
         bad_resp.text = "Forbidden"
 
-        with patch("certinext.auth.requests.post", return_value=bad_resp):
+        with patch("certinext.auth.httpx.post", return_value=bad_resp):
             with pytest.raises(RuntimeError):
                 auth.get_token()
 
@@ -318,13 +318,13 @@ class TestAuthErrorMessages:
         """A 500 Internal Server Error response raises RuntimeError."""
         auth = _make_auth()
         bad_resp = MagicMock()
-        bad_resp.ok = False
+        bad_resp.is_success = False
         bad_resp.status_code = 500
-        bad_resp.reason = "Internal Server Error"
+        bad_resp.reason_phrase = "Internal Server Error"
         bad_resp.url = "https://us-api.certinext.io/oauth/token"
         bad_resp.text = "Internal Server Error"
 
-        with patch("certinext.auth.requests.post", return_value=bad_resp):
+        with patch("certinext.auth.httpx.post", return_value=bad_resp):
             with pytest.raises(RuntimeError):
                 auth.get_token()
 
@@ -334,7 +334,7 @@ class TestAuthErrorMessages:
 # ---------------------------------------------------------------------------
 
 class TestClientHTTPErrors:
-    """CertiNextClient propagates HTTPError for non-2xx API responses."""
+    """CertiNextClient raises CertiNextAPIError for non-2xx API responses."""
 
     def _make_client(self) -> tuple[CertiNextClient, MagicMock]:
         """Return a CertiNextClient with auth and session mocked."""
@@ -351,52 +351,52 @@ class TestClientHTTPErrors:
         return client, mock_session
 
     def test_get_raises_on_401(self):
-        """get() propagates HTTPError on a 401 Unauthorized response."""
+        """get() raises CertiNextAPIError on a 401 Unauthorized response."""
         client, mock_session = self._make_client()
         mock_session.get.return_value = _make_http_error_response(401)
-        with pytest.raises(requests.HTTPError):
+        with pytest.raises(CertiNextAPIError):
             client.get("/api/certinext/v2/domains")
 
     def test_get_raises_on_403(self):
-        """get() propagates HTTPError on a 403 Forbidden response."""
+        """get() raises CertiNextAPIError on a 403 Forbidden response."""
         client, mock_session = self._make_client()
         mock_session.get.return_value = _make_http_error_response(403)
-        with pytest.raises(requests.HTTPError):
+        with pytest.raises(CertiNextAPIError):
             client.get("/api/certinext/v2/domains")
 
     def test_get_raises_on_404(self):
-        """get() propagates HTTPError on a 404 Not Found response."""
+        """get() raises CertiNextAPIError on a 404 Not Found response."""
         client, mock_session = self._make_client()
         mock_session.get.return_value = _make_http_error_response(404)
-        with pytest.raises(requests.HTTPError):
+        with pytest.raises(CertiNextAPIError):
             client.get("/api/certinext/v2/domains/missing-id")
 
     def test_get_raises_on_500(self):
-        """get() propagates HTTPError on a 500 Internal Server Error response."""
+        """get() raises CertiNextAPIError on a 500 Internal Server Error response."""
         client, mock_session = self._make_client()
         mock_session.get.return_value = _make_http_error_response(500)
-        with pytest.raises(requests.HTTPError):
+        with pytest.raises(CertiNextAPIError):
             client.get("/api/certinext/v2/domains")
 
     def test_post_raises_on_422(self):
-        """post() propagates HTTPError on a 422 Unprocessable Entity response."""
+        """post() raises CertiNextAPIError on a 422 Unprocessable Entity response."""
         client, mock_session = self._make_client()
         mock_session.post.return_value = _make_http_error_response(422)
-        with pytest.raises(requests.HTTPError):
+        with pytest.raises(CertiNextAPIError):
             client.post("/api/certinext/v2/domains", json={"name": ""})
 
     def test_post_raises_on_409(self):
-        """post() propagates HTTPError on a 409 Conflict response."""
+        """post() raises CertiNextAPIError on a 409 Conflict response."""
         client, mock_session = self._make_client()
         mock_session.post.return_value = _make_http_error_response(409)
-        with pytest.raises(requests.HTTPError):
+        with pytest.raises(CertiNextAPIError):
             client.post("/api/certinext/v2/domains", json={"name": "duplicate.example.edu"})
 
     def test_delete_raises_on_404(self):
-        """delete() propagates HTTPError on a 404 Not Found response."""
+        """delete() raises CertiNextAPIError on a 404 Not Found response."""
         client, mock_session = self._make_client()
         mock_session.delete.return_value = _make_http_error_response(404)
-        with pytest.raises(requests.HTTPError):
+        with pytest.raises(CertiNextAPIError):
             client.delete("/api/certinext/v2/domains/missing-id")
 
 
@@ -519,12 +519,10 @@ def _make_rfc7807_response(status_code: int, body: dict, headers: dict | None = 
     """Return a mock response with an RFC 7807 JSON body."""
     resp = MagicMock()
     resp.status_code = status_code
+    resp.is_error = True
     resp.json.return_value = body
     resp.text = str(body)
     resp.headers = headers or {}
-    resp.raise_for_status.side_effect = requests.HTTPError(
-        f"{status_code} Error", response=resp
-    )
     return resp
 
 
@@ -555,7 +553,7 @@ class TestTypedExceptionDispatch:
             client.get("/api/certinext/v2/domains/missing")
 
     def test_404_is_also_certinext_api_error(self):
-        """CertiNextNotFoundError is a subclass of CertiNextAPIError and HTTPError."""
+        """CertiNextNotFoundError is a subclass of CertiNextAPIError."""
         client, mock_session = self._make_client()
         mock_session.get.return_value = _make_rfc7807_response(
             404, {"title": "Not Found", "status": 404}

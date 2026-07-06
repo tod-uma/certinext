@@ -15,17 +15,20 @@
 """CertiNext exception classes."""
 
 import re
-from typing import Any
+from typing import TYPE_CHECKING, Any, Optional
 
-from requests.exceptions import HTTPError
+if TYPE_CHECKING:
+    import httpx
 
 
-class CertiNextAPIError(HTTPError):
+class CertiNextAPIError(Exception):
     """An HTTP error response from the CertiNext API.
 
-    Subclasses :class:`requests.HTTPError` so existing code that catches
-    ``HTTPError`` continues to work. Adds :attr:`status_code` and
-    :attr:`body` so callers can inspect what the API actually returned.
+    Subclasses plain :class:`Exception` — deliberately *not* the transport
+    library's error type (it subclassed ``requests.HTTPError`` before 1.0),
+    so the exception contract survives transport changes. Catch
+    ``CertiNextAPIError`` for API-level errors and ``httpx.HTTPError`` for
+    transport-level failures (timeouts, connection errors).
 
     The API returns RFC 7807 ``application/problem+json`` bodies. When the
     response is parsed JSON, ``__str__`` extracts the ``detail`` field for a
@@ -36,6 +39,8 @@ class CertiNextAPIError(HTTPError):
         status_code: The HTTP status code (e.g. 422).
         body: Parsed JSON response body as a dict, or raw text if the
             response was not valid JSON.
+        response: The underlying :class:`httpx.Response`, when available
+            (``None`` for exceptions constructed outside the client).
     """
 
     def __init__(
@@ -43,18 +48,20 @@ class CertiNextAPIError(HTTPError):
         status_code: int,
         body: dict[str, Any] | str,
         *args: Any,
-        **kwargs: Any,
+        response: Optional["httpx.Response"] = None,
     ) -> None:
         """
         Args:
             status_code: The HTTP status code returned by the API.
             body: Parsed JSON response body, or raw response text.
-            *args: Forwarded to :class:`requests.HTTPError`.
-            **kwargs: Forwarded to :class:`requests.HTTPError` (e.g. ``response=``).
+            *args: Forwarded to :class:`Exception`.
+            response: The originating HTTP response, for callers that need
+                headers or other response metadata.
         """
         self.status_code = status_code
         self.body = body
-        super().__init__(*args, **kwargs)
+        self.response = response
+        super().__init__(*args)
 
     def __str__(self) -> str:
         """Return a string with the status code and the most useful error message available.
@@ -131,18 +138,18 @@ class CertiNextRateLimitError(CertiNextAPIError):
         body: dict[str, Any] | str,
         *args: Any,
         retry_after: float | None = None,
-        **kwargs: Any,
+        response: Optional["httpx.Response"] = None,
     ) -> None:
         """
         Args:
             status_code: HTTP status code (429).
             body: Parsed JSON or raw response text.
             retry_after: Value of the ``Retry-After`` response header in seconds.
+            response: Forwarded to :class:`CertiNextAPIError`.
             *args: Forwarded to :class:`CertiNextAPIError`.
-            **kwargs: Forwarded to :class:`CertiNextAPIError`.
         """
         self.retry_after = retry_after
-        super().__init__(status_code, body, *args, **kwargs)
+        super().__init__(status_code, body, *args, response=response)
 
 
 class CertiNextTimeoutError(TimeoutError):
