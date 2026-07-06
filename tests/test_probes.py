@@ -38,8 +38,8 @@ for prod, ``sandbox`` profile for sandbox) or environment variables.
 import os
 from typing import Any
 
+import httpx
 import pytest
-import requests
 
 import certinext
 from certinext._chain import order_certificate_chain
@@ -499,12 +499,16 @@ def test_probe_r21_openapi_only_order_fields() -> None:
 
 
 def test_probe_r22_exception_hierarchy_invariant() -> None:
-    """R22: ``CertiNextAPIError`` subclasses ``requests.HTTPError``.
+    """R22: ``CertiNextAPIError`` subclasses plain ``Exception``, not the transport error.
 
-    The healthcheck's catch-order depends on this; phase 2's reclassification
-    must change this deliberately, not by accident.
+    Changed deliberately in phase 2 (issue #15): the exception contract is
+    now independent of the HTTP library, so API errors and ``httpx``
+    transport errors are disjoint hierarchies. If ``CertiNextAPIError`` ever
+    becomes a transport-error subclass again, the healthcheck's NETWORK
+    classification would silently swallow API errors.
     """
-    assert issubclass(CertiNextAPIError, requests.HTTPError)
+    assert issubclass(CertiNextAPIError, Exception)
+    assert not issubclass(CertiNextAPIError, httpx.HTTPError)
 
 
 def test_probe_r23_contested_enum_values(probe_env: str, client: CertiNextClient) -> None:

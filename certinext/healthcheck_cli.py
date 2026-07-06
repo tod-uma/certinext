@@ -50,8 +50,9 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-import requests
+import httpx
 import structlog
+from pydantic import ValidationError
 from tabulate import tabulate
 
 from certinext._cli import (
@@ -290,18 +291,23 @@ def _finish(
 def classify(probe: Probe, session: CertiNextSession, ctx: dict[str, Any]) -> ProbeResult:
     """Run one probe and classify its outcome.
 
-    This is the single try/except that every probe passes through. Catch order
-    matters: :class:`CertiNextRateLimitError` and :class:`CertiNextAPIError`
-    must be caught before :class:`requests.RequestException` (the former are
-    subclasses of ``requests.HTTPError``), or API errors would be swallowed as
-    network failures.
+    This is the single try/except that every probe passes through. Since 1.0,
+    :class:`CertiNextAPIError` subclasses plain ``Exception`` (not the
+    transport error type), so API and transport failures are disjoint
+    hierarchies. One ordering constraint remains: pydantic's
+    ``ValidationError`` subclasses ``ValueError``, so it must be caught
+    before the ``KeyError``/``ValueError`` parse-note clause.
 
     Classification:
 
     - 401/403 → ``DENIED``; 404 → ``NOT_FOUND``; 422 or 5xx → ``SERVER_BUG``
       (raw body captured); any other unexpected non-2xx → ``SERVER_BUG``.
     - 429 → ``RATE_LIMITED`` (not exit-affecting).
-    - A ``requests`` connection/timeout error (no HTTP response) → ``NETWORK``.
+    - An ``httpx`` transport error (timeout, connection failure — no usable
+      HTTP response) → ``NETWORK``.
+    - A pydantic ``ValidationError`` means a 2xx response whose body no
+      longer matches our models — shape drift is a vendor signal, not a
+      network failure → ``SERVER_BUG``.
     - A token ``RuntimeError`` from :mod:`certinext.auth` carries no status
       code; ``DENIED`` when its message names ``401``/``403``/``invalid_client``,
       otherwise ``NETWORK`` (token endpoint unreachable or returned non-JSON).
@@ -345,8 +351,13 @@ def classify(probe: Probe, session: CertiNextSession, ctx: dict[str, Any]) -> Pr
         detail = exc.body if outcome == Outcome.SERVER_BUG else None
         return _finish(probe, start, outcome, http_status=status, ems_code=exc.ems_code,
                        detail=detail, message=str(exc))
-    except requests.RequestException as exc:
+    except httpx.HTTPError as exc:
         return _finish(probe, start, Outcome.NETWORK, message=f"{type(exc).__name__}: {exc}")
+    except ValidationError as exc:
+        # A 2xx response whose shape no longer matches our models: the vendor
+        # changed the payload, not the network. Must precede ValueError below.
+        return _finish(probe, start, Outcome.SERVER_BUG,
+                       message=f"response shape drift: {exc}")
     except RuntimeError as exc:
         msg = str(exc)
         denied = any(marker in msg for marker in ("401", "403", "invalid_client"))
@@ -519,7 +530,7 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Increase verbosity: -v shows progress, "
             "-vvv enables debug logging (per-probe results), "
-            "-vvvv also enables third-party debug logging (urllib3)"
+            "-vvvv also enables third-party debug logging (httpx)"
         ),
     )
     conn = parser.add_argument_group("connection")

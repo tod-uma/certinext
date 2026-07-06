@@ -173,7 +173,7 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Increase verbosity: -v shows progress, "
             "-vvv enables debug logging, "
-            "-vvvv also enables third-party debug logging (urllib3)"
+            "-vvvv also enables third-party debug logging (httpx)"
         ),
     )
     conn = parser.add_argument_group("connection")

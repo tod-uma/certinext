@@ -39,7 +39,8 @@ def _make_client() -> tuple[CertiNextClient, MagicMock]:
 
 def _ok_response(payload: object) -> MagicMock:
     resp = MagicMock()
-    resp.raise_for_status.return_value = None
+    resp.status_code = 200
+    resp.is_error = False
     resp.json.return_value = payload
     resp.content = b"{}"
     return resp

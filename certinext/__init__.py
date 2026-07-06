@@ -37,8 +37,10 @@ Known API limitations (vendor bugs, pending fix):
       by fetching all domains and filtering client-side.
 
 Errors:
-    All API errors raise a subclass of :class:`CertiNextAPIError` (itself a
-    subclass of :class:`requests.HTTPError`). Typed subclasses are raised for
+    All API errors raise a subclass of :class:`CertiNextAPIError` (a plain
+    :class:`Exception` — deliberately independent of the HTTP transport
+    library; transport-level failures raise :class:`httpx.HTTPError`
+    instead). Typed subclasses are raised for
     specific status codes: :class:`CertiNextNotFoundError` (404),
     :class:`CertiNextConflictError` (409), and :class:`CertiNextRateLimitError`
     (429). All carry ``.status_code`` (int) and ``.body`` (dict or str). When

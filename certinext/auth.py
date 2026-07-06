@@ -15,7 +15,12 @@
 import time
 from typing import Optional
 
-import requests
+import httpx
+
+#: Timeout for token-endpoint requests. The old ``requests`` implementation
+#: had no timeout at all, so any finite value is stricter; 10 s to connect
+#: and 30 s to read is generous for an OAuth token endpoint.
+_TOKEN_TIMEOUT = httpx.Timeout(10.0, read=30.0)
 
 
 class OAuth2ClientCredentials:
@@ -23,6 +28,10 @@ class OAuth2ClientCredentials:
 
     Fetches a token on first use and caches it, automatically refreshing it
     60 seconds before expiry so callers always receive a valid token.
+
+    This is the single place in the library that issues an HTTP request
+    outside :class:`~certinext.client.CertiNextClient` — the token endpoint
+    is not part of the API surface the client wraps.
     """
 
     def __init__(self, token_url: str, client_id: str, client_secret: str, scope: str = "") -> None:
@@ -61,7 +70,14 @@ class OAuth2ClientCredentials:
         self._expires_at = 0.0
 
     def _fetch_token(self) -> None:
-        """Request a new token from the token endpoint and cache it."""
+        """Request a new token from the token endpoint and cache it.
+
+        Raises:
+            RuntimeError: On a non-2xx response or a non-JSON body. The message
+                carries the HTTP status code and raw body (e.g. ``invalid_client``)
+                — the healthcheck classifies auth failures by string-matching
+                these markers, so change them only together with it.
+        """
         data = {
             "grant_type": "client_credentials",
             "client_id": self.client_id,
@@ -70,10 +86,10 @@ class OAuth2ClientCredentials:
         if self.scope:
             data["scope"] = self.scope
 
-        resp = requests.post(self.token_url, data=data)
-        if not resp.ok:
+        resp = httpx.post(self.token_url, data=data, timeout=_TOKEN_TIMEOUT)
+        if not resp.is_success:
             raise RuntimeError(
-                f"Token request failed: {resp.status_code} {resp.reason}\n"
+                f"Token request failed: {resp.status_code} {resp.reason_phrase}\n"
                 f"URL: {resp.url}\n"
                 f"Body: {resp.text!r}"
             )
