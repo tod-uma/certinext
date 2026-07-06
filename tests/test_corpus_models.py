@@ -36,6 +36,8 @@ import pytest
 from certinext.models import CertiNextModel
 from certinext.models.accounts import AccountInfo, Group, Organization
 from certinext.models.catalog import ProductCategory
+from certinext.models.ledger import LedgerRecord
+from certinext.models.orders import OrderRecord
 
 _CORPUS_ROOT = Path(__file__).parent / "fixtures" / "corpus"
 _ENVS = ("prod", "sandbox")
@@ -94,14 +96,20 @@ REGISTRY: dict[str, tuple[type[CertiNextModel], Callable[[Any], list[dict[str, A
     "groups.json": (Group, _wrapped("groups")),
     "organizations-list.json": (Organization, _wrapped("organizations")),
     "organizations-detail.json": (Organization, _single),
+    "reports-ledger.json": (LedgerRecord, _wrapped("content")),
+    "reports-orders.json": (OrderRecord, _wrapped("content")),
+}
+
+# Registered files whose captured payload legitimately has zero rows (the
+# non-empty assertion is waived; the account state, not the model, is why).
+EMPTY_OK: dict[str, str] = {
+    "reports-ledger.json": "ledger has totalElements=0 in both environments (2026-07-02 capture)",
 }
 
 # Corpus files whose models have not been migrated yet (phase 1 in
 # progress) or that intentionally have no row model. Files listed with a
 # reason string are permanent exclusions; the rest must move to REGISTRY.
 NOT_YET_COVERED: dict[str, str] = {
-    "reports-ledger.json": "pending: ledger migration",
-    "reports-orders.json": "pending: orders migration",
     "domains-list.json": "pending: domains migration",
     "domains-list-default.json": "pending: domains migration",
     "domains-detail.json": "pending: domains migration",
@@ -129,7 +137,7 @@ def test_corpus_rows_parse(env: str, filename: str) -> None:
     """Every row in every registered corpus payload validates into its model."""
     model_cls, extract = REGISTRY[filename]
     rows = extract(_load_body(env, filename))
-    assert rows, f"{env}/{filename}: extractor produced no rows"
+    assert rows or filename in EMPTY_OK, f"{env}/{filename}: extractor produced no rows"
     for row in rows:
         instance = model_cls.model_validate(row)
         # ADR 0005 escape hatch: the exact wire dict stays reachable.

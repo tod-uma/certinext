@@ -68,52 +68,52 @@ class TestLedgerRecordProperties:
 
     def test_transaction_date(self):
         """transaction_date reads transactionDate."""
-        record = LedgerRecord(self._DATA)
+        record = LedgerRecord.model_validate(self._DATA)
         assert record.transaction_date == "2026-05-01T00:00:00Z"
 
     def test_transaction_date_falls_back_to_date(self):
         """transaction_date falls back to 'date' when transactionDate is absent."""
-        record = LedgerRecord({"date": "2026-05-01"})
+        record = LedgerRecord.model_validate({"date": "2026-05-01"})
         assert record.transaction_date == "2026-05-01"
 
     def test_description(self):
         """description reads description."""
-        record = LedgerRecord(self._DATA)
+        record = LedgerRecord.model_validate(self._DATA)
         assert record.description == "DV SSL Certificate #1"
 
     def test_order_number(self):
         """order_number reads orderNumber."""
-        record = LedgerRecord(self._DATA)
+        record = LedgerRecord.model_validate(self._DATA)
         assert record.order_number == "ORD-001"
 
     def test_transaction_type(self):
         """transaction_type reads transactionType."""
-        record = LedgerRecord(self._DATA)
+        record = LedgerRecord.model_validate(self._DATA)
         assert record.transaction_type == "PURCHASE"
 
     def test_transaction_type_falls_back_to_type(self):
         """transaction_type falls back to 'type' when transactionType is absent."""
-        record = LedgerRecord({"type": "RENEWAL"})
+        record = LedgerRecord.model_validate({"type": "RENEWAL"})
         assert record.transaction_type == "RENEWAL"
 
     def test_debit(self):
         """debit reads debit."""
-        record = LedgerRecord(self._DATA)
+        record = LedgerRecord.model_validate(self._DATA)
         assert record.debit == "50.00"
 
     def test_credit_none_when_null(self):
         """credit returns None when the field is None."""
-        record = LedgerRecord(self._DATA)
+        record = LedgerRecord.model_validate(self._DATA)
         assert record.credit is None
 
     def test_balance(self):
         """balance reads balance."""
-        record = LedgerRecord(self._DATA)
+        record = LedgerRecord.model_validate(self._DATA)
         assert record.balance == "950"
 
     def test_missing_fields_return_none(self):
         """Missing fields return None."""
-        record = LedgerRecord({})
+        record = LedgerRecord.model_validate({})
         assert record.transaction_date is None
         assert record.description is None
         assert record.order_number is None
@@ -125,7 +125,7 @@ class TestLedgerRecordProperties:
     def test_as_dict_returns_raw_data(self):
         """as_dict() returns the exact dict passed at construction."""
         data = _make_record()
-        record = LedgerRecord(data)
+        record = LedgerRecord.model_validate(data)
         assert record.as_dict() is data
 
 
@@ -134,7 +134,7 @@ class TestLedgerRecordToRow:
 
     def test_to_row_keys(self):
         """to_row() includes all expected keys."""
-        record = LedgerRecord(_make_record())
+        record = LedgerRecord.model_validate(_make_record())
         row = record.to_row()
         expected_keys = {
             "transaction_date", "description", "order_number",
@@ -144,19 +144,19 @@ class TestLedgerRecordToRow:
 
     def test_to_row_values_are_strings(self):
         """to_row() returns string values for all keys."""
-        record = LedgerRecord(_make_record())
+        record = LedgerRecord.model_validate(_make_record())
         row = record.to_row()
         assert all(isinstance(v, str) for v in row.values())
 
     def test_to_row_none_becomes_empty_string(self):
         """to_row() converts None fields to empty string."""
-        record = LedgerRecord({"credit": None})
+        record = LedgerRecord.model_validate({"credit": None})
         row = record.to_row()
         assert row["credit"] == ""
 
     def test_to_row_populated_values(self):
         """to_row() returns the correct values from the record data."""
-        record = LedgerRecord(_make_record(1))
+        record = LedgerRecord.model_validate(_make_record(1))
         row = record.to_row()
         assert row["description"] == "DV SSL Certificate #1"
         assert row["order_number"] == "ORD-001"
@@ -164,7 +164,7 @@ class TestLedgerRecordToRow:
 
     def test_repr_contains_date_and_description(self):
         """repr() includes transaction_date and description."""
-        record = LedgerRecord(_make_record(1))
+        record = LedgerRecord.model_validate(_make_record(1))
         r = repr(record)
         assert "2026-05-01" in r
         assert "DV SSL Certificate #1" in r

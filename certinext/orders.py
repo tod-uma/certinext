@@ -12,141 +12,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Any, Literal
+from typing import Any
 
 import structlog
 
 from .client import CertiNextClient
 from .exceptions import CertiNextAPIError  # noqa: F401 — referenced in Raises docstrings
+from .models.orders import CertificateStatus, OrderRecord
+
+__all__ = ["CertificateStatus", "OrderAccessor", "OrderRecord"]
 
 log = structlog.get_logger()
 
 _BASE = "/api/certinext/v2/reports/orders"
-
-CertificateStatus = Literal[
-    "pending-dcv",
-    "pending-organization-verification",
-    "pending-csr",
-    "pending-documents",
-    "pending-agreement",
-    "pending-approval",
-    "issued",
-    "revoked",
-    "cancelled",
-    "rejected",
-    "expired",
-    "unknown",
-]
-"""Valid ``certificateStatus`` values returned by :attr:`OrderRecord.certificate_status`.
-
-.. note::
-    The orders report API returns human-readable display strings (e.g.
-    ``"Pending for Approver"``, ``"Certificate Downloaded"``) rather than these
-    enum values. :attr:`OrderRecord.certificate_status` passes them through as-is;
-    do not compare against this ``Literal`` type at runtime. Use
-    :attr:`OrderRecord.order_status` (``"Order Fulfilled"`` / ``"Order Accepted"``)
-    for reliable programmatic checks.
-"""
-
-
-class OrderRecord:
-    """Represents a single row from the CertiNext orders report.
-
-    Instances are returned by `OrderAccessor` methods and should not be
-    constructed directly. All API response fields are exposed as read-only
-    properties.
-
-    The ``common_name`` property attempts to locate the certificate's primary
-    domain from multiple candidate field names (``commonName``, ``cn``,
-    ``domain``, ``domainName``). If the orders report response does not include
-    a domain field, ``common_name`` returns ``None``.
-
-    Example::
-
-        sess = certinext.session(client_id="...", client_secret="...")
-        for order in sess.orders.get_list(status="issued"):
-            print(order.common_name, order.certificate_status)
-    """
-
-    def __init__(self, data: dict[str, Any]) -> None:
-        """
-        Args:
-            data: Raw API response dict for this order row.
-        """
-        self._data: dict[str, Any] = data
-
-    # --- properties ---
-
-    @property
-    def order_number(self) -> str | None:
-        """Unique order number assigned by CertiNext."""
-        return self._data.get("orderNumber")
-
-    @property
-    def request_number(self) -> str | None:
-        """Request number associated with this order."""
-        return self._data.get("requestNumber")
-
-    @property
-    def product_code(self) -> str | None:
-        """Certificate product code (e.g. ``OV_SSL``, ``DV_SSL``)."""
-        return self._data.get("productCode")
-
-    @property
-    def order_status(self) -> str | None:
-        """High-level order status string."""
-        return self._data.get("orderStatus")
-
-    @property
-    def certificate_status(self) -> CertificateStatus | None:
-        """Certificate lifecycle status.
-
-        Common values: ``issued``, ``expired``, ``revoked``, ``pending-dcv``.
-        See `CertificateStatus` for the full set.
-        """
-        return self._data.get("certificateStatus")
-
-    @property
-    def common_name(self) -> str | None:
-        """Common name (primary domain) of the certificate.
-
-        Tries the field names ``commonName``, ``cn``, ``domain``, and
-        ``domainName`` in order. Returns ``None`` if none are present.
-        """
-        return (
-            self._data.get("commonName")
-            or self._data.get("cn")
-            or self._data.get("domain")
-            or self._data.get("domainName")
-            or None
-        )
-
-    # --- helpers ---
-
-    def as_dict(self) -> dict[str, Any]:
-        """Return the raw API response dict for this order."""
-        return self._data
-
-    def to_row(self) -> dict[str, str]:
-        """Return a flat ``dict[str, str]`` suitable for tabular display."""
-        def _s(val: Any) -> str:
-            return str(val) if val is not None else ""
-        return {
-            "common_name": _s(self.common_name),
-            "certificate_status": _s(self.certificate_status),
-            "order_status": _s(self.order_status),
-            "order_number": _s(self.order_number),
-            "product_code": _s(self.product_code),
-        }
-
-    def __repr__(self) -> str:
-        """Return a concise developer representation."""
-        return (
-            f"OrderRecord(order_number={self.order_number!r}, "
-            f"common_name={self.common_name!r}, "
-            f"certificate_status={self.certificate_status!r})"
-        )
-
 
 class OrderAccessor:
     """Accessor for the CertiNext Orders Report API.
@@ -234,7 +112,7 @@ class OrderAccessor:
             CertiNextAPIError: On a non-2xx API response. Provides ``.status_code`` and ``.body``.
         """
         raw, _ = self._fetch_page(page, size, status)
-        return [OrderRecord(item) for item in raw]
+        return [OrderRecord.model_validate(item) for item in raw if isinstance(item, dict)]
 
     def get_list(
         self,
@@ -265,7 +143,7 @@ class OrderAccessor:
         page = 1
         while True:
             raw, total_pages = self._fetch_page(page, page_size, status)
-            records.extend(OrderRecord(item) for item in raw)
+            records.extend(OrderRecord.model_validate(item) for item in raw if isinstance(item, dict))
             if total_pages is not None:
                 if page >= total_pages:
                     break

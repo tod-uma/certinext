@@ -23,6 +23,8 @@ documented public API for 1.0.
 from ._base import CertiNextModel, coerce_flag, lenient_enum
 from .accounts import AccountInfo, Group, Organization
 from .catalog import CustomField, Product, ProductCategory
+from .ledger import LedgerRecord
+from .orders import CertificateStatus, OrderRecord
 
 __all__ = [
     "CertiNextModel",
@@ -34,4 +36,7 @@ __all__ = [
     "CustomField",
     "Product",
     "ProductCategory",
+    "LedgerRecord",
+    "CertificateStatus",
+    "OrderRecord",
 ]
