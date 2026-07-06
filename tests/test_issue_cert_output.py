@@ -155,7 +155,7 @@ class FakeOrder:
 
     def download_certificate(self) -> CertificateDownload:
         """Return the canned :class:`CertificateDownload`."""
-        return CertificateDownload(self._data)
+        return CertificateDownload.model_validate(self._data)
 
     def download_certificate_der(self) -> bytes:
         """Return the canned DER bytes."""

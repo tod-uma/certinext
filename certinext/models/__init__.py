@@ -34,6 +34,14 @@ from .domains import (
 )
 from .ledger import LedgerRecord
 from .orders import CertificateStatus, OrderRecord
+from .ssl_certificates import (
+    CertificateDownload,
+    DcvChallenge,
+    ReissueMode,
+    RevocationReason,
+    SslOrder,
+    SslOrderStatus,
+)
 
 __all__ = [
     "CertiNextModel",
@@ -55,4 +63,10 @@ __all__ = [
     "DcvVerifyResult",
     "Domain",
     "DomainStatus",
+    "CertificateDownload",
+    "DcvChallenge",
+    "ReissueMode",
+    "RevocationReason",
+    "SslOrder",
+    "SslOrderStatus",
 ]

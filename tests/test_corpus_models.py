@@ -39,6 +39,7 @@ from certinext.models.catalog import ProductCategory
 from certinext.models.domains import DcvInfo, DcvVerifyResult, Domain
 from certinext.models.ledger import LedgerRecord
 from certinext.models.orders import OrderRecord
+from certinext.models.ssl_certificates import CertificateDownload, SslOrder
 
 _CORPUS_ROOT = Path(__file__).parent / "fixtures" / "corpus"
 _ENVS = ("prod", "sandbox")
@@ -104,6 +105,8 @@ REGISTRY: dict[str, tuple[type[CertiNextModel], Callable[[Any], list[dict[str, A
     "domains-detail.json": (Domain, _single),
     "domains-dcv-attempts.json": (DcvVerifyResult, _wrapped("content")),
     "domains-dcv-attempts-last.json": (DcvVerifyResult, _single),
+    "ssl-certificates-detail.json": (SslOrder, _single),
+    "ssl-certificates-certificate.json": (CertificateDownload, _single),
 }
 
 # Registered files whose captured payload legitimately has zero rows (the
@@ -117,8 +120,6 @@ EMPTY_OK: dict[str, str] = {
 # reason string are permanent exclusions; the rest must move to REGISTRY.
 NOT_YET_COVERED: dict[str, str] = {
     "domains-dcv.json": "covered by test_corpus_dcv_info_from_wire (DcvInfo is a value object, not a row model)",
-    "ssl-certificates-detail.json": "pending: ssl_certificates migration",
-    "ssl-certificates-certificate.json": "pending: ssl_certificates migration",
     "healthcheck-2026-07-02.json": "permanent: healthcheck report artifact, not an API payload",
 }
 

@@ -318,21 +318,6 @@ class Domain(CertiNextModel):
             )
         return self._client
 
-    def _replace_payload(self, data: dict[str, Any]) -> None:
-        """Re-validate ``data`` and update all fields and extras in place.
-
-        Used by :meth:`refresh` and :meth:`deactivate`, which the 0.3.x class
-        implemented by swapping the raw dict behind its properties.
-
-        Args:
-            data: The new raw payload dict.
-        """
-        fresh = type(self).model_validate(data)
-        for field_name in type(self).model_fields:
-            setattr(self, field_name, getattr(fresh, field_name))
-        object.__setattr__(self, "__pydantic_extra__", fresh.__pydantic_extra__)
-        self._raw = data
-
     # --- dunder methods ---
 
     def __str__(self) -> str:

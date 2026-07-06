@@ -100,6 +100,21 @@ class CertiNextModel(BaseModel):
             return self._raw
         return self.model_dump(by_alias=True)
 
+    def _replace_payload(self, data: dict[str, Any]) -> None:
+        """Re-validate ``data`` and update all fields and extras in place.
+
+        Used by models with ``refresh()``-style verb methods, which the 0.3.x
+        classes implemented by swapping the raw dict behind their properties.
+
+        Args:
+            data: The new raw payload dict.
+        """
+        fresh = type(self).model_validate(data)
+        for field_name in type(self).model_fields:
+            setattr(self, field_name, getattr(fresh, field_name))
+        object.__setattr__(self, "__pydantic_extra__", fresh.__pydantic_extra__)
+        self._raw = data
+
 
 def lenient_enum(enum_cls: type[_EnumT]) -> Any:
     """Build a pydantic ``BeforeValidator`` mapping values into ``enum_cls`` leniently.

@@ -280,7 +280,7 @@ def test_probe_r05_chain_order_misordered(probe_env: str, client: CertiNextClien
     if not found:
         pytest.skip("no downloadable issued certificate with a chain in the sandbox")
     _, body = found
-    dl = CertificateDownload(body)
+    dl = CertificateDownload.model_validate(body)
     raw = dl.chain_pem
     if len(raw) < 2:
         pytest.skip("chain has fewer than 2 certificates — order unobservable")
