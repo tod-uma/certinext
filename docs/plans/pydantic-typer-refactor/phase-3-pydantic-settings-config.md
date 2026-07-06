@@ -1,5 +1,5 @@
 ---
-status: planned
+status: done
 depends-on: [phase-0]
 implements-adr: [0003]
 ---
@@ -39,13 +39,29 @@ resolution precedence likewise: CLI flag → `--sandbox` → profile config →
 production defaults. Encode both orders in tests *first* (they exist in
 `tests/test_config.py`/`tests/test_keyring_helpers.py` — port, don't relax).
 
-## Sub-decision: TOML writer
+## Sub-decision: TOML writer — **tomlkit adopted** (ratified 2026-07-06, Tod)
 
-`certinext-setup-defaults` *writes* config.toml via the hand-rolled
-`_render`. pydantic-settings only reads. Options: keep `_render`, or adopt
-[tomlkit](https://tomlkit.readthedocs.io/en/latest/) for comment/format
-round-tripping. Roadmap open question #4 — decide at implementation, record
-in this doc.
+`certinext-setup-defaults` *writes* config.toml; pydantic-settings only
+reads. Decided: adopt [tomlkit](https://tomlkit.readthedocs.io/en/latest/)
+for the write path; the hand-rolled `_render` is deleted.
+
+<details>
+<summary>Why tomlkit, and why only for writes?</summary>
+
+- Comment/format preservation in hand-edited config files is a real UX
+  gain — the old writer's header comment literally apologized for
+  destroying comments on every save.
+- tomlkit is used **only** in `save_defaults()` (read-modify-write).
+  All *read* paths stay on `tomllib`/`tomli`: tomlkit's wrapper types
+  are dict/str/int subclasses but its `Bool` cannot subclass Python's
+  `bool`, so letting parsed tomlkit values flow into the strict pydantic
+  family models (`StrictBool`) would break validation subtly.
+- Windows gotcha found in testing: `Path.write_text` translates `\n` to
+  `\r\n`, but tomlkit output already carries the parsed file's own line
+  endings — double translation corrupts `\r\n` into `\r\r\n`. The writer
+  passes `newline=""` to disable translation.
+
+</details>
 
 ## Implementation steps
 
@@ -58,6 +74,26 @@ in this doc.
    `setup-keyring` unchanged semantics.
 4. Delete `_config.py` internals it replaces; keep public helper names used
    elsewhere in the package until phase 4 rewires the CLIs.
+
+## Implementation notes (2026-07-06)
+
+- New module `certinext/settings.py`: `IssuanceDefaults` and
+  `ConnectionSettings` (the two config-file key families; strict field
+  types so wrong-typed values degrade into warnings, never coerce),
+  `KeyringSettingsSource`, and `CertiNextSettings` whose
+  `settings_customise_sources` orders init → keyring → env — the
+  nonstandard precedence, now pinned by `tests/test_settings.py`.
+- `_config.py` keeps every public helper name/signature; per-key
+  validation delegates to the family models (`model_validate` one key at
+  a time, so one bad entry still can't block the rest). `_validate`,
+  `_toml_literal`, and `_render` are gone.
+- `_cli.py`: `_resolve` (arg → keyring → env → prompt) became
+  `_require_credential` — just the prompt/error tail; the first three
+  steps live in `CertiNextSettings`. The explicit `--account-number`
+  skips-stored-secret rule moved into `KeyringSettingsSource`.
+- The `--sandbox`/endpoint resolution stays in `apply_sandbox()` on
+  purpose: it is conditional mapping (flag → known URLs), not source
+  precedence, and phase 4 rewires it anyway. Its tests pass unchanged.
 
 ## Verification
 
