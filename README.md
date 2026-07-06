@@ -1262,12 +1262,12 @@ print(domain)
 #   created:         2026-05-04 21:27:14+00:00
 
 repr(domain)
-# Domain(id='vuxwZgEXWWFXQQWC-...', name='maine.edu', status='ACTIVE', dcv_status='VERIFIED')
+# Domain(name='maine.edu', status='ACTIVE')
 ```
 
 #### DcvInfo
 
-`domain.get_dcv()` returns a `DcvInfo` dataclass with the following fields:
+`domain.get_dcv()` returns a `DcvInfo` model with the following fields:
 
 | Field | Type | Description |
 |---|---|---|
@@ -1292,7 +1292,7 @@ print(dcv.method)                  # e.g. "DNS-TXT" or "HTTP-URL"
 print(dcv.token)                   # challenge value to publish
 print(dcv.host)                    # sub-domain prefix for the challenge record
 
-result = domain.verify()           # trigger verification; returns raw API response dict
+result = domain.verify()           # trigger verification; returns a DcvVerifyResult summary
 domain.change_dcv_method("DNS-TXT")   # accepted values: "DNS-TXT", "HTTP-URL"
 attempt = domain.last_dcv_attempt()   # returns raw API response dict
 history = domain.dcv_attempt_history() # returns raw API response dict or list
