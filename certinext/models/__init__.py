@@ -21,12 +21,16 @@ documented public API for 1.0.
 """
 
 from ._base import CertiNextModel, coerce_flag, lenient_enum
+from .accounts import AccountInfo, Group, Organization
 from .catalog import CustomField, Product, ProductCategory
 
 __all__ = [
     "CertiNextModel",
     "coerce_flag",
     "lenient_enum",
+    "AccountInfo",
+    "Group",
+    "Organization",
     "CustomField",
     "Product",
     "ProductCategory",

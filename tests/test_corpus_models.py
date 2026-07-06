@@ -34,6 +34,7 @@ from typing import Any
 import pytest
 
 from certinext.models import CertiNextModel
+from certinext.models.accounts import AccountInfo, Group, Organization
 from certinext.models.catalog import ProductCategory
 
 _CORPUS_ROOT = Path(__file__).parent / "fixtures" / "corpus"
@@ -62,20 +63,43 @@ def _rows_catalog_products(body: Any) -> list[dict[str, Any]]:
     return [r for r in rows if isinstance(r, dict)]
 
 
+def _single(body: Any) -> list[dict[str, Any]]:
+    """Treat a single-object body as one row."""
+    return [body] if isinstance(body, dict) else []
+
+
+def _wrapped(key: str) -> Callable[[Any], list[dict[str, Any]]]:
+    """Return an extractor for a ``{key: [rows]}`` wrapper body.
+
+    Args:
+        key: The wrapper key holding the row list.
+
+    Returns:
+        An extractor that also accepts a bare-list body (R07: list
+        endpoints alternate between shapes).
+    """
+
+    def _extract(body: Any) -> list[dict[str, Any]]:
+        rows = body.get(key, []) if isinstance(body, dict) else body
+        return [r for r in rows if isinstance(r, dict)] if isinstance(rows, list) else []
+
+    return _extract
+
+
 # filename -> (model class, row extractor). One entry per corpus file whose
 # model has been migrated; each row must model_validate without raising.
 REGISTRY: dict[str, tuple[type[CertiNextModel], Callable[[Any], list[dict[str, Any]]]]] = {
     "catalog-products.json": (ProductCategory, _rows_catalog_products),
+    "auth-me.json": (AccountInfo, _single),
+    "groups.json": (Group, _wrapped("groups")),
+    "organizations-list.json": (Organization, _wrapped("organizations")),
+    "organizations-detail.json": (Organization, _single),
 }
 
 # Corpus files whose models have not been migrated yet (phase 1 in
 # progress) or that intentionally have no row model. Files listed with a
 # reason string are permanent exclusions; the rest must move to REGISTRY.
 NOT_YET_COVERED: dict[str, str] = {
-    "auth-me.json": "pending: accounts migration",
-    "groups.json": "pending: accounts migration",
-    "organizations-list.json": "pending: accounts migration",
-    "organizations-detail.json": "pending: accounts migration",
     "reports-ledger.json": "pending: ledger migration",
     "reports-orders.json": "pending: orders migration",
     "domains-list.json": "pending: domains migration",
