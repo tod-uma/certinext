@@ -1,5 +1,5 @@
 ---
-status: planned
+status: done
 depends-on: [phase-1]
 implements-adr: [0003]
 ---
@@ -52,12 +52,40 @@ not discovered later:
 - OrderWorkflow's 422 download retry loop (R11) sits above the client and
   is untouched.
 
-Implementation choice left open (record which): hand-rolled token handling
-ported as-is onto `httpx.Client`, vs a custom
+Implementation choice — **ratified during implementation (2026-07-06)**:
+hand-rolled token handling ported as-is onto `httpx.Client`, not a custom
 [`httpx.Auth`](https://www.python-httpx.org/advanced/authentication/)
-implementation. Prefer whichever keeps the 401-retry-once semantics most
-legible; do not add general retry/backoff — that's deliberate (callers and
-OrderWorkflow own retries).
+implementation. No general retry/backoff was added — that's deliberate
+(callers and OrderWorkflow own retries).
+
+<details>
+<summary>Why hand-rolled over httpx.Auth?</summary>
+
+- The 401-retry-once semantics stay in one legible `_execute` method
+  instead of being spread across an auth-flow generator; `httpx.Auth`'s
+  `auth_flow` yield protocol is harder to read for exactly-once retry.
+- The existing tests mock at the `_session`/`_headers` seam; porting
+  as-is kept the test diff mechanical.
+
+</details>
+
+Other choices made in this phase, all deliberate:
+
+- **`follow_redirects=True`** on the `httpx.Client` — matches the
+  `requests.Session` default the client was built on
+  ([httpx redirects](https://www.python-httpx.org/compatibility/#redirects)).
+- **Explicit finite timeouts** (`Timeout(10.0, read=60.0)` for the API,
+  `Timeout(10.0, read=30.0)` for the token endpoint) — the `requests`
+  implementation had *no* timeout, so any finite value satisfies
+  "at least as strict as today"; the generous read timeout covers slow
+  report endpoints ([httpx timeouts](https://www.python-httpx.org/advanced/timeouts/)).
+- **`httpx`/`httpcore` loggers silenced below `-vvvv`** in
+  `_setup_logging` — httpx logs one INFO line per request (urllib3 only
+  logged at DEBUG), which would have changed CLI stderr output
+  ([httpx logging](https://www.python-httpx.org/logging/)).
+- **R22 probe updated** to assert the *new* invariant (plain `Exception`,
+  not `httpx.HTTPError`) so a future regression back to a
+  transport-subclassed exception fails loudly.
 
 Also deliberate: **no response caching in 1.0** (wishlist IDEA-006 records
 why). The constraint this phase must honor is the *seam*: all HTTP flows
