@@ -292,6 +292,29 @@ class TestOrderAccessorGetList:
         assert len(result) == 2
         assert mock_client.get.call_count == 2
 
+    def test_wrapper_total_pages_terminates(self, accessor: OrderAccessor, mock_client: MagicMock):
+        """get_list() stops at the wrapper's totalPages instead of fetching further."""
+        mock_client.get.side_effect = [
+            {"content": [SAMPLE_ORDER] * 2, "page": 1, "size": 2, "totalElements": 3, "totalPages": 2},
+            {"content": [SAMPLE_ORDER_EXPIRED], "page": 2, "size": 2, "totalElements": 3, "totalPages": 2},
+        ]
+        result = accessor.get_list(page_size=2)
+        assert len(result) == 3
+        assert mock_client.get.call_count == 2
+
+    def test_wrapper_exact_multiple_no_infinite_loop(self, accessor: OrderAccessor, mock_client: MagicMock):
+        """A total that is an exact multiple of page_size must not refetch the clamped last page.
+
+        The server clamps out-of-range pages to the last page (probe R16,
+        2026-07-02), so without totalPages termination a full final page
+        would be refetched forever.
+        """
+        full_last_page = {"content": [SAMPLE_ORDER] * 2, "page": 1, "size": 2, "totalElements": 2, "totalPages": 1}
+        mock_client.get.side_effect = [full_last_page, full_last_page, full_last_page]
+        result = accessor.get_list(page_size=2)
+        assert len(result) == 2
+        assert mock_client.get.call_count == 1
+
 
 # ---------------------------------------------------------------------------
 # _build_rows join logic

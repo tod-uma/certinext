@@ -1022,23 +1022,21 @@ domain, or order); when that input is unavailable the probe is reported
 The process exits non-zero when any probe is `DENIED`, `NOT_FOUND`,
 `SERVER_BUG`, or `NETWORK`. Add `--strict` to also fail on `EMPTY`.
 
-#### Current known issue: `/domains` returns 422 (production *and* sandbox)
+#### Case study: the June 2026 `/domains` 422 (resolved)
 
-Since mid-June 2026 the CertiNext `/domains` list endpoint has returned a
-generic HTTP 422 for every request, in **both production and sandbox** — a
-vendor-side regression that appeared with their DCV-inheritance GA rollout
-(CertiNext ticket #131869). It is **not** a fault in this library or in
-`certinext-healthcheck`.
+In mid-June 2026 the CertiNext `/domains` list endpoint returned a generic
+HTTP 422 for every request made with our production credentials (CertiNext
+ticket #131869). The root cause turned out to be on the account side — a
+credentials/provisioning problem, resolved 2026-06-25 by issuing new OAuth
+client credentials — not a fault in this library.
 
-While that outage persists, a run reports the domain-list probe as
+While it lasted, `certinext-healthcheck` reported the domain-list probe as
 `SERVER_BUG` (with the raw RFC 7807 body captured verbatim) and the per-domain
 Tier-2 probes that depend on a domain from that list as `SKIPPED`, so the run
-exits non-zero. **We therefore cannot currently demonstrate a fully-green run
-in either environment** — which is exactly the condition `certinext-healthcheck`
-was built to surface: it pinpoints the broken endpoint and preserves the
-server's own error body, instead of letting the failure show up as a confusing
-crash somewhere downstream. Every probe that does not touch `/domains` is
-unaffected.
+exited non-zero. That is exactly the behaviour the tool exists for: it
+pinpointed the broken endpoint and preserved the server's own error body,
+instead of letting the failure surface as a confusing crash downstream. As of
+2026-07-02 both production and sandbox runs are fully green.
 
 #### Arguments
 
@@ -1171,10 +1169,11 @@ Filter by status server-side (reduces data transferred):
 domains = sess.domain.get_list(domain_status="ACTIVE", dcv_status="PENDING,REJECTED,EXPIRED")
 ```
 
-> **Note:** The API `search` parameter is partially fixed (re-tested 2026-06-05):
-> exact FQDN matches now work, but substring searches (values without `.`) return
-> 0 results instead of matching domains. Use `pattern` (below) for reliable
-> filtering.
+> **Note:** The API `search` parameter behaves differently per environment
+> (re-tested 2026-07-02, probe R01): exact FQDN matches work everywhere; the
+> **sandbox** now also matches substrings correctly, but **production** still
+> returns 0 results for substring searches — and results are capped at the
+> server's ~50-row default page. Use `pattern` (below) for reliable filtering.
 
 Filter by name with a regex (applied client-side after the API response):
 
@@ -1202,10 +1201,11 @@ domains = sess.domain.get_list(domain_status="ACTIVE", pattern=r".*\.maine\.edu"
 verification. It fetches all domains and filters client-side using
 `domain.needs_dcv`.
 
-> **Note:** The API `domainStatus` and `dcvStatus` filter parameters return a
-> 400 error when used together — confirmed vendor bug (reported 2026-05-20).
-> Server-side status filtering is disabled until CertiNext notifies the fix is
-> deployed.
+> **Note:** Combining the API `domainStatus` and `dcvStatus` filter parameters
+> originally returned a 400 error (reported 2026-05-20), so this method fetches
+> all domains and filters client-side. Probe R02 confirmed the combination now
+> works in both environments (2026-07-02, GitLab issue #6); the switch to
+> server-side filtering is planned for the 1.0 refactor.
 
 ```python
 pending = sess.domain.get_pending_dcv()

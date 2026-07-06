@@ -36,12 +36,12 @@ This library already contains a **client-side predictive model of DCV inheritanc
 *before* the feature was official, from an InCommon cert-users mailing-list discussion dated
 **2026-06-01**:
 
-- `Domain.dcv_covering_parent()` ([certinext/domains.py:297-355](../../certinext/domains.py#L297-L355))
+- `Domain.dcv_covering_parent()` (in [certinext/domains.py](../../certinext/domains.py))
   walks the domain tree for a registered ancestor and uses `_has_ns_records()`
-  ([certinext/domains.py:102-126](../../certinext/domains.py#L102-L126)) to assume propagation
+  (same module) to assume propagation
   **stops at DNS zone boundaries** (a subdomain with its own NS records is treated as *not*
   inheriting).
-- `filter_needs_dcv()` ([certinext/domains.py:522-556](../../certinext/domains.py#L522-L556))
+- `filter_needs_dcv()` (in [certinext/domains.py](../../certinext/domains.py))
   removes domains a parent covers. It is exported from `__init__.py` and consumed by the
   scripts repo.
 

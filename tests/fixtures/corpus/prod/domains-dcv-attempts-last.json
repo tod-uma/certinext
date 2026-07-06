@@ -1,0 +1,67 @@
+{
+  "request": {
+    "method": "GET",
+    "params": null,
+    "path": "/api/certinext/v2/domains/CZb-HYaeZzmljbLVVTUh_PieT-wutFW2QIMo-ruxFi3mRRxZ/dcv/attempts/last"
+  },
+  "response": {
+    "body": {
+      "diagnostics": {
+        "attemptTimestamp": "2026-06-23 16:39:29",
+        "consensus": {
+          "agreed": true,
+          "consensusStatusCode": "",
+          "consensusUrl": "",
+          "consensusValue": "",
+          "perspectiveCount": 0,
+          "quorumCount": 0,
+          "rirDiversityMet": true,
+          "totalPerspectivesQueried": 0
+        },
+        "domainId": "48066",
+        "domainName": "xeffb310.x3b1bdc5.x0fef5e0.x1ae89fe.edu",
+        "expected": {
+          "domainName": "xeffb310.x3b1bdc5.x0fef5e0.x1ae89fe.edu",
+          "fileContent": "",
+          "fileName": "",
+          "recordValue": ""
+        },
+        "failureClass": "UNKNOWN",
+        "method": "DNS_TXT",
+        "nextSteps": [
+          {
+            "key": "dcv.nextStep.unknown",
+            "params": {},
+            "severity": "ERROR"
+          }
+        ],
+        "overallStatus": "VERIFIED",
+        "perspectives": [],
+        "schemaVersion": 1,
+        "tokenIsStale": true
+      },
+      "domainId": "id-b4f66ac3",
+      "method": "dns-txt",
+      "status": "VERIFIED"
+    },
+    "headers": {
+      "Access-Control-Allow-Methods": "GET, POST",
+      "Cache-Control": "no-store, no-cache,no-store,private,must-revalidate,max-stale=0,post-check=0,pre-check=0",
+      "Connection": "keep-alive",
+      "Content-Security-Policy": "frame-ancestors 'self';manifest-src 'self';",
+      "Content-Type": "application/json",
+      "Date": "Fri, 03 Jul 2026 01:23:41 GMT",
+      "Expires": "Thu, 01 Jan 1970 00:00:00 GMT",
+      "Pragma": "no-cache, no-cache",
+      "Referrer-Policy": "origin-when-cross-origin",
+      "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+      "Transfer-Encoding": "chunked",
+      "Vary": "Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "X-API-Version": "2.0.0",
+      "X-Content-Type-Options": "nosniff",
+      "X-Frame-Options": "DENY",
+      "X-XSS-Protection": "0; mode=block"
+    },
+    "status": 200
+  }
+}

@@ -778,9 +778,12 @@ class DomainAccessor:
 
         Fetches all domains and filters client-side using :attr:`Domain.needs_dcv`.
 
-        **Note:** The API ``domainStatus`` and ``dcvStatus`` filter parameters return
-        a 400 error when used together — confirmed vendor bug (reported 2026-05-20).
-        Server-side filtering is disabled until CertiNext notifies the fix is deployed.
+        **Note:** Combining the API ``domainStatus`` and ``dcvStatus`` filter
+        parameters originally returned a 400 (reported 2026-05-20), which is why
+        this fetches everything and filters client-side. Probe R02 confirmed the
+        combination now works in both environments (2026-07-02, GitLab issue #6);
+        the switch to server-side filtering is planned for the 1.0 refactor
+        (phase 1) rather than a 0.3.x behavior change.
 
         Args:
             search: Optional search string passed to the API. See :meth:`get_list`.

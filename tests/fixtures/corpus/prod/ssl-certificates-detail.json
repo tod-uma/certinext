@@ -1,0 +1,69 @@
+{
+  "request": {
+    "method": "GET",
+    "params": null,
+    "path": "/api/certinext/v2/ssl-certificates/7127497404"
+  },
+  "response": {
+    "body": {
+      "certificateState": "Certificate Downloaded",
+      "csrSubmitted": true,
+      "domain": "x27ea14a.x1ae89fe.edu",
+      "expiresAt": "2026-12-14T15:32:28Z",
+      "orderId": "7127497404",
+      "orderState": "Order Fulfilled",
+      "requestId": "4129107743",
+      "requestor": {
+        "email": "user-cdab4a@example.invalid",
+        "name": "Name-c5eddb",
+        "phone": "+23528996730"
+      },
+      "status": "issued",
+      "subscriberAgreement": {
+        "signed": true,
+        "signedAt": "2026-06-25T20:35:13Z",
+        "signedPlace": "Name-4b4fce",
+        "signerName": "Name-c5eddb"
+      },
+      "verifications": {
+        "domain": {
+          "domains": [
+            {
+              "caaStatus": "PASSED",
+              "dcvMethod": "dns-txt",
+              "dcvStatus": "VERIFIED",
+              "domain": "x27ea14a.x1ae89fe.edu",
+              "domainStatus": "ACTIVE",
+              "verifiedAt": "2026-05-29T15:32:22Z"
+            }
+          ],
+          "status": "VERIFIED"
+        },
+        "empty": false,
+        "organization": {
+          "organizationName": "Org-7d08cc",
+          "status": "VERIFIED"
+        }
+      }
+    },
+    "headers": {
+      "Access-Control-Allow-Methods": "GET, POST",
+      "Cache-Control": "no-store, no-cache,no-store,private,must-revalidate,max-stale=0,post-check=0,pre-check=0",
+      "Connection": "keep-alive",
+      "Content-Security-Policy": "frame-ancestors 'self';manifest-src 'self';",
+      "Content-Type": "application/json",
+      "Date": "Fri, 03 Jul 2026 01:23:41 GMT",
+      "Expires": "Thu, 01 Jan 1970 00:00:00 GMT",
+      "Pragma": "no-cache, no-cache",
+      "Referrer-Policy": "origin-when-cross-origin",
+      "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+      "Transfer-Encoding": "chunked",
+      "Vary": "Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "X-API-Version": "2.0.0",
+      "X-Content-Type-Options": "nosniff",
+      "X-Frame-Options": "DENY",
+      "X-XSS-Protection": "0; mode=block"
+    },
+    "status": 200
+  }
+}

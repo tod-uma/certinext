@@ -1,0 +1,519 @@
+{
+  "request": {
+    "method": "GET",
+    "params": null,
+    "path": "/api/certinext/v2/domains"
+  },
+  "response": {
+    "body": {
+      "content": [
+        {
+          "createdAt": "2026-06-25T20:35:12Z",
+          "dcvStatus": "VERIFIED",
+          "domainId": "id-01b5a75a",
+          "domainName": "xd17ba1c.x0fef5e0.x1ae89fe.edu",
+          "organizationId": "id-614dcd90",
+          "organizationName": "Org-7d08cc",
+          "status": "ACTIVE",
+          "validTill": "2026-08-03T00:00:00Z"
+        },
+        {
+          "createdAt": "2026-06-25T20:19:42Z",
+          "dcvStatus": "REJECTED",
+          "domainId": "id-ec867ead",
+          "domainName": "xd17ba1c.x0fef5e0.x1ae89fe.edu",
+          "organizationId": "id-66ba6241",
+          "organizationName": "Org-7d08cc",
+          "status": "ACTIVE"
+        },
+        {
+          "createdAt": "2026-06-23T16:39:27Z",
+          "dcvStatus": "VERIFIED",
+          "domainId": "id-20aa5e40",
+          "domainName": "x392c120.x3b1bdc5.x0fef5e0.x1ae89fe.edu",
+          "organizationId": "id-614dcd90",
+          "organizationName": "Org-7d08cc",
+          "status": "ACTIVE",
+          "validTill": "2026-08-03T00:00:00Z"
+        },
+        {
+          "createdAt": "2026-06-23T16:39:27Z",
+          "dcvStatus": "VERIFIED",
+          "domainId": "id-b4f66ac3",
+          "domainName": "xeffb310.x3b1bdc5.x0fef5e0.x1ae89fe.edu",
+          "organizationId": "id-614dcd90",
+          "organizationName": "Org-7d08cc",
+          "status": "ACTIVE",
+          "validTill": "2026-08-03T00:00:00Z"
+        },
+        {
+          "createdAt": "2026-06-23T13:37:51Z",
+          "dcvStatus": "VERIFIED",
+          "domainId": "id-8b361245",
+          "domainName": "x14242bd.x0fef5e0.x1ae89fe.edu",
+          "organizationId": "id-614dcd90",
+          "organizationName": "Org-7d08cc",
+          "status": "ACTIVE",
+          "validTill": "2026-08-03T00:00:00Z"
+        },
+        {
+          "createdAt": "2026-06-23T13:37:48Z",
+          "dcvStatus": "VERIFIED",
+          "domainId": "id-aa3b97cd",
+          "domainName": "xacd768d.x0fef5e0.x1ae89fe.edu",
+          "organizationId": "id-614dcd90",
+          "organizationName": "Org-7d08cc",
+          "status": "ACTIVE",
+          "validTill": "2026-08-03T00:00:00Z"
+        },
+        {
+          "createdAt": "2026-06-23T13:37:44Z",
+          "dcvStatus": "VERIFIED",
+          "domainId": "id-e22ddfc3",
+          "domainName": "xf1a4729.x0fef5e0.x1ae89fe.edu",
+          "organizationId": "id-614dcd90",
+          "organizationName": "Org-7d08cc",
+          "status": "ACTIVE",
+          "validTill": "2026-08-03T00:00:00Z"
+        },
+        {
+          "createdAt": "2026-06-22T14:04:02Z",
+          "dcvStatus": "VERIFIED",
+          "domainId": "id-6b470810",
+          "domainName": "x65c376a.x0fef5e0.x1ae89fe.edu",
+          "organizationId": "id-614dcd90",
+          "organizationName": "Org-7d08cc",
+          "status": "ACTIVE",
+          "validTill": "2026-08-03T00:00:00Z"
+        },
+        {
+          "createdAt": "2026-06-22T14:03:57Z",
+          "dcvStatus": "VERIFIED",
+          "domainId": "id-53df3489",
+          "domainName": "xe0a65da.x0fef5e0.x1ae89fe.edu",
+          "organizationId": "id-614dcd90",
+          "organizationName": "Org-7d08cc",
+          "status": "ACTIVE",
+          "validTill": "2026-08-03T00:00:00Z"
+        },
+        {
+          "createdAt": "2026-06-18T16:52:03Z",
+          "dcvStatus": "VERIFIED",
+          "domainId": "id-2e528b8d",
+          "domainName": "xc7af2b8.x0fef5e0.x1ae89fe.edu",
+          "organizationId": "id-614dcd90",
+          "organizationName": "Org-7d08cc",
+          "status": "ACTIVE",
+          "validTill": "2026-08-03T00:00:00Z"
+        },
+        {
+          "createdAt": "2026-06-16T13:30:00Z",
+          "dcvStatus": "VERIFIED",
+          "domainId": "id-e8bee574",
+          "domainName": "x397b962.x985eedc.x1ae89fe.edu",
+          "organizationId": "id-614dcd90",
+          "organizationName": "Org-7d08cc",
+          "status": "ACTIVE",
+          "validTill": "2026-08-03T00:00:00Z"
+        },
+        {
+          "createdAt": "2026-06-14T09:46:46Z",
+          "dcvStatus": "VERIFIED",
+          "domainId": "id-19800b24",
+          "domainName": "xcec7690.x0fef5e0.x1ae89fe.edu",
+          "organizationId": "id-614dcd90",
+          "organizationName": "Org-7d08cc",
+          "status": "ACTIVE",
+          "validTill": "2026-08-03T00:00:00Z"
+        },
+        {
+          "createdAt": "2026-06-12T19:24:56Z",
+          "dcvStatus": "VERIFIED",
+          "domainId": "id-456c1ce0",
+          "domainName": "x67dc4b5.x0fef5e0.x1ae89fe.edu",
+          "organizationId": "id-614dcd90",
+          "organizationName": "Org-7d08cc",
+          "status": "ACTIVE",
+          "validTill": "2026-08-03T00:00:00Z"
+        },
+        {
+          "createdAt": "2026-06-12T19:23:51Z",
+          "dcvStatus": "VERIFIED",
+          "domainId": "id-976082d5",
+          "domainName": "xcb83617.x0fef5e0.x1ae89fe.edu",
+          "organizationId": "id-614dcd90",
+          "organizationName": "Org-7d08cc",
+          "status": "ACTIVE",
+          "validTill": "2026-08-03T00:00:00Z"
+        },
+        {
+          "createdAt": "2026-06-10T17:49:57Z",
+          "dcvStatus": "VERIFIED",
+          "domainId": "id-ee79f27b",
+          "domainName": "x246cc06.x63619ce.x1ae89fe.edu",
+          "organizationId": "id-614dcd90",
+          "organizationName": "Org-7d08cc",
+          "status": "ACTIVE",
+          "validTill": "2026-08-03T00:00:00Z"
+        },
+        {
+          "createdAt": "2026-06-10T17:49:57Z",
+          "dcvStatus": "VERIFIED",
+          "domainId": "id-20bf2f7a",
+          "domainName": "xc9d7da1.x63619ce.x1ae89fe.edu",
+          "organizationId": "id-614dcd90",
+          "organizationName": "Org-7d08cc",
+          "status": "ACTIVE",
+          "validTill": "2026-08-03T00:00:00Z"
+        },
+        {
+          "createdAt": "2026-06-10T17:49:57Z",
+          "dcvStatus": "VERIFIED",
+          "domainId": "id-3e31190a",
+          "domainName": "x84ba1e8.x63619ce.x1ae89fe.edu",
+          "organizationId": "id-614dcd90",
+          "organizationName": "Org-7d08cc",
+          "status": "ACTIVE",
+          "validTill": "2026-08-03T00:00:00Z"
+        },
+        {
+          "createdAt": "2026-06-09T02:07:52Z",
+          "dcvStatus": "VERIFIED",
+          "domainId": "id-c934db82",
+          "domainName": "xf7da6b5.net",
+          "organizationId": "id-614dcd90",
+          "organizationName": "Org-7d08cc",
+          "status": "ACTIVE",
+          "validTill": "2026-12-25T00:00:00Z"
+        },
+        {
+          "createdAt": "2026-06-05T18:28:07Z",
+          "dcvStatus": "VERIFIED",
+          "domainId": "id-1198540e",
+          "domainName": "x1b704e0.x1ae89fe.edu",
+          "organizationId": "id-614dcd90",
+          "organizationName": "Org-7d08cc",
+          "status": "ACTIVE",
+          "validTill": "2026-08-03T00:00:00Z"
+        },
+        {
+          "createdAt": "2026-05-04T21:27:14Z",
+          "dcvStatus": "VERIFIED",
+          "domainId": "id-638f83c0",
+          "domainName": "x37fe756.x273f1e2.x1ae89fe.edu",
+          "organizationId": "id-614dcd90",
+          "organizationName": "Org-7d08cc",
+          "status": "ACTIVE",
+          "validTill": "2026-08-03T00:00:00Z"
+        },
+        {
+          "createdAt": "2026-05-04T21:27:14Z",
+          "dcvStatus": "VERIFIED",
+          "domainId": "id-6769a6f8",
+          "domainName": "x5b74917.x1ae89fe.edu",
+          "organizationId": "id-614dcd90",
+          "organizationName": "Org-7d08cc",
+          "status": "ACTIVE",
+          "validTill": "2026-08-03T00:00:00Z"
+        },
+        {
+          "createdAt": "2026-05-04T21:27:14Z",
+          "dcvStatus": "VERIFIED",
+          "domainId": "id-02bb8c5a",
+          "domainName": "x07d3210.x1ae89fe.edu",
+          "organizationId": "id-614dcd90",
+          "organizationName": "Org-7d08cc",
+          "status": "ACTIVE",
+          "validTill": "2026-08-03T00:00:00Z"
+        },
+        {
+          "createdAt": "2026-05-04T21:27:14Z",
+          "dcvStatus": "PENDING",
+          "domainId": "id-8fb0b9b4",
+          "domainName": "x3a572ee.edu",
+          "organizationId": "id-614dcd90",
+          "organizationName": "Org-7d08cc",
+          "status": "ACTIVE"
+        },
+        {
+          "createdAt": "2026-05-04T21:27:14Z",
+          "dcvStatus": "VERIFIED",
+          "domainId": "id-2613f831",
+          "domainName": "xd9a9d38.x1ae89fe.edu",
+          "organizationId": "id-614dcd90",
+          "organizationName": "Org-7d08cc",
+          "status": "ACTIVE",
+          "validTill": "2026-08-03T00:00:00Z"
+        },
+        {
+          "createdAt": "2026-05-04T21:27:14Z",
+          "dcvStatus": "VERIFIED",
+          "domainId": "id-668cebb2",
+          "domainName": "x6d06233.x1ae89fe.edu",
+          "organizationId": "id-614dcd90",
+          "organizationName": "Org-7d08cc",
+          "status": "ACTIVE",
+          "validTill": "2026-08-03T00:00:00Z"
+        },
+        {
+          "createdAt": "2026-05-04T21:27:14Z",
+          "dcvStatus": "VERIFIED",
+          "domainId": "id-197a5dc4",
+          "domainName": "x985eedc.x1ae89fe.edu",
+          "organizationId": "id-614dcd90",
+          "organizationName": "Org-7d08cc",
+          "status": "ACTIVE",
+          "validTill": "2026-08-03T00:00:00Z"
+        },
+        {
+          "createdAt": "2026-05-04T21:27:14Z",
+          "dcvStatus": "PENDING",
+          "domainId": "id-dadf576c",
+          "domainName": "xa0f1d02.edu",
+          "organizationId": "id-614dcd90",
+          "organizationName": "Org-7d08cc",
+          "status": "ACTIVE"
+        },
+        {
+          "createdAt": "2026-05-04T21:27:14Z",
+          "dcvStatus": "VERIFIED",
+          "domainId": "id-9be8ebfa",
+          "domainName": "xd47debe.x1ae89fe.edu",
+          "organizationId": "id-614dcd90",
+          "organizationName": "Org-7d08cc",
+          "status": "ACTIVE",
+          "validTill": "2026-08-03T00:00:00Z"
+        },
+        {
+          "createdAt": "2026-05-04T21:27:14Z",
+          "dcvStatus": "VERIFIED",
+          "domainId": "id-acc8160d",
+          "domainName": "xa7df3cf.x1ae89fe.edu",
+          "organizationId": "id-614dcd90",
+          "organizationName": "Org-7d08cc",
+          "status": "ACTIVE",
+          "validTill": "2026-08-03T00:00:00Z"
+        },
+        {
+          "createdAt": "2026-05-04T21:27:14Z",
+          "dcvStatus": "PENDING",
+          "domainId": "id-ef3f76cb",
+          "domainName": "x33c2ba5.xddb211e.edu",
+          "organizationId": "id-614dcd90",
+          "organizationName": "Org-7d08cc",
+          "status": "ACTIVE"
+        },
+        {
+          "createdAt": "2026-05-04T21:27:14Z",
+          "dcvStatus": "PENDING",
+          "domainId": "id-823879a7",
+          "domainName": "xddb211e.edu",
+          "organizationId": "id-614dcd90",
+          "organizationName": "Org-7d08cc",
+          "status": "ACTIVE"
+        },
+        {
+          "createdAt": "2026-05-04T21:27:14Z",
+          "dcvStatus": "PENDING",
+          "domainId": "id-48326dac",
+          "domainName": "xc29ff5b.edu",
+          "organizationId": "id-614dcd90",
+          "organizationName": "Org-7d08cc",
+          "status": "ACTIVE"
+        },
+        {
+          "createdAt": "2026-05-04T21:27:14Z",
+          "dcvStatus": "VERIFIED",
+          "domainId": "id-c797b1cb",
+          "domainName": "x739f0e8.x6d06233.x1ae89fe.edu",
+          "organizationId": "id-614dcd90",
+          "organizationName": "Org-7d08cc",
+          "status": "ACTIVE",
+          "validTill": "2026-08-03T00:00:00Z"
+        },
+        {
+          "createdAt": "2026-05-04T21:27:14Z",
+          "dcvStatus": "PENDING",
+          "domainId": "id-23ec8003",
+          "domainName": "x0fd0010.edu",
+          "organizationId": "id-614dcd90",
+          "organizationName": "Org-7d08cc",
+          "status": "ACTIVE"
+        },
+        {
+          "createdAt": "2026-05-04T21:27:14Z",
+          "dcvStatus": "PENDING",
+          "domainId": "id-15456e3c",
+          "domainName": "x9d8b25e.org",
+          "organizationId": "id-614dcd90",
+          "organizationName": "Org-7d08cc",
+          "status": "ACTIVE"
+        },
+        {
+          "createdAt": "2026-05-04T21:27:14Z",
+          "dcvStatus": "PENDING",
+          "domainId": "id-6d3adf68",
+          "domainName": "xdea3402.org",
+          "organizationId": "id-614dcd90",
+          "organizationName": "Org-7d08cc",
+          "status": "ACTIVE"
+        },
+        {
+          "createdAt": "2026-05-04T21:27:14Z",
+          "dcvStatus": "PENDING",
+          "domainId": "id-e91bc05c",
+          "domainName": "xe3aef83.org",
+          "organizationId": "id-614dcd90",
+          "organizationName": "Org-7d08cc",
+          "status": "ACTIVE"
+        },
+        {
+          "createdAt": "2026-05-04T21:27:14Z",
+          "dcvStatus": "VERIFIED",
+          "domainId": "id-800d5226",
+          "domainName": "xeac9eab.x1ae89fe.edu",
+          "organizationId": "id-614dcd90",
+          "organizationName": "Org-7d08cc",
+          "status": "ACTIVE",
+          "validTill": "2026-08-03T00:00:00Z"
+        },
+        {
+          "createdAt": "2026-05-04T21:27:14Z",
+          "dcvStatus": "VERIFIED",
+          "domainId": "id-bb04eba6",
+          "domainName": "xd60d789.net",
+          "organizationId": "id-614dcd90",
+          "organizationName": "Org-7d08cc",
+          "status": "ACTIVE",
+          "validTill": "2026-12-24T00:00:00Z"
+        },
+        {
+          "createdAt": "2026-05-04T21:27:14Z",
+          "dcvStatus": "VERIFIED",
+          "domainId": "id-cae74e94",
+          "domainName": "xf206928.x3b2638c.x1ae89fe.edu",
+          "organizationId": "id-614dcd90",
+          "organizationName": "Org-7d08cc",
+          "status": "ACTIVE",
+          "validTill": "2026-08-03T00:00:00Z"
+        },
+        {
+          "createdAt": "2026-05-04T21:27:14Z",
+          "dcvStatus": "VERIFIED",
+          "domainId": "id-9a307d29",
+          "domainName": "x63619ce.x1ae89fe.edu",
+          "organizationId": "id-614dcd90",
+          "organizationName": "Org-7d08cc",
+          "status": "ACTIVE",
+          "validTill": "2026-08-03T00:00:00Z"
+        },
+        {
+          "createdAt": "2026-05-04T21:27:14Z",
+          "dcvStatus": "VERIFIED",
+          "domainId": "id-3239d72f",
+          "domainName": "x3236999.net",
+          "organizationId": "id-614dcd90",
+          "organizationName": "Org-7d08cc",
+          "status": "ACTIVE",
+          "validTill": "2026-12-25T00:00:00Z"
+        },
+        {
+          "createdAt": "2026-05-04T21:27:14Z",
+          "dcvStatus": "PENDING",
+          "domainId": "id-6dbc9ff9",
+          "domainName": "x6738722.org",
+          "organizationId": "id-614dcd90",
+          "organizationName": "Org-7d08cc",
+          "status": "ACTIVE"
+        },
+        {
+          "createdAt": "2026-05-04T21:27:14Z",
+          "dcvStatus": "PENDING",
+          "domainId": "id-1b8b6676",
+          "domainName": "x1b37c72.org",
+          "organizationId": "id-614dcd90",
+          "organizationName": "Org-7d08cc",
+          "status": "ACTIVE"
+        },
+        {
+          "createdAt": "2026-05-04T21:27:14Z",
+          "dcvStatus": "PENDING",
+          "domainId": "id-e5548043",
+          "domainName": "x4bec134.edu",
+          "organizationId": "id-614dcd90",
+          "organizationName": "Org-7d08cc",
+          "status": "ACTIVE"
+        },
+        {
+          "createdAt": "2026-05-04T21:27:14Z",
+          "dcvStatus": "PENDING",
+          "domainId": "id-be7b2845",
+          "domainName": "x998f7b7.org",
+          "organizationId": "id-614dcd90",
+          "organizationName": "Org-7d08cc",
+          "status": "ACTIVE"
+        },
+        {
+          "createdAt": "2026-05-04T21:27:14Z",
+          "dcvStatus": "VERIFIED",
+          "domainId": "id-56335beb",
+          "domainName": "x1ae89fe.edu",
+          "organizationId": "id-614dcd90",
+          "organizationName": "Org-7d08cc",
+          "status": "ACTIVE",
+          "validTill": "2026-08-03T00:00:00Z"
+        },
+        {
+          "createdAt": "2026-05-04T21:27:14Z",
+          "dcvStatus": "PENDING",
+          "domainId": "id-d05780f8",
+          "domainName": "x5fef735.org",
+          "organizationId": "id-614dcd90",
+          "organizationName": "Org-7d08cc",
+          "status": "ACTIVE"
+        },
+        {
+          "createdAt": "2026-05-04T21:27:14Z",
+          "dcvStatus": "PENDING",
+          "domainId": "id-6479ffe0",
+          "domainName": "x112c80a.edu",
+          "organizationId": "id-614dcd90",
+          "organizationName": "Org-7d08cc",
+          "status": "ACTIVE"
+        },
+        {
+          "createdAt": "2026-05-04T21:27:14Z",
+          "dcvStatus": "PENDING",
+          "domainId": "id-d9edb478",
+          "domainName": "xed07526.xddb211e.edu",
+          "organizationId": "id-614dcd90",
+          "organizationName": "Org-7d08cc",
+          "status": "ACTIVE"
+        }
+      ],
+      "page": 0,
+      "size": 50,
+      "totalElements": 55,
+      "totalPages": 2
+    },
+    "headers": {
+      "Access-Control-Allow-Methods": "GET, POST",
+      "Cache-Control": "no-store, no-cache,no-store,private,must-revalidate,max-stale=0,post-check=0,pre-check=0",
+      "Connection": "keep-alive",
+      "Content-Security-Policy": "frame-ancestors 'self';manifest-src 'self';",
+      "Content-Type": "application/json",
+      "Date": "Fri, 03 Jul 2026 01:23:27 GMT",
+      "Expires": "Thu, 01 Jan 1970 00:00:00 GMT",
+      "Pragma": "no-cache, no-cache",
+      "Referrer-Policy": "origin-when-cross-origin",
+      "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+      "Transfer-Encoding": "chunked",
+      "Vary": "Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "X-API-Version": "2.0.0",
+      "X-Content-Type-Options": "nosniff",
+      "X-Frame-Options": "DENY",
+      "X-XSS-Protection": "0; mode=block"
+    },
+    "status": 200
+  }
+}

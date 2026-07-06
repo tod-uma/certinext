@@ -1,0 +1,76 @@
+{
+  "request": {
+    "method": "GET",
+    "params": null,
+    "path": "/api/certinext/v2/ssl-certificates/4610606711"
+  },
+  "response": {
+    "body": {
+      "certificateState": "Certificate Downloaded",
+      "csrSubmitted": true,
+      "domain": "x45722a4.x1ae89fe.edu",
+      "expiresAt": "2026-07-11T17:01:16Z",
+      "orderId": "4610606711",
+      "orderState": "Order Fulfilled",
+      "requestId": "5370839396",
+      "requestor": {
+        "email": "user-cdab4a@example.invalid",
+        "name": "Name-c5eddb",
+        "phone": "+23528996730"
+      },
+      "status": "issued",
+      "subscriberAgreement": {
+        "signed": true,
+        "signedAt": "2026-07-02T17:09:51Z",
+        "signedPlace": "Name-bbbc4f",
+        "signerName": "Name-380a0c"
+      },
+      "subscription": {
+        "endDate": "2027-06-11T17:01:17Z",
+        "status": "active",
+        "validityYears": 1
+      },
+      "verifications": {
+        "domain": {
+          "domains": [
+            {
+              "caaStatus": "PASSED",
+              "dcvMethod": "dns-txt",
+              "dcvStatus": "VERIFIED",
+              "domain": "x45722a4.x1ae89fe.edu",
+              "domainStatus": "ACTIVE",
+              "verifiedAt": "2026-06-11T17:01:03Z"
+            }
+          ],
+          "status": "VERIFIED"
+        },
+        "empty": false,
+        "organization": {
+          "consentSentTo": "user-cdab4a@example.invalid",
+          "consentStatus": "1",
+          "organizationName": "Org-7d08cc",
+          "status": "VERIFIED"
+        }
+      }
+    },
+    "headers": {
+      "Access-Control-Allow-Methods": "GET, POST",
+      "Cache-Control": "no-store, no-cache,no-store,private,must-revalidate,max-stale=0,post-check=0,pre-check=0",
+      "Connection": "keep-alive",
+      "Content-Security-Policy": "frame-ancestors 'self';manifest-src 'self';",
+      "Content-Type": "application/json",
+      "Date": "Fri, 03 Jul 2026 01:23:56 GMT",
+      "Expires": "Thu, 01 Jan 1970 00:00:00 GMT",
+      "Pragma": "no-cache, no-cache",
+      "Referrer-Policy": "origin-when-cross-origin",
+      "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+      "Transfer-Encoding": "chunked",
+      "Vary": "Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "X-API-Version": "2.0.0",
+      "X-Content-Type-Options": "nosniff",
+      "X-Frame-Options": "DENY",
+      "X-XSS-Protection": "0; mode=block"
+    },
+    "status": 200
+  }
+}
