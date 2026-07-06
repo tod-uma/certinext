@@ -61,56 +61,71 @@ _CATEGORY_DATA = {
 # ---------------------------------------------------------------------------
 
 class TestProduct:
-    """Product exposes expected properties."""
+    """Product exposes expected attributes."""
 
     _DATA = {"productCode": "842", "productName": "DV SSL Certificate", "price": "50.00", "productTypeID": "13"}
 
     def test_product_code(self):
         """product_code reads productCode."""
-        p = Product(self._DATA)
+        p = Product.model_validate(self._DATA)
         assert p.product_code == "842"
 
     def test_product_name(self):
         """product_name reads productName."""
-        p = Product(self._DATA)
+        p = Product.model_validate(self._DATA)
         assert p.product_name == "DV SSL Certificate"
 
     def test_price(self):
         """price reads price."""
-        p = Product(self._DATA)
+        p = Product.model_validate(self._DATA)
         assert p.price == "50.00"
 
     def test_product_type_id(self):
         """product_type_id reads productTypeID."""
-        p = Product(self._DATA)
+        p = Product.model_validate(self._DATA)
         assert p.product_type_id == "13"
 
     def test_subscription_price_returns_dict(self):
         """subscription_price returns a dict (empty if missing)."""
-        p = Product(self._DATA)
+        p = Product.model_validate(self._DATA)
         assert p.subscription_price == {}
 
     def test_subscription_price_when_present(self):
         """subscription_price returns the dict value when present."""
-        p = Product({"subscriptionPrice": {"annual": "45.00"}})
+        p = Product.model_validate({"subscriptionPrice": {"annual": "45.00"}})
         assert p.subscription_price == {"annual": "45.00"}
+
+    def test_subscription_price_non_dict_coerced_to_empty(self):
+        """subscription_price coerces a non-dict wire value to {} (0.3.x behavior)."""
+        p = Product.model_validate({"subscriptionPrice": "n/a"})
+        assert p.subscription_price == {}
 
     def test_missing_fields_return_none(self):
         """Missing fields return None."""
-        p = Product({})
+        p = Product.model_validate({})
         assert p.product_code is None
         assert p.product_name is None
         assert p.price is None
         assert p.product_type_id is None
 
+    def test_numeric_product_code_coerced_to_str(self):
+        """A numeric productCode is coerced to string, not a ValidationError (ADR 0005)."""
+        p = Product.model_validate({"productCode": 842})
+        assert p.product_code == "842"
+
+    def test_unknown_fields_retained(self):
+        """Unknown wire keys are retained, never fatal (ADR 0005)."""
+        p = Product.model_validate({"productCode": "842", "newVendorField": "x"})
+        assert p.as_dict()["newVendorField"] == "x"
+
     def test_as_dict_returns_raw_data(self):
         """as_dict() returns the exact dict passed at construction."""
-        p = Product(self._DATA)
+        p = Product.model_validate(self._DATA)
         assert p.as_dict() is self._DATA
 
     def test_repr_contains_code_and_name(self):
         """repr() includes product_code and product_name."""
-        p = Product(self._DATA)
+        p = Product.model_validate(self._DATA)
         r = repr(p)
         assert "842" in r
         assert "DV SSL Certificate" in r
@@ -121,48 +136,53 @@ class TestProduct:
 # ---------------------------------------------------------------------------
 
 class TestProductCategory:
-    """ProductCategory nests Product objects and exposes expected properties."""
+    """ProductCategory nests Product objects and exposes expected attributes."""
 
     def test_category_name(self):
         """category_name reads categoryName."""
-        cat = ProductCategory(_CATEGORY_DATA)
+        cat = ProductCategory.model_validate(_CATEGORY_DATA)
         assert cat.category_name == "SSL/TLS Certificates"
 
     def test_category_id(self):
         """category_id reads categoryID."""
-        cat = ProductCategory(_CATEGORY_DATA)
+        cat = ProductCategory.model_validate(_CATEGORY_DATA)
         assert cat.category_id == "3"
 
     def test_currency_type(self):
         """currency_type reads currencyType."""
-        cat = ProductCategory(_CATEGORY_DATA)
+        cat = ProductCategory.model_validate(_CATEGORY_DATA)
         assert cat.currency_type == "USD"
 
     def test_products_is_list_of_product(self):
         """products is a list of Product instances."""
-        cat = ProductCategory(_CATEGORY_DATA)
+        cat = ProductCategory.model_validate(_CATEGORY_DATA)
         assert len(cat.products) == 2
         assert all(isinstance(p, Product) for p in cat.products)
 
     def test_products_have_correct_codes(self):
         """Products in the category have the correct product codes."""
-        cat = ProductCategory(_CATEGORY_DATA)
+        cat = ProductCategory.model_validate(_CATEGORY_DATA)
         codes = [p.product_code for p in cat.products]
         assert codes == ["842", "843"]
 
     def test_products_empty_when_no_products_key(self):
         """products is empty when the products key is missing."""
-        cat = ProductCategory({"categoryName": "Empty"})
+        cat = ProductCategory.model_validate({"categoryName": "Empty"})
         assert cat.products == []
+
+    def test_products_skips_non_dict_entries(self):
+        """Non-dict entries in the products list are dropped (0.3.x behavior)."""
+        cat = ProductCategory.model_validate({"products": [{"productCode": "1"}, "junk", None]})
+        assert len(cat.products) == 1
 
     def test_as_dict_returns_raw_data(self):
         """as_dict() returns the exact dict passed at construction."""
-        cat = ProductCategory(_CATEGORY_DATA)
+        cat = ProductCategory.model_validate(_CATEGORY_DATA)
         assert cat.as_dict() is _CATEGORY_DATA
 
     def test_repr_includes_category_name_and_count(self):
         """repr() includes category name and product count."""
-        cat = ProductCategory(_CATEGORY_DATA)
+        cat = ProductCategory.model_validate(_CATEGORY_DATA)
         r = repr(cat)
         assert "SSL/TLS" in r
         assert "2" in r
@@ -173,52 +193,57 @@ class TestProductCategory:
 # ---------------------------------------------------------------------------
 
 class TestCustomField:
-    """CustomField exposes expected properties."""
+    """CustomField exposes expected attributes."""
 
     def test_field_name_from_field_name_key(self):
         """field_name reads fieldName."""
-        f = CustomField({"fieldName": "purchaseOrderNumber", "required": True})
+        f = CustomField.model_validate({"fieldName": "purchaseOrderNumber", "required": True})
         assert f.field_name == "purchaseOrderNumber"
 
     def test_field_name_falls_back_to_name(self):
         """field_name falls back to 'name' when fieldName is absent."""
-        f = CustomField({"name": "poNumber"})
+        f = CustomField.model_validate({"name": "poNumber"})
         assert f.field_name == "poNumber"
 
     def test_display_name_from_display_name_key(self):
         """display_name reads displayName."""
-        f = CustomField({"displayName": "PO Number"})
+        f = CustomField.model_validate({"displayName": "PO Number"})
         assert f.display_name == "PO Number"
 
     def test_display_name_falls_back_to_label(self):
         """display_name falls back to 'label' when displayName is absent."""
-        f = CustomField({"label": "PO Number"})
+        f = CustomField.model_validate({"label": "PO Number"})
         assert f.display_name == "PO Number"
 
     def test_required_true(self):
         """required is True when the field is marked required."""
-        f = CustomField({"required": True})
+        f = CustomField.model_validate({"required": True})
         assert f.required is True
 
     def test_required_false(self):
         """required is False when the field is not required."""
-        f = CustomField({"required": False})
+        f = CustomField.model_validate({"required": False})
         assert f.required is False
 
     def test_required_false_when_missing(self):
         """required is False when the key is absent."""
-        f = CustomField({})
+        f = CustomField.model_validate({})
         assert f.required is False
+
+    def test_required_string_flags(self):
+        """required coerces the vendor's "1"/"0" string flags."""
+        assert CustomField.model_validate({"required": "1"}).required is True
+        assert CustomField.model_validate({"required": "0"}).required is False
 
     def test_as_dict_returns_raw_data(self):
         """as_dict() returns the exact dict passed at construction."""
         data = {"fieldName": "x", "required": True}
-        f = CustomField(data)
+        f = CustomField.model_validate(data)
         assert f.as_dict() is data
 
     def test_repr_contains_field_name(self):
         """repr() includes field_name."""
-        f = CustomField({"fieldName": "myField"})
+        f = CustomField.model_validate({"fieldName": "myField"})
         assert "myField" in repr(f)
 
 
