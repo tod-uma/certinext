@@ -559,17 +559,25 @@ class TestDomainAccessorGetPendingDcv:
         result = accessor.get_pending_dcv()
         assert all(isinstance(d, Domain) for d in result)
 
-    def test_calls_list_with_no_server_side_filters(self, accessor: DomainAccessor, mock_client: MagicMock):
-        """get_pending_dcv() fetches all domains without server-side status filters.
+    def test_filters_domain_status_server_side_only(self, accessor: DomainAccessor, mock_client: MagicMock):
+        """get_pending_dcv() sends domainStatus=ACTIVE server-side and no dcvStatus (R02).
 
-        The API returns 400 when domainStatus and dcvStatus are combined, so
-        filtering is done client-side via needs_dcv instead.
+        The dcvStatus half stays client-side deliberately: needs_dcv means
+        anything other than VERIFIED, which the server cannot express —
+        dcvStatus=EXPIRED still 400s (vendor #135290) and unknown future
+        statuses would be silently dropped by an allow-list filter.
         """
         mock_client.get.return_value = []
         accessor.get_pending_dcv()
         mock_client.get.assert_called_once_with(
             "/api/certinext/v2/domains",
-            params={"sortBy": "domainName", "sortDir": "asc", "limit": 200, "offset": 0},
+            params={
+                "sortBy": "domainName",
+                "sortDir": "asc",
+                "limit": 200,
+                "domainStatus": "ACTIVE",
+                "offset": 0,
+            },
         )
 
 

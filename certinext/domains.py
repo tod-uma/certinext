@@ -301,14 +301,19 @@ class DomainAccessor:
     def get_pending_dcv(self, search: str | None = None, pattern: str | None = None) -> list[Domain]:
         """Return all active domains that have not yet completed DCV verification.
 
-        Fetches all domains and filters client-side using :attr:`Domain.needs_dcv`.
+        Fetches with a server-side ``domainStatus=ACTIVE`` filter, then applies
+        :attr:`Domain.needs_dcv` client-side for the DCV-status half.
 
-        **Note:** Combining the API ``domainStatus`` and ``dcvStatus`` filter
-        parameters originally returned a 400 (reported 2026-05-20), which is why
-        this fetches everything and filters client-side. Probe R02 confirmed the
-        combination now works in both environments (2026-07-02, GitLab issue #6);
-        the switch to server-side filtering is planned for the 1.0 refactor
-        (phase 1) rather than a 0.3.x behavior change.
+        **Note (R02 partial switch, 2026-07-06):** Probe R02 confirmed the
+        combined ``domainStatus``+``dcvStatus`` filter is accepted in both
+        environments (2026-07-02, GitLab issue #6), so ``domainStatus=ACTIVE``
+        moved server-side — it exactly matches the first conjunct of
+        :attr:`~Domain.needs_dcv`. The ``dcvStatus`` half stays client-side
+        deliberately: ``needs_dcv`` means *anything other than VERIFIED*, and
+        the server cannot express that — ``dcvStatus=EXPIRED`` still returns
+        400 (vendor #135290 open), and unknown future statuses would be
+        silently excluded from an allow-list filter. Revisit when issue #6
+        settles the ``DcvStatus`` enum membership.
 
         Args:
             search: Optional search string passed to the API. See :meth:`get_list`.
@@ -321,7 +326,7 @@ class DomainAccessor:
             re.error: If ``pattern`` is not a valid regular expression.
             CertiNextAPIError: On a non-2xx API response. Provides ``.status_code`` and ``.body``.
         """
-        domains = self.get_list(search=search, pattern=pattern)
+        domains = self.get_list(search=search, domain_status="ACTIVE", pattern=pattern)
         return [d for d in domains if d.needs_dcv]
 
     def get(self, domain_id_or_name: str) -> Domain:

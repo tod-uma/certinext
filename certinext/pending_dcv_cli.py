@@ -76,10 +76,10 @@ def main() -> None:
         apply_sandbox(args)
         sess = build_session(args)
 
-        # get_pending_dcv() fetches the full domain list and filters client-side
-        # (needs_dcv + the optional pattern). The combined domainStatus+dcvStatus
-        # server-side filter that once 400'd now works in both envs (probe R02,
-        # 2026-07-02, issue #6); the switch is planned for the 1.0 refactor.
+        # get_pending_dcv() filters domainStatus=ACTIVE server-side (R02) and
+        # applies needs_dcv (dcvStatus != VERIFIED) + the optional pattern
+        # client-side. dcvStatus stays client-side until issue #6 settles the
+        # enum: EXPIRED still 400s server-side (vendor #135290).
         domains = sess.domain.get_pending_dcv(pattern=args.pattern)
         _show_domains(domains, args.json)
     except KeyboardInterrupt:
