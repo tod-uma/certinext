@@ -173,6 +173,21 @@ def test_save_defaults_remove(cfg_file: Path) -> None:
     assert merged == {"requestor_name": "Jane"}
 
 
+def test_save_defaults_preserves_comments(cfg_file: Path) -> None:
+    """Comments and existing keys in a hand-written file survive a save (tomlkit)."""
+    cfg_file.write_text(
+        "# my hand-written notes\n"
+        '[defaults]\ntype = "ov"  # OV is what we usually want\n',
+        encoding="utf-8",
+    )
+    save_defaults({"requestor_name": "Jane"}, None)
+    text = cfg_file.read_text(encoding="utf-8")
+    assert "# my hand-written notes" in text
+    assert "# OV is what we usually want" in text
+    merged, _ = config_defaults(None)
+    assert merged == {"cert_type": "ov", "requestor_name": "Jane"}
+
+
 def test_save_defaults_rejects_unknown_key(cfg_file: Path) -> None:
     """Saving an unrecognised key raises ConfigError."""
     with pytest.raises(ConfigError, match="Not a recognised default"):

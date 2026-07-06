@@ -22,7 +22,7 @@ import keyring.backends.fail
 import pytest
 from keyring.errors import NoKeyringError
 
-from certinext._cli import _resolve
+from certinext._cli import _require_credential
 from certinext._keyring import in_wsl, keyring_available, no_keyring_help
 from certinext.setup_keyring_cli import main as setup_keyring_main
 
@@ -131,19 +131,17 @@ def test_setup_keyring_warns_on_sandbox_with_profile(
     assert ("certinext-prod", "CERTINEXT_CLIENT_ID", "acct123") in stored
 
 
-def test_resolve_non_tty_without_backend(monkeypatch: pytest.MonkeyPatch) -> None:
-    """_resolve's non-TTY error includes the keyring help when no backend exists."""
-    monkeypatch.delenv("CERTINEXT_CLIENT_ID", raising=False)
+def test_require_credential_non_tty_without_backend(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The non-TTY error includes the keyring help when no backend exists."""
     monkeypatch.setattr("certinext._cli.keyring_available", lambda: False)
     monkeypatch.setattr("certinext._cli.sys.stdin.isatty", lambda: False)
     with pytest.raises(RuntimeError, match="no usable\\s+OS keyring backend"):
-        _resolve(None, "CERTINEXT_CLIENT_ID", "CertiNext account number")
+        _require_credential(None, "CERTINEXT_CLIENT_ID", "CertiNext account number")
 
 
-def test_resolve_non_tty_with_backend(monkeypatch: pytest.MonkeyPatch) -> None:
-    """_resolve's non-TTY error keeps the short keyring suggestion when a backend exists."""
-    monkeypatch.delenv("CERTINEXT_CLIENT_ID", raising=False)
+def test_require_credential_non_tty_with_backend(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The non-TTY error keeps the short keyring suggestion when a backend exists."""
     monkeypatch.setattr("certinext._cli.keyring_available", lambda: True)
     monkeypatch.setattr("certinext._cli.sys.stdin.isatty", lambda: False)
     with pytest.raises(RuntimeError, match="store the credential in the keyring"):
-        _resolve(None, "CERTINEXT_CLIENT_ID", "CertiNext account number")
+        _require_credential(None, "CERTINEXT_CLIENT_ID", "CertiNext account number")
