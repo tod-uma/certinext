@@ -10,17 +10,19 @@ Python library and CLI scripts for managing your [CertiNext](https://us.certinex
 - [Installation](#installation)
 - [Credentials](#credentials)
 - [Using the CLI tools](#using-the-cli-tools)
-  - [certinext-setup-keyring](#certinext-setup-keyring)
-  - [certinext-setup-defaults](#certinext-setup-defaults)
-  - [certinext-accounts](#certinext-accounts)
-  - [certinext-domains](#certinext-domains)
-  - [certinext-ledger](#certinext-ledger)
-  - [certinext-list-certificates](#certinext-list-certificates)
-  - [certinext-pending-dcv](#certinext-pending-dcv)
-  - [certinext-domain-cert-count](#certinext-domain-cert-count)
-  - [certinext-issue-cert](#certinext-issue-cert)
-  - [certinext-parent-dcv-status](#certinext-parent-dcv-status)
-  - [certinext-healthcheck](#certinext-healthcheck)
+  - [Old command names (aliases)](#old-command-names-aliases)
+  - [Shell completion](#shell-completion)
+  - [certinext setup keyring](#certinext-setup-keyring)
+  - [certinext setup defaults](#certinext-setup-defaults)
+  - [certinext accounts](#certinext-accounts)
+  - [certinext domains](#certinext-domains)
+  - [certinext ledger](#certinext-ledger)
+  - [certinext list-certificates](#certinext-list-certificates)
+  - [certinext pending-dcv](#certinext-pending-dcv)
+  - [certinext domain-cert-count](#certinext-domain-cert-count)
+  - [certinext issue-cert](#certinext-issue-cert)
+  - [certinext parent-dcv-status](#certinext-parent-dcv-status)
+  - [certinext healthcheck](#certinext-healthcheck)
 - [Log output](#log-output)
 - [Python library](#python-library)
 - [Examples](#examples)
@@ -40,17 +42,17 @@ Instructions below default to [uv](https://docs.astral.sh/uv/)
 ([Install uv](#install-uv) if you don't have it yet).
 You don't need Python installed first — uv downloads and manages Python for you.
 
-To install the `certinext-*` CLI tools (issuing certificates, listing
+To install the `certinext` CLI (issuing certificates, listing
 domains, etc.):
 
 ```bash
 uv tool install "certinext[csr,keyring]"
 ```
 
-That's the whole install — the commands now work from any terminal. (If a
+That's the whole install — the command now works from any terminal. (If a
 command isn't found, run `uv tool update-shell` and open a new terminal.)
 The two extras are recommended for CLI use: `csr` enables CSR parsing for
-`certinext-issue-cert`, and `keyring` lets the commands store and read
+`certinext issue-cert`, and `keyring` lets the commands store and read
 credentials in the OS keychain.
 
 Everything else — installing uv itself, library use, pre-releases, the UMS
@@ -153,7 +155,7 @@ pip install --pre certinext        # pre-release
 ```
 
 **Optional extras** — add any of `csr`, `keyring`, or `dns` after the fact,
-e.g. the `keyring` extra needed by `certinext-setup-keyring`:
+e.g. the `keyring` extra needed by `certinext setup keyring`:
 
 ```bash
 pip install "certinext[keyring]"
@@ -200,7 +202,7 @@ keychain (Windows Credential Manager on Windows, Keychain on macOS,
 libsecret/SecretService on Linux):
 
 ```bash
-certinext-setup-keyring
+certinext setup keyring
 ```
 
 This needs the `keyring` extra. It's included in the recommended
@@ -220,15 +222,15 @@ Use `--profile NAME` to store multiple credential sets (e.g. different
 accounts or environments):
 
 ```bash
-certinext-setup-keyring --profile prod
+certinext setup keyring --profile prod
 ```
 
 Select a profile at runtime with `--profile` or the `CERTINEXT_PROFILE`
 environment variable:
 
 ```bash
-certinext-domains --profile prod list
-CERTINEXT_PROFILE=prod certinext-pending-dcv
+certinext domains --profile prod list
+CERTINEXT_PROFILE=prod certinext pending-dcv
 ```
 
 #### Credential resolution order
@@ -248,7 +250,7 @@ All scripts resolve credentials in this priority order:
 #### WSL and headless Linux
 
 On Linux, `keyring` needs a running Secret Service daemon (gnome-keyring or
-KWallet). WSL and headless servers usually have none, so `certinext-setup-keyring`
+KWallet). WSL and headless servers usually have none, so `certinext setup keyring`
 reports that no usable OS keyring backend was found. Options:
 
 - **Skip the keyring.** All scripts fall back to the `CERTINEXT_CLIENT_ID` and
@@ -265,7 +267,7 @@ reports that no usable OS keyring backend was found. Options:
   pip install keyring-pybridge
   export PYTHON_KEYRING_BACKEND=keyring_pybridge.PyBridgeKeyring
   export KEYRING_PROPERTY_PYTHON='C:\path\to\python.exe'
-  certinext-setup-keyring
+  certinext setup keyring
   ```
 
   Add the two `export` lines to your shell profile so every session uses the
@@ -280,48 +282,48 @@ reports that no usable OS keyring backend was found. Options:
 OV and EV certificate orders normally pause at a manual approval step at
 the CA before issuance. If your organization has consent configured, an
 **Organization Consent Token** (prevetting token) lets the CA auto-approve
-the order — useful when you want `certinext-issue-cert` to run end-to-end
+the order — useful when you want `certinext issue-cert` to run end-to-end
 without a human approving each order.
 
 Find it in the CertiNext portal under **Organization Management →
 Organization Consent / Consent Tokens** for the target organization.
 
-**Recommended: store in the keyring once** (prompted by `certinext-setup-keyring`):
+**Recommended: store in the keyring once** (prompted by `certinext setup keyring`):
 
 ```bash
-certinext-setup-keyring   # prompts for client ID, secret, and prevetting token
+certinext setup keyring   # prompts for client ID, secret, and prevetting token
 ```
 
-`certinext-issue-cert` then resolves the token automatically from the keyring
+`certinext issue-cert` then resolves the token automatically from the keyring
 (or the `CERTINEXT_PREVETTING_TOKEN` environment variable) — no flag needed per run.
 
 To pass it explicitly for a single run:
 
 ```bash
-certinext-issue-cert example.com.csr --type ov --org-id 8921215 \
+certinext issue-cert example.com.csr --type ov --org-id 8921215 \
   --prevetting-token TOKEN
 ```
 
 The token is never written to the config file by `--save-defaults` or
-`certinext-setup-defaults` — use the keyring or env var for persistent storage.
+`certinext setup defaults` — use the keyring or env var for persistent storage.
 
 ### Storing issue-cert defaults (optional)
 
-Store the values `certinext-issue-cert` needs on every run — requestor
+Store the values `certinext issue-cert` needs on every run — requestor
 identity, certificate type, org ID, validity — so that issuing a certificate
 is just:
 
 ```bash
-certinext-issue-cert new.csr
+certinext issue-cert new.csr
 ```
 
 Run the interactive setup once:
 
 ```bash
-certinext-setup-defaults
+certinext setup defaults
 ```
 
-Or pass `--save-defaults` on any `certinext-issue-cert` run to capture the
+Or pass `--save-defaults` on any `certinext issue-cert` run to capture the
 values you used. Or hand-edit the config file
 (`~/.config/certinext/config.toml` on Linux/macOS,
 `%APPDATA%\certinext\config.toml` on Windows, override with
@@ -361,10 +363,10 @@ pass `--sandbox` (or `--base-url`) on every run:
 - `sandbox = true` — the profile defaults to the sandbox endpoints.
 - `base_url` / `token_url` — the profile defaults to an explicit endpoint.
 
-With a stored endpoint, plain `certinext-domains --profile sandbox` (or
+With a stored endpoint, plain `certinext domains --profile sandbox` (or
 `CERTINEXT_PROFILE=sandbox`) hits the sandbox API directly. A command-line
 `--sandbox` or `--base-url` still overrides the stored value for that run.
-Set these with `certinext-setup-defaults` (see below) or by hand-editing.
+Set these with `certinext setup defaults` (see below) or by hand-editing.
 
 CERTInext runs several regions. Non-US customers can point a profile at theirs —
 for example India production:
@@ -378,12 +380,12 @@ token_url = "https://api.certinext.io/oauth/token"
 The known endpoints (`certinext.KNOWN_API_ENDPOINTS`, from the OpenAPI `servers`
 list) are: US production `https://us-api.certinext.io`, US sandbox
 `https://sandbox-us-api.certinext.io`, India production `https://api.certinext.io`,
-plus `qa-api` and `demo-api`. `certinext-setup-defaults` offers these as a menu.
+plus `qa-api` and `demo-api`. `certinext setup defaults` offers these as a menu.
 
 Values resolve in priority order: explicit CLI argument → environment
 variable → `[profiles.NAME]` → `[defaults]` → built-in default. Secrets
 (client secret, prevetting token) are never stored here — use
-`certinext-setup-keyring` for credentials.
+`certinext setup keyring` for credentials.
 
 ### Sandbox environment
 
@@ -392,18 +394,18 @@ testing API calls without affecting production data.  Store sandbox credentials
 once with:
 
 ```bash
-certinext-setup-keyring --sandbox
+certinext setup keyring --sandbox
 ```
 
 Then pass `--sandbox` to any CLI command to target the sandbox:
 
 ```bash
-certinext-accounts --sandbox
-certinext-domains --sandbox list
-certinext-ledger --sandbox
-certinext-list-certificates --sandbox
-certinext-pending-dcv --sandbox
-certinext-domain-cert-count --sandbox
+certinext accounts --sandbox
+certinext domains --sandbox list
+certinext ledger --sandbox
+certinext list-certificates --sandbox
+certinext pending-dcv --sandbox
+certinext domain-cert-count --sandbox
 ```
 
 `--sandbox` is a shortcut that sets `--base-url` and `--token-url` to the
@@ -413,8 +415,8 @@ To avoid passing `--sandbox` every time, record it on a profile so the profile
 targets the sandbox by default:
 
 ```bash
-certinext-setup-defaults --profile srv-acct --sandbox   # stores sandbox = true
-certinext-domains --profile srv-acct list               # hits the sandbox API
+certinext setup defaults --profile srv-acct --sandbox   # stores sandbox = true
+certinext domains --profile srv-acct list               # hits the sandbox API
 ```
 
 See [Storing issue-cert defaults](#storing-issue-cert-defaults-optional) for
@@ -429,7 +431,7 @@ are safe to include in CI environments that lack a keyring.
 **Local development** — store credentials in the keyring once:
 
 ```bash
-certinext-setup-keyring --sandbox
+certinext setup keyring --sandbox
 pytest -m integration
 ```
 
@@ -454,27 +456,60 @@ from):
 
 ```bash
 uv tool install "certinext[csr,keyring]"
-certinext-setup-keyring      # store API credentials in the OS keychain (once)
-certinext-setup-defaults     # store requestor/cert defaults (once, optional)
-certinext-issue-cert example.com.csr --cert-out cert.pem --fullchain-out fullchain.pem
+certinext setup keyring      # store API credentials in the OS keychain (once)
+certinext setup defaults     # store requestor/cert defaults (once, optional)
+certinext issue-cert example.com.csr --cert-out cert.pem --fullchain-out fullchain.pem
 ```
 
-Each command is documented below.
+Everything is one `certinext` application with subcommands; run
+`certinext --help` for the full tree. Each subcommand is documented below.
 
-### certinext-setup-keyring
+### Old command names (aliases)
 
-`certinext-setup-keyring` stores CertiNext API credentials in the OS keychain
+Before 1.0 each operation was a separate `certinext-*` script. Those names
+still work — each one is an alias that pre-selects its subcommand, with
+identical flags, output, and exit codes — and they stay installed until at
+least 2.0. New scripts and documentation should use the subcommand form.
+
+| Old script | New subcommand |
+| --- | --- |
+| `certinext-setup-keyring` | `certinext setup keyring` |
+| `certinext-setup-defaults` | `certinext setup defaults` |
+| `certinext-accounts` | `certinext accounts` |
+| `certinext-domains` | `certinext domains` |
+| `certinext-ledger` | `certinext ledger` |
+| `certinext-list-certificates` | `certinext list-certificates` |
+| `certinext-pending-dcv` | `certinext pending-dcv` |
+| `certinext-domain-cert-count` | `certinext domain-cert-count` |
+| `certinext-issue-cert` | `certinext issue-cert` |
+| `certinext-parent-dcv-status` | `certinext parent-dcv-status` |
+| `certinext-healthcheck` | `certinext healthcheck` |
+
+### Shell completion
+
+The app can install tab completion for bash, zsh, fish, and PowerShell:
+
+```bash
+certinext --install-completion   # then open a new terminal
+```
+
+Completion covers subcommand names, flags, and enum values (e.g.
+`--type dv|ov|ev`).
+
+### certinext setup keyring
+
+`certinext setup keyring` stores CertiNext API credentials in the OS keychain
 interactively. Run it once before using the other commands.
 
 ```bash
 # Store credentials for the default profile
-certinext-setup-keyring
+certinext setup keyring
 
 # Store credentials for a named profile
-certinext-setup-keyring --profile prod
+certinext setup keyring --profile prod
 
 # Store credentials for the sandbox environment
-certinext-setup-keyring --sandbox
+certinext setup keyring --sandbox
 ```
 
 The script prompts for your account number, client secret, and (optionally)
@@ -486,16 +521,16 @@ This command stores **only credentials, not a URL** — `--sandbox` here is just
 a shortcut for `--profile sandbox`. If you pass both `--sandbox` and an explicit
 `--profile NAME`, the `--sandbox` flag is ignored (the profile wins) and the
 script warns you. To make a profile *use* the sandbox endpoint, set that on the
-profile with `certinext-setup-defaults --profile NAME --sandbox`.
+profile with `certinext setup defaults --profile NAME --sandbox`.
 
-### certinext-setup-defaults
+### certinext setup defaults
 
-`certinext-setup-defaults` interactively stores defaults for
-`certinext-issue-cert` in the config file, so future issuance runs only need
+`certinext setup defaults` interactively stores defaults for
+`certinext issue-cert` in the config file, so future issuance runs only need
 the CSR.
 
 If API credentials are not yet stored, the script offers to run
-`certinext-setup-keyring` first — credentials are needed for the org picker
+`certinext setup keyring` first — credentials are needed for the org picker
 described below.
 
 **API endpoint first.** The script begins by asking which endpoint this profile
@@ -532,7 +567,7 @@ If credentials are available, it then offers a **product** menu fetched from the
 Catalog API, filtered to the type you chose and sorted with wildcard products
 last. Pick one to store as the profile's default product code (sent as
 `X-Product-Code` at issue time), or choose *API default* to let the server pick.
-`certinext-issue-cert --product CODE` overrides the stored default per run.
+`certinext issue-cert --product CODE` overrides the stored default per run.
 
 For OV and EV orders, if API credentials are available the script fetches your
 organizations and presents them as a numbered menu filtered to pre-vetted orgs,
@@ -548,30 +583,30 @@ the file format and resolution order.
 
 ```bash
 # Edit the [defaults] section
-certinext-setup-defaults
+certinext setup defaults
 
 # Edit a profile section ([profiles.prod])
-certinext-setup-defaults --profile prod
+certinext setup defaults --profile prod
 
 # Edit the sandbox profile (and store sandbox = true on it)
-certinext-setup-defaults --sandbox
+certinext setup defaults --sandbox
 
 # Make a named profile target the sandbox endpoint by default
-certinext-setup-defaults --profile srv-acct --sandbox
+certinext setup defaults --profile srv-acct --sandbox
 ```
 
 Each prompt shows the currently stored value — press Enter to keep it, or
 enter `-` to clear it.
 
-### certinext-accounts
+### certinext accounts
 
-`certinext-accounts` shows the current account identity, billing groups, and
+`certinext accounts` shows the current account identity, billing groups, and
 pre-vetted organizations.
 
 ```bash
-certinext-accounts
-certinext-accounts --sandbox
-certinext-accounts --json
+certinext accounts
+certinext accounts --sandbox
+certinext accounts --json
 ```
 
 | Argument | Description |
@@ -580,9 +615,9 @@ certinext-accounts --json
 
 ---
 
-### certinext-domains
+### certinext domains
 
-`certinext-domains` is a command-line interface for the domains API.
+`certinext domains` is a command-line interface for the domains API.
 
 #### Common arguments
 
@@ -609,11 +644,11 @@ List all domains.
 
 ```bash
 # credentials from keychain
-certinext-domains list
-certinext-domains list --offset 50 --limit 25
+certinext domains list
+certinext domains list --offset 50 --limit 25
 
 # credentials explicit
-certinext-domains --account-number ACCT --client-secret SECRET list
+certinext domains --account-number ACCT --client-secret SECRET list
 ```
 
 #### get
@@ -621,8 +656,8 @@ certinext-domains --account-number ACCT --client-secret SECRET list
 Get a single domain by name or ID.
 
 ```bash
-certinext-domains get maine.edu
-certinext-domains get vuxwZgEXWWFXQQWC-...
+certinext domains get maine.edu
+certinext domains get vuxwZgEXWWFXQQWC-...
 ```
 
 #### create
@@ -630,7 +665,7 @@ certinext-domains get vuxwZgEXWWFXQQWC-...
 Create a new domain. Additional API fields can be passed as `KEY=VALUE` pairs.
 
 ```bash
-certinext-domains create newdomain.example.com
+certinext domains create newdomain.example.com
 ```
 
 #### deactivate
@@ -638,8 +673,8 @@ certinext-domains create newdomain.example.com
 Deactivate a domain by ID. Prompts for confirmation unless `-y` is passed.
 
 ```bash
-certinext-domains deactivate DOMAIN_ID
-certinext-domains deactivate DOMAIN_ID -y
+certinext domains deactivate DOMAIN_ID
+certinext domains deactivate DOMAIN_ID -y
 ```
 
 #### get-dcv
@@ -647,7 +682,7 @@ certinext-domains deactivate DOMAIN_ID -y
 Show current DCV status for a domain.
 
 ```bash
-certinext-domains get-dcv DOMAIN_ID
+certinext domains get-dcv DOMAIN_ID
 ```
 
 #### verify-dcv
@@ -655,7 +690,7 @@ certinext-domains get-dcv DOMAIN_ID
 Trigger DCV verification for a domain.
 
 ```bash
-certinext-domains verify-dcv DOMAIN_ID
+certinext domains verify-dcv DOMAIN_ID
 ```
 
 #### change-dcv-method
@@ -663,7 +698,7 @@ certinext-domains verify-dcv DOMAIN_ID
 Change the DCV method for a domain. Accepted values: `DNS-TXT`, `HTTP-URL`.
 
 ```bash
-certinext-domains change-dcv-method DOMAIN_ID DNS-TXT
+certinext domains change-dcv-method DOMAIN_ID DNS-TXT
 ```
 
 #### last-dcv-attempt
@@ -671,7 +706,7 @@ certinext-domains change-dcv-method DOMAIN_ID DNS-TXT
 Show the most recent DCV attempt for a domain.
 
 ```bash
-certinext-domains last-dcv-attempt DOMAIN_ID
+certinext domains last-dcv-attempt DOMAIN_ID
 ```
 
 #### dcv-attempt-history
@@ -679,7 +714,7 @@ certinext-domains last-dcv-attempt DOMAIN_ID
 Show the full DCV attempt history for a domain.
 
 ```bash
-certinext-domains dcv-attempt-history DOMAIN_ID
+certinext domains dcv-attempt-history DOMAIN_ID
 ```
 
 </details>
@@ -689,12 +724,12 @@ certinext-domains dcv-attempt-history DOMAIN_ID
 Add `--json` before the subcommand to get raw JSON instead of the default tabular output. Useful for piping into `jq`:
 
 ```bash
-certinext-domains --json list | jq '.[] | .domainName'
+certinext domains --json list | jq '.[] | .domainName'
 ```
 
-### certinext-ledger
+### certinext ledger
 
-`certinext-ledger` shows the account transaction history (all debits, credits,
+`certinext ledger` shows the account transaction history (all debits, credits,
 and running balance) with automatic pagination.
 
 #### Arguments
@@ -707,16 +742,16 @@ and running balance) with automatic pagination.
 #### Examples
 
 ```bash
-certinext-ledger
-certinext-ledger --last 20
-certinext-ledger --sandbox --json
+certinext ledger
+certinext ledger --last 20
+certinext ledger --sandbox --json
 ```
 
 ---
 
-### certinext-list-certificates
+### certinext list-certificates
 
-`certinext-list-certificates` lists all SSL/TLS certificate orders from the
+`certinext list-certificates` lists all SSL/TLS certificate orders from the
 orders report. Use `--status` to filter by lifecycle status.
 
 #### Arguments
@@ -729,18 +764,18 @@ orders report. Use `--status` to filter by lifecycle status.
 #### Examples
 
 ```bash
-certinext-list-certificates
-certinext-list-certificates --status issued
-certinext-list-certificates --status expired
-certinext-list-certificates --status pending-dcv
-certinext-list-certificates --sandbox --json
+certinext list-certificates
+certinext list-certificates --status issued
+certinext list-certificates --status expired
+certinext list-certificates --status pending-dcv
+certinext list-certificates --sandbox --json
 ```
 
 ---
 
-### certinext-pending-dcv
+### certinext pending-dcv
 
-`certinext-pending-dcv` lists every active domain that has not yet completed
+`certinext pending-dcv` lists every active domain that has not yet completed
 DCV verification. It is a quick read-only diagnostic — no changes are made to
 any domain.
 
@@ -761,24 +796,24 @@ any domain.
 
 ```bash
 # Credentials from keychain (no flags needed after setup)
-certinext-pending-dcv
+certinext pending-dcv
 
 # Use a named profile
-certinext-pending-dcv --profile prod
+certinext pending-dcv --profile prod
 
 # Filter to a specific subdomain pattern
-certinext-pending-dcv --pattern ".*\.maine\.edu"
+certinext pending-dcv --pattern ".*\.maine\.edu"
 
 # Raw JSON output for scripting
-certinext-pending-dcv --json | jq '.[] | .domainName'
+certinext pending-dcv --json | jq '.[] | .domainName'
 
 # Credentials from environment variables
-CERTINEXT_CLIENT_ID=ACCT CERTINEXT_CLIENT_SECRET=SECRET certinext-pending-dcv
+CERTINEXT_CLIENT_ID=ACCT CERTINEXT_CLIENT_SECRET=SECRET certinext pending-dcv
 ```
 
-### certinext-domain-cert-count
+### certinext domain-cert-count
 
-`certinext-domain-cert-count` shows all registered domains and how many
+`certinext domain-cert-count` shows all registered domains and how many
 certificates each one has. It fetches the domain list and the orders report,
 then matches each certificate to its most specific registered domain by suffix
 — a cert for `host.subdomain.example.org` counts toward `subdomain.example.org`
@@ -802,27 +837,27 @@ when that domain is registered, rather than the less-specific `example.org`.
 
 ```bash
 # All certificates, all statuses (credentials from keychain)
-certinext-domain-cert-count
+certinext domain-cert-count
 
 # Only issued (active) certificates
-certinext-domain-cert-count --status issued
+certinext domain-cert-count --status issued
 
 # Only expired certificates
-certinext-domain-cert-count --status expired
+certinext domain-cert-count --status expired
 
 # Collapse subdomains — subdomain.example.org rolls into example.org
-certinext-domain-cert-count --condense
+certinext domain-cert-count --condense
 
 # Condense + issued only
-certinext-domain-cert-count --condense --status issued
+certinext domain-cert-count --condense --status issued
 
 # Raw JSON for scripting
-certinext-domain-cert-count --json | jq '.[] | select(.certificates != "0")'
+certinext domain-cert-count --json | jq '.[] | select(.certificates != "0")'
 ```
 
-### certinext-issue-cert
+### certinext issue-cert
 
-`certinext-issue-cert` submits a CSR to CertiNext and downloads the issued
+`certinext issue-cert` submits a CSR to CertiNext and downloads the issued
 certificate.  It reads the domain and SANs directly from the CSR, creates a
 certificate order, handles the full lifecycle (agreement, DCV if needed, CSR
 submission), and writes the signed PEM to stdout or a file once the CA has
@@ -849,7 +884,7 @@ csr_file                    PEM-encoded CSR file (positional; omit to read from 
 --org-id ID                 Organization ID — required for OV and EV certificates
 --product CODE              Product code (X-Product-Code) selecting a specific
                             catalog product; default: API default for the type.
-                            List codes with certinext-setup-defaults.
+                            List codes with certinext setup defaults.
 --domain FQDN               Override the primary domain (default: extracted from CSR CN)
 --san FQDN                  Override SANs (default: extracted from CSR; repeatable)
 --auto-secure-www           Request automatic www-redirect coverage (API default: true)
@@ -883,42 +918,42 @@ Requestor and certificate values can also come from stored defaults — see
 
 ```bash
 # DV certificate — credentials and requestor info from keychain / env vars
-certinext-issue-cert example.com.csr
+certinext issue-cert example.com.csr
 
 # Read CSR from stdin
-certinext-issue-cert < example.com.csr
+certinext issue-cert < example.com.csr
 
 # Save certificate to a file
-certinext-issue-cert example.com.csr --output example.com.pem
+certinext issue-cert example.com.csr --output example.com.pem
 
 # Write leaf, intermediate chain, and fullchain to separate files
 # (the layout nginx, Apache, and HAProxy configs typically expect)
-certinext-issue-cert example.com.csr --cert-out cert.pem --chain-out chain.pem --fullchain-out fullchain.pem
+certinext issue-cert example.com.csr --cert-out cert.pem --chain-out chain.pem --fullchain-out fullchain.pem
 
 # Emit the chain exactly as the API returns it, without re-sorting (debugging)
-certinext-issue-cert example.com.csr --fullchain-out fullchain.pem --raw-chain
+certinext issue-cert example.com.csr --fullchain-out fullchain.pem --raw-chain
 
 # OV certificate with explicit org
-certinext-issue-cert example.com.csr --type ov --org-id 8921215
+certinext issue-cert example.com.csr --type ov --org-id 8921215
 
 # Two-year DV certificate against the sandbox
-certinext-issue-cert example.com.csr --validity 2 --sandbox
+certinext issue-cert example.com.csr --validity 2 --sandbox
 
 # Submit and exit immediately without waiting for issuance
-certinext-issue-cert example.com.csr --wait 0
+certinext issue-cert example.com.csr --wait 0
 
 # Resume polling an order created in a previous run
-certinext-issue-cert --order-id ORDER-ID --wait 600
+certinext issue-cert --order-id ORDER-ID --wait 600
 
 # Resume and supply the CSR (in case the order is still in pending-csr)
-certinext-issue-cert --order-id ORDER-ID --csr example.com.csr
+certinext issue-cert --order-id ORDER-ID --csr example.com.csr
 
 # Capture the values used on this run as defaults for future runs
-certinext-issue-cert example.com.csr --type ov --org-id 8921215 --save-defaults
+certinext issue-cert example.com.csr --type ov --org-id 8921215 --save-defaults
 ```
 
 To avoid repeating requestor flags on every call, store them once with
-`certinext-setup-defaults` (or `--save-defaults` above), or set environment
+`certinext setup defaults` (or `--save-defaults` above), or set environment
 variables (which take precedence over stored defaults):
 
 ```bash
@@ -928,7 +963,7 @@ export CERTINEXT_REQUESTOR_PHONE="+12075551234"
 export CERTINEXT_REQUESTOR_DESIGNATION="Systems Administrator"
 export CERTINEXT_SIGNER_PLACE="Portland, ME"
 
-certinext-issue-cert example.com.csr --output example.com.pem
+certinext issue-cert example.com.csr --output example.com.pem
 ```
 
 #### Certificate lifecycle
@@ -946,9 +981,9 @@ The tool handles the full CertiNext order lifecycle automatically:
 If the order does not reach `issued` within `--wait` seconds, the tool exits
 with code 1 and prints the order ID so you can resume with `--order-id`.
 
-### certinext-parent-dcv-status
+### certinext parent-dcv-status
 
-`certinext-parent-dcv-status` shows DCV status and expiry for every domain
+`certinext parent-dcv-status` shows DCV status and expiry for every domain
 that requires direct DCV validation — either because it has no registered
 ancestor in the account, or because its own NS records form a DNS zone
 boundary that blocks DCV inheritance from a parent.
@@ -972,23 +1007,23 @@ lookups and list only account-level parents.
 
 ```bash
 # All parent domains with DCV status
-certinext-parent-dcv-status --sandbox
+certinext parent-dcv-status --sandbox
 
 # Only domains expiring within 60 days
-certinext-parent-dcv-status --status expiring --expiring-days 60
+certinext parent-dcv-status --status expiring --expiring-days 60
 
 # Skip DNS NS checks (faster, account-level parents only)
-certinext-parent-dcv-status --no-ns-check
+certinext parent-dcv-status --no-ns-check
 
 # Raw JSON for scripting
-certinext-parent-dcv-status --json | jq '.[] | select(.dcv_status != "VERIFIED")'
+certinext parent-dcv-status --json | jq '.[] | select(.dcv_status != "VERIFIED")'
 ```
 
 ---
 
-### certinext-healthcheck
+### certinext healthcheck
 
-`certinext-healthcheck` probes (nearly) every read-only CertiNext endpoint the
+`certinext healthcheck` probes (nearly) every read-only CertiNext endpoint the
 library exposes, classifies each result, and prints a scannable report of what
 works for the credentials it was given. It is **read-only and safe to run
 against production** — it only ever issues GETs and never mutates anything.
@@ -1030,7 +1065,7 @@ ticket #131869). The root cause turned out to be on the account side — a
 credentials/provisioning problem, resolved 2026-06-25 by issuing new OAuth
 client credentials — not a fault in this library.
 
-While it lasted, `certinext-healthcheck` reported the domain-list probe as
+While it lasted, `certinext healthcheck` reported the domain-list probe as
 `SERVER_BUG` (with the raw RFC 7807 body captured verbatim) and the per-domain
 Tier-2 probes that depend on a domain from that list as `SKIPPED`, so the run
 exited non-zero. That is exactly the behaviour the tool exists for: it
@@ -1051,19 +1086,19 @@ instead of letting the failure surface as a confusing crash downstream. As of
 
 ```bash
 # Probe the sandbox and show progress
-certinext-healthcheck --sandbox -v
+certinext healthcheck --sandbox -v
 
 # Probe production (read-only) — surfaces any endpoint that is down for this account
-certinext-healthcheck
+certinext healthcheck
 
 # Tier-1 only, for a fast auth/connectivity canary
-certinext-healthcheck --quick
+certinext healthcheck --quick
 
 # Machine-readable output, with the raw RFC 7807 body for any 422
-certinext-healthcheck --json | python -m json.tool
+certinext healthcheck --json | python -m json.tool
 
 # Nightly cron that alerts on regressions via the exit code
-certinext-healthcheck 2>> /var/log/certinext-health.log || mail -s "CertiNext health" ops@example.edu
+certinext healthcheck 2>> /var/log/certinext-health.log || mail -s "CertiNext health" ops@example.edu
 ```
 
 ---
@@ -1089,7 +1124,7 @@ the environment automatically:
 **Cron example** — capture JSON logs to a file:
 
 ```bash
-certinext-parent-dcv-status --sandbox 2>> /var/log/certinext.log
+certinext parent-dcv-status --sandbox 2>> /var/log/certinext.log
 ```
 
 Each line is a self-contained JSON object:
@@ -1562,7 +1597,7 @@ when writing a `fullchain.pem` for an ACME server).
 > Schannel / IIS validation ([GitLab #4](https://gitlab.its.maine.edu/sysadmin/python-libs/certinext/-/issues/4)).
 > `as_pem_chain()` (and `download_chain()`, `--fullchain-out`, `--chain-out`, and
 > the `--output`/stdout bundle) re-sort the chain into correct leaf-first signing
-> order by default. Pass `as_pem_chain(sort=False)` — or `certinext-issue-cert
+> order by default. Pass `as_pem_chain(sort=False)` — or `certinext issue-cert
 > --raw-chain` — to emit the exact bytes the API returned. Sorting needs the
 > `cryptography` package (`pip install certinext[csr]`); without it the CLI exits
 > with guidance and the library raises `ImportError` unless you use the raw path.
@@ -1680,24 +1715,24 @@ certinext/
     _config.py                    # stored issue-cert defaults (config.toml load/merge/save)
     _keyring.py                   # shared keyring helpers (keyring_service, keyring_get, keyring_available, no_keyring_help)
     accounts.py                   # AccountInfo, Group, Organization, AccountAccessor
-    accounts_cli.py               # certinext-accounts CLI entry point
+    accounts_cli.py               # certinext accounts CLI entry point
     auth.py                       # OAuth 2.0 client credentials token management
     catalog.py                    # Product, ProductCategory, CustomField, CatalogAccessor
     client.py                     # HTTP session wrapper (get/post/put/delete/get_bytes)
     csr.py                        # parse_csr() — extract CN and SANs from a PEM CSR (requires certinext[csr])
-    domain_cert_count_cli.py      # certinext-domain-cert-count CLI entry point
+    domain_cert_count_cli.py      # certinext domain-cert-count CLI entry point
     domains.py                    # Domain class and DomainAccessor
-    domains_cli.py                # certinext-domains CLI entry point
+    domains_cli.py                # certinext domains CLI entry point
     exceptions.py                 # CertiNextAPIError
-    issue_certificate_cli.py      # certinext-issue-cert CLI entry point
+    issue_certificate_cli.py      # certinext issue-cert CLI entry point
     ledger.py                     # LedgerRecord and LedgerAccessor
-    ledger_cli.py                 # certinext-ledger CLI entry point
-    list_certificates_cli.py      # certinext-list-certificates CLI entry point
+    ledger_cli.py                 # certinext ledger CLI entry point
+    list_certificates_cli.py      # certinext list-certificates CLI entry point
     orders.py                     # OrderRecord and OrderAccessor
-    pending_dcv_cli.py            # certinext-pending-dcv CLI entry point
+    pending_dcv_cli.py            # certinext pending-dcv CLI entry point
     session.py                    # CertiNextSession (accounts, catalog, domain, ledger, orders, ssl)
-    setup_defaults_cli.py         # certinext-setup-defaults CLI entry point
-    setup_keyring_cli.py          # certinext-setup-keyring CLI entry point
+    setup_defaults_cli.py         # certinext setup defaults CLI entry point
+    setup_keyring_cli.py          # certinext setup keyring CLI entry point
     ssl_certificates.py           # SslOrder, DcvChallenge, CertificateDownload, SslAccessor, OrderWorkflow
                                   #   SslAccessor.create() — DV/OV/EV dispatcher
                                   #   CertificateDownload.as_pem_chain() — leaf-first fullchain
