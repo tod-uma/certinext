@@ -54,7 +54,7 @@ def golden(request: pytest.FixtureRequest) -> Callable[[str, str], None]:
     Returns:
         A ``check(rel_path, actual)`` callable.
     """
-    update: bool = request.config.getoption("--update-goldens")
+    update = bool(request.config.getoption("--update-goldens"))
 
     def check(rel_path: str, actual: str) -> None:
         """Assert ``actual`` matches (or rewrite) the golden at ``rel_path``.
