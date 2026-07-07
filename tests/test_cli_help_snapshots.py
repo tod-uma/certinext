@@ -68,13 +68,19 @@ def _pinned_console(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("LINES", "50")
     monkeypatch.setenv("NO_COLOR", "1")
     monkeypatch.delenv("FORCE_COLOR", raising=False)
-    monkeypatch.delenv("TERMINAL_WIDTH", raising=False)
     try:
         from typer import rich_utils
     except ImportError:
         pass
     else:
         monkeypatch.setattr(rich_utils, "MAX_WIDTH", 100, raising=False)
+    # On Windows rich detects a "legacy" console, reserves the last column
+    # (rendering 99 wide instead of 100) and substitutes square box corners
+    # for rounded ones — so snapshots recorded on Windows would never match
+    # a Linux CI run. Force modern-terminal rendering on every platform.
+    import rich.console
+
+    monkeypatch.setattr(rich.console, "detect_legacy_windows", lambda: False, raising=False)
 
 
 @pytest.mark.parametrize("name", _HELP_CASES)

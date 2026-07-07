@@ -1,17 +1,17 @@
-                                                                                                   
- Usage: certinext setup keyring [OPTIONS]                                                          
-                                                                                                   
- Interactively store CertiNext credentials in the OS keychain.                                     
-                                                                                                   
- Run once before using scripts or tools that connect to the CertiNext API.                         
- Switch profiles by setting CERTINEXT_PROFILE (or passing --profile) when                          
- running the consuming command.                                                                    
-                                                                                                   
-┌─ Options ───────────────────────────────────────────────────────────────────────────────────────┐
-│ --profile        NAME  Credential profile for keyring lookup (env: CERTINEXT_PROFILE; default:  │
-│                        use the default profile)                                                 │
-│ --sandbox              Connect to the CertiNext sandbox API; implies --profile sandbox unless   │
-│                        --profile is set                                                         │
-│ --help                 Show this message and exit.                                              │
-└─────────────────────────────────────────────────────────────────────────────────────────────────┘
+                                                                                                    
+ Usage: certinext setup keyring [OPTIONS]                                                           
+                                                                                                    
+ Interactively store CertiNext credentials in the OS keychain.                                      
+                                                                                                    
+ Run once before using scripts or tools that connect to the CertiNext API.                          
+ Switch profiles by setting CERTINEXT_PROFILE (or passing --profile) when                           
+ running the consuming command.                                                                     
+                                                                                                    
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --profile        NAME  Credential profile for keyring lookup (env: CERTINEXT_PROFILE; default:   │
+│                        use the default profile)                                                  │
+│ --sandbox              Connect to the CertiNext sandbox API; implies --profile sandbox unless    │
+│                        --profile is set                                                          │
+│ --help                 Show this message and exit.                                               │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 

@@ -1,11 +1,11 @@
-                                                                                                   
- Usage: certinext domains list [OPTIONS]                                                           
-                                                                                                   
- List all domains.                                                                                 
-                                                                                                   
-┌─ Options ───────────────────────────────────────────────────────────────────────────────────────┐
-│ --offset        INTEGER  Number of records to skip                                              │
-│ --limit         INTEGER  Maximum records to return                                              │
-│ --help                   Show this message and exit.                                            │
-└─────────────────────────────────────────────────────────────────────────────────────────────────┘
+                                                                                                    
+ Usage: certinext domains list [OPTIONS]                                                            
+                                                                                                    
+ List all domains.                                                                                  
+                                                                                                    
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --offset        INTEGER  Number of records to skip                                               │
+│ --limit         INTEGER  Maximum records to return                                               │
+│ --help                   Show this message and exit.                                             │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 

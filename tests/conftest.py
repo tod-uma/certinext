@@ -15,6 +15,7 @@
 """Shared fixtures for the certinext test suite."""
 
 import json
+import os
 from pathlib import Path
 from typing import Callable
 from unittest.mock import MagicMock
@@ -26,6 +27,27 @@ from certinext.domains import Domain, DomainAccessor
 
 _FIXTURES_DIR = Path(__file__).parent / "fixtures"
 _GOLDENS_DIR = Path(__file__).parent / "goldens"
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """Pin typer's help-rendering width before any test module imports typer.
+
+    typer reads ``TERMINAL_WIDTH`` into ``rich_utils.MAX_WIDTH`` at *import*
+    time, so a fixture set too late cannot make ``--help`` output render at
+    the same width on every machine and in CI — this hook runs before test
+    collection imports ``certinext.cli``. The ``--help`` snapshot goldens are
+    recorded at this width. (Nothing imported by this conftest itself pulls
+    in typer; if that ever changes, this pin must move earlier.)
+
+    Args:
+        config: The pytest configuration object (unused).
+    """
+    os.environ["TERMINAL_WIDTH"] = "100"
+    # Belt and braces: rich consoles created without an explicit width fall
+    # back to terminal-size detection, which reads COLUMNS. Pin it so any
+    # help-rendering path that misses MAX_WIDTH still sizes identically.
+    os.environ["COLUMNS"] = "100"
+    os.environ["LINES"] = "50"
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:

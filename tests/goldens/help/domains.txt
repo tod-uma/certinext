@@ -1,41 +1,41 @@
-                                                                                                   
- Usage: certinext domains [OPTIONS] COMMAND [ARGS]...                                              
-                                                                                                   
- Manage CertiNext domains                                                                          
-                                                                                                   
-┌─ Options ───────────────────────────────────────────────────────────────────────────────────────┐
-│ --json                                         Write output as JSON instead of human-readable   │
-│                                                text                                             │
-│ --verbose                     -v      INTEGER  Increase verbosity: -v shows progress, -vvv      │
-│                                                enables debug logging, -vvvv also enables        │
-│                                                third-party debug logging (httpx)                │
-│                                                [default: 0]                                     │
-│ --profile                             NAME     Credential profile for keyring lookup (env:      │
-│                                                CERTINEXT_PROFILE; default: use the default      │
-│                                                profile)                                         │
-│ --sandbox                                      Connect to the CertiNext sandbox API; implies    │
-│                                                --profile sandbox unless --profile is set        │
-│ --base-url                            URL      CertiNext base URL (default:                     │
-│                                                https://us-api.certinext.io, or the              │
-│                                                profile/sandbox endpoint)                        │
-│ --token-url                           URL      OAuth2 token endpoint URL (default: derived from │
-│                                                the base URL)                                    │
-│ --account-number,--client-id          ACCT     CertiNext account number / OAuth2 client_id      │
-│                                                (env: CERTINEXT_CLIENT_ID)                       │
-│ --client-secret                       SECRET   OAuth2 client secret (env:                       │
-│                                                CERTINEXT_CLIENT_SECRET)                         │
-│ --scope                               SCOPE    OAuth2 scope (optional)                          │
-│ --help                                         Show this message and exit.                      │
-└─────────────────────────────────────────────────────────────────────────────────────────────────┘
-┌─ Commands ──────────────────────────────────────────────────────────────────────────────────────┐
-│ list                 List all domains.                                                          │
-│ get                  Get a single domain by name or ID.                                         │
-│ create               Create a new domain.                                                       │
-│ deactivate           Deactivate a domain.                                                       │
-│ get-dcv              Get DCV status for a domain.                                               │
-│ verify-dcv           Trigger DCV verification for a domain.                                     │
-│ change-dcv-method    Change the DCV method for a domain.                                        │
-│ last-dcv-attempt     Get the last DCV attempt for a domain.                                     │
-│ dcv-attempt-history  Get DCV attempt history for a domain.                                      │
-└─────────────────────────────────────────────────────────────────────────────────────────────────┘
+                                                                                                    
+ Usage: certinext domains [OPTIONS] COMMAND [ARGS]...                                               
+                                                                                                    
+ Manage CertiNext domains                                                                           
+                                                                                                    
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --json                                         Write output as JSON instead of human-readable    │
+│                                                text                                              │
+│ --verbose                     -v      INTEGER  Increase verbosity: -v shows progress, -vvv       │
+│                                                enables debug logging, -vvvv also enables         │
+│                                                third-party debug logging (httpx)                 │
+│                                                [default: 0]                                      │
+│ --profile                             NAME     Credential profile for keyring lookup (env:       │
+│                                                CERTINEXT_PROFILE; default: use the default       │
+│                                                profile)                                          │
+│ --sandbox                                      Connect to the CertiNext sandbox API; implies     │
+│                                                --profile sandbox unless --profile is set         │
+│ --base-url                            URL      CertiNext base URL (default:                      │
+│                                                https://us-api.certinext.io, or the               │
+│                                                profile/sandbox endpoint)                         │
+│ --token-url                           URL      OAuth2 token endpoint URL (default: derived from  │
+│                                                the base URL)                                     │
+│ --account-number,--client-id          ACCT     CertiNext account number / OAuth2 client_id (env: │
+│                                                CERTINEXT_CLIENT_ID)                              │
+│ --client-secret                       SECRET   OAuth2 client secret (env:                        │
+│                                                CERTINEXT_CLIENT_SECRET)                          │
+│ --scope                               SCOPE    OAuth2 scope (optional)                           │
+│ --help                                         Show this message and exit.                       │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
+│ list                 List all domains.                                                           │
+│ get                  Get a single domain by name or ID.                                          │
+│ create               Create a new domain.                                                        │
+│ deactivate           Deactivate a domain.                                                        │
+│ get-dcv              Get DCV status for a domain.                                                │
+│ verify-dcv           Trigger DCV verification for a domain.                                      │
+│ change-dcv-method    Change the DCV method for a domain.                                         │
+│ last-dcv-attempt     Get the last DCV attempt for a domain.                                      │
+│ dcv-attempt-history  Get DCV attempt history for a domain.                                       │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 

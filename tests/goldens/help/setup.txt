@@ -1,13 +1,13 @@
-                                                                                                   
- Usage: certinext setup [OPTIONS] COMMAND [ARGS]...                                                
-                                                                                                   
- Store credentials and issuance defaults for later runs.                                           
-                                                                                                   
-┌─ Options ───────────────────────────────────────────────────────────────────────────────────────┐
-│ --help          Show this message and exit.                                                     │
-└─────────────────────────────────────────────────────────────────────────────────────────────────┘
-┌─ Commands ──────────────────────────────────────────────────────────────────────────────────────┐
-│ defaults  Interactively store issue-cert defaults in the config file.                           │
-│ keyring   Interactively store CertiNext credentials in the OS keychain.                         │
-└─────────────────────────────────────────────────────────────────────────────────────────────────┘
+                                                                                                    
+ Usage: certinext setup [OPTIONS] COMMAND [ARGS]...                                                 
+                                                                                                    
+ Store credentials and issuance defaults for later runs.                                            
+                                                                                                    
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
+│ defaults  Interactively store issue-cert defaults in the config file.                            │
+│ keyring   Interactively store CertiNext credentials in the OS keychain.                          │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 
