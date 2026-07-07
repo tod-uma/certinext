@@ -12,12 +12,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Read-only health & coverage probe for the CertiNext API.
+"""Read-only health & coverage probe engine for the CertiNext API.
 
-``certinext-healthcheck`` exercises (nearly) every CertiNext **read** endpoint
-the library exposes, classifies each result, and prints a scannable report of
-what works and what doesn't for the credentials it was given. It is provably
-safe to run against production: it only ever issues GETs and never mutates.
+``certinext healthcheck`` exercises (nearly) every CertiNext **read** endpoint
+the library exposes, classifies each result, and reports what works and what
+doesn't for the credentials it was given. It is provably safe to run against
+production: it only ever issues GETs and never mutates.
+
+This module holds the probe registry, classification, and rendering — the
+operations layer. The CLI command in :mod:`certinext.cli` is a thin wrapper,
+so a TUI or MCP server can reuse :func:`run` / :func:`exit_code` directly.
 
 Two tiers of probes run in order:
 
@@ -31,19 +35,8 @@ Each probe yields one outcome: ``PASS``, ``EMPTY``, ``DENIED``, ``NOT_FOUND``,
 ``SERVER_BUG``, ``RATE_LIMITED``, ``NETWORK``, or ``SKIPPED``. The process exits
 non-zero when any probe is ``DENIED``, ``NOT_FOUND``, ``SERVER_BUG`` or
 ``NETWORK`` (add ``EMPTY`` with ``--strict``).
-
-Usage::
-
-    certinext-healthcheck
-    certinext-healthcheck --sandbox -v
-    certinext-healthcheck --quick
-    certinext-healthcheck --strict
-    certinext-healthcheck --json | python -m json.tool
 """
 
-import argparse
-import json
-import sys
 import time
 from collections import Counter
 from collections.abc import Callable
@@ -53,15 +46,9 @@ from typing import Any
 import httpx
 import structlog
 from pydantic import ValidationError
-from tabulate import tabulate
+from rich.console import Console
+from rich.table import Table
 
-from certinext._cli import (
-    _setup_logging,
-    add_connection_args,
-    add_json_output_arg,
-    apply_sandbox,
-    build_session,
-)
 from certinext.exceptions import CertiNextAPIError, CertiNextRateLimitError
 from certinext.session import CertiNextSession
 
@@ -481,87 +468,61 @@ def render_summary(results: list[ProbeResult]) -> str:
     return " | ".join(f"{outcome} {counts[outcome]}" for outcome in _SUMMARY_ORDER if counts[outcome])
 
 
-def render_table(results: list[ProbeResult]) -> str:
-    """Return the human-readable results table.
+# Outcome -> rich style for the results table. Failing outcomes red, degraded
+# ones yellow, PASS green, SKIPPED dim — scannable at a glance on a TTY;
+# styles drop out automatically when output is piped.
+_OUTCOME_STYLES = {
+    Outcome.PASS: "green",
+    Outcome.EMPTY: "yellow",
+    Outcome.DENIED: "red",
+    Outcome.NOT_FOUND: "red",
+    Outcome.SERVER_BUG: "red",
+    Outcome.RATE_LIMITED: "yellow",
+    Outcome.NETWORK: "red",
+    Outcome.SKIPPED: "dim",
+}
+
+
+def results_table(results: list[ProbeResult]) -> Table:
+    """Build the human-readable results table as a rich :class:`~rich.table.Table`.
 
     Args:
         results: The probe results from :func:`run`.
 
     Returns:
-        A ``tabulate``-formatted table string.
+        A rich table with one row per probe, outcome-colored on TTYs.
     """
-    rows = [
-        {
-            "probe": r.name,
-            "tier": r.tier,
-            "outcome": r.outcome,
-            "http": r.http_status if r.http_status is not None else "",
-            "count": r.count if r.count is not None else "",
-            "detail": _short(r.message),
-        }
-        for r in results
-    ]
-    return tabulate(rows, headers="keys", tablefmt="simple")
+    table = Table(box=None, pad_edge=False)
+    table.add_column("probe")
+    table.add_column("tier", justify="right")
+    table.add_column("outcome")
+    table.add_column("http", justify="right")
+    table.add_column("count", justify="right")
+    table.add_column("detail")
+    for r in results:
+        table.add_row(
+            r.name,
+            str(r.tier),
+            r.outcome,
+            "" if r.http_status is None else str(r.http_status),
+            "" if r.count is None else str(r.count),
+            _short(r.message),
+            style=_OUTCOME_STYLES.get(r.outcome),
+        )
+    return table
 
 
-def build_parser() -> argparse.ArgumentParser:
-    """Return the argument parser for certinext-healthcheck.
+def render_table(results: list[ProbeResult]) -> str:
+    """Return the human-readable results table rendered to plain text.
+
+    Args:
+        results: The probe results from :func:`run`.
 
     Returns:
-        A configured :class:`argparse.ArgumentParser` instance.
+        The :func:`results_table` output rendered without styling, suitable
+        for logs or string assertions.
     """
-    parser = argparse.ArgumentParser(
-        description=(
-            "Probe every read-only CertiNext endpoint the library exposes and report "
-            "what works for the given credentials. Read-only and safe against production."
-        ),
-    )
-    parser.add_argument(
-        "--quick", action="store_true", default=False,
-        help="Run Tier-1 probes only (skip derived-input Tier-2 probes)",
-    )
-    parser.add_argument(
-        "--strict", action="store_true", default=False,
-        help="Also exit non-zero when a baseline list is unexpectedly empty (EMPTY)",
-    )
-    add_json_output_arg(parser)
-    parser.add_argument(
-        "-v", "--verbose", action="count", default=0,
-        help=(
-            "Increase verbosity: -v shows progress, "
-            "-vvv enables debug logging (per-probe results), "
-            "-vvvv also enables third-party debug logging (httpx)"
-        ),
-    )
-    conn = parser.add_argument_group("connection")
-    add_connection_args(conn)
-    return parser
-
-
-def main() -> None:
-    """Entry point for certinext-healthcheck."""
-    try:
-        parser = build_parser()
-        args = parser.parse_args()
-        _setup_logging(args.verbose)
-        apply_sandbox(args)
-        sess = build_session(args)
-
-        log.info("Running CertiNext health check", scope="tier-1" if args.quick else "all")
-        results = run(sess, quick=args.quick)
-
-        if args.output_json:
-            print(json.dumps([r.to_dict() for r in results], indent=2))
-        else:
-            print(render_table(results))
-            print()
-            print(render_summary(results))
-
-        raise SystemExit(exit_code(results, strict=args.strict))
-    except KeyboardInterrupt:
-        print("\nAborted.", file=sys.stderr)
-        raise SystemExit(130)
-
-
-if __name__ == "__main__":
-    main()
+    console = Console(width=200, no_color=True, force_terminal=False)
+    with console.capture() as capture:
+        console.print(results_table(results))
+    return capture.get().rstrip("\n")

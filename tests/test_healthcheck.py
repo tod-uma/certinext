@@ -26,7 +26,7 @@ from certinext.exceptions import (
     CertiNextNotFoundError,
     CertiNextRateLimitError,
 )
-from certinext.healthcheck_cli import (
+from certinext.healthcheck import (
     REGISTRY,
     Outcome,
     Probe,

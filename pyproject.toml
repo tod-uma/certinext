@@ -32,9 +32,12 @@ dependencies = [
     "tomli>=2.0; python_version < '3.11'",
     "pydantic-settings>=2.3",
     "tomlkit>=0.13",
+    "typer>=0.12",
+    "rich>=13",
 ]
 
 [project.scripts]
+certinext = "certinext.cli:main"
 certinext-setup-keyring = "certinext.setup_keyring_cli:main"
 certinext-setup-defaults = "certinext.setup_defaults_cli:main"
 certinext-accounts = "certinext.accounts_cli:main"
@@ -45,7 +48,7 @@ certinext-pending-dcv = "certinext.pending_dcv_cli:main"
 certinext-domain-cert-count = "certinext.domain_cert_count_cli:main"
 certinext-issue-cert = "certinext.issue_certificate_cli:main"
 certinext-parent-dcv-status = "certinext.parent_dcv_status_cli:main"
-certinext-healthcheck = "certinext.healthcheck_cli:main"
+certinext-healthcheck = "certinext.cli._aliases:healthcheck"
 
 [project.urls]
 Homepage = "https://github.com/tod-uma/certinext"
