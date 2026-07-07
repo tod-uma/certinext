@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: done
 depends-on: [phase-1, phase-2, phase-3]
 implements-adr: [0003, 0004]
 ---
@@ -125,6 +125,39 @@ README CLI section restructured around subcommands with an alias table;
 shell-completion install note
 ([typer completion docs](https://typer.tiangolo.com/tutorial/options-autocompletion/));
 migration guide lists any flag divergences (target: none).
+
+## Completion record (2026-07-07)
+
+All six implementation steps done; README CLI section restructured
+(alias table + completion note; the full README pass stays with phase 6).
+No flag divergences found — the migration story is the alias table alone.
+
+Verification evidence:
+
+- **Tests:** 832 passed / 12 skipped; ruff + mypy clean. Step 6 landed as
+  22 `--help` snapshots and 10 `--json` goldens under `tests/goldens/`,
+  compared line-by-line; regenerate deliberately with
+  `pytest --update-goldens` (option lives in `tests/conftest.py`).
+- **Grep gates:** no `import argparse`, no `tabulate` in `certinext/`.
+- **Live, prod:** `certinext healthcheck` — 15/15 probes PASS, exit 0.
+- **Live, sandbox:** `certinext healthcheck --sandbox` — 15/15 PASS; alias
+  smoke test passed (`certinext-healthcheck --sandbox` stdout byte-identical,
+  same exit code).
+- **Live, sandbox issue-cert end-to-end:** OV order 5789819957 for
+  `phase4-cli-1783449150.maine.edu` — created from stored profile defaults,
+  auto-approved via keyring prevetting token, issued, downloaded with
+  `--all-formats-out`; chain verified leaf-first (leaf, intermediate,
+  staging root), DER matches the PEM leaf. Covers the R11/R12 paths.
+
+Findings (neither is a phase-4 regression):
+
+- Sandbox **DV** orders 422 with `EMS-1180 Organization Name cannot be
+  empty` — account/vendor behavior; OV with the stored sandbox profile is
+  the working issuance flow. The 0.3.x code path was identical.
+- `--all-formats-out DIR` requires DIR to exist (fails cleanly with an
+  `--order-id` resume hint; 0.3.x behaved the same —
+  `issue_certificate_cli.py:719` had no mkdir). Creating the directory
+  would be a small QoL improvement for phase 6 or a follow-up.
 
 ---
 > **AI-assistant disclaimer:** Drafted by Claude Code (Claude Fable 5,
