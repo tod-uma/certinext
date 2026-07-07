@@ -31,7 +31,17 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - typer built against real click
     from click.exceptions import ClickException  # type: ignore[no-redef]
 
-from certinext.cli import healthcheck  # noqa: F401  (registers the subcommand)
+# Command modules register themselves on the app at import time.
+from certinext.cli import (  # noqa: F401
+    accounts,
+    domain_cert_count,
+    domains,
+    healthcheck,
+    ledger,
+    list_certificates,
+    parent_dcv_status,
+    pending_dcv,
+)
 from certinext.cli._app import app
 
 __all__ = ["app", "main"]

@@ -41,3 +41,38 @@ def _invoke(*subcommand: str) -> int:
 def healthcheck() -> int:
     """Entry point for the ``certinext-healthcheck`` alias."""
     return _invoke("healthcheck")
+
+
+def accounts() -> int:
+    """Entry point for the ``certinext-accounts`` alias."""
+    return _invoke("accounts")
+
+
+def ledger() -> int:
+    """Entry point for the ``certinext-ledger`` alias."""
+    return _invoke("ledger")
+
+
+def list_certificates() -> int:
+    """Entry point for the ``certinext-list-certificates`` alias."""
+    return _invoke("list-certificates")
+
+
+def pending_dcv() -> int:
+    """Entry point for the ``certinext-pending-dcv`` alias."""
+    return _invoke("pending-dcv")
+
+
+def domain_cert_count() -> int:
+    """Entry point for the ``certinext-domain-cert-count`` alias."""
+    return _invoke("domain-cert-count")
+
+
+def parent_dcv_status() -> int:
+    """Entry point for the ``certinext-parent-dcv-status`` alias."""
+    return _invoke("parent-dcv-status")
+
+
+def domains() -> int:
+    """Entry point for the ``certinext-domains`` alias."""
+    return _invoke("domains")

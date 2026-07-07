@@ -26,10 +26,11 @@ JSON/PEM; diagnostics go through structlog or :data:`err_console`.
 """
 
 import sys
-from typing import Annotated, Optional
+from typing import Annotated, Any, Optional
 
 import typer
 from rich.console import Console
+from rich.table import Table
 
 import certinext
 from certinext.cli_support import build_session, resolve_connection
@@ -59,6 +60,46 @@ def data_console() -> Console:
     if sys.stdout.isatty():
         return Console()
     return Console(width=_PIPE_WIDTH, no_color=True)
+
+
+def rows_table(rows: list[dict[str, Any]]) -> Table:
+    """Build a headed rich table from a list of uniform dict rows.
+
+    The replacement for the ``tabulate(rows, headers="keys")`` idiom: column
+    order comes from the first row's key order; None values render empty.
+
+    Args:
+        rows: Non-empty list of dicts sharing the same keys.
+
+    Returns:
+        A borderless :class:`rich.table.Table` ready for a data console.
+    """
+    table = Table(box=None, pad_edge=False)
+    for key in rows[0]:
+        table.add_column(str(key))
+    for row in rows:
+        table.add_row(*("" if value is None else str(value) for value in row.values()))
+    return table
+
+
+def pairs_table(data: dict[str, Any]) -> Table:
+    """Build a headerless key/value rich table from a dict.
+
+    The replacement for the ``tabulate(list(data.items()))`` idiom used to
+    dump a single record's fields.
+
+    Args:
+        data: Mapping of field name to value.
+
+    Returns:
+        A borderless, headerless :class:`rich.table.Table`.
+    """
+    table = Table(box=None, pad_edge=False, show_header=False)
+    table.add_column("key")
+    table.add_column("value")
+    for key, value in data.items():
+        table.add_row(str(key), "" if value is None else str(value))
+    return table
 
 
 # --- Shared connection options (one definition, every subcommand) ---------
