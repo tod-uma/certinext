@@ -1,0 +1,25 @@
+                                                                                                   
+ Usage: certinext [OPTIONS] COMMAND [ARGS]...                                                      
+                                                                                                   
+ CertiNext certificate management CLI.                                                             
+                                                                                                   
+┌─ Options ───────────────────────────────────────────────────────────────────────────────────────┐
+│ --install-completion          Install completion for the current shell.                         │
+│ --show-completion             Show completion for the current shell, to copy it or customize    │
+│                               the installation.                                                 │
+│ --help                        Show this message and exit.                                       │
+└─────────────────────────────────────────────────────────────────────────────────────────────────┘
+┌─ Commands ──────────────────────────────────────────────────────────────────────────────────────┐
+│ accounts           Show account info, groups, and organizations.                                │
+│ domain-cert-count  Show all registered domains and their certificate counts.                    │
+│ healthcheck        Probe every read-only CertiNext endpoint the library exposes and report      │
+│                    what works for the given credentials. Read-only and safe against production. │
+│ issue-cert         Submit a CSR to CertiNext and download the issued certificate.               │
+│ ledger             Show the CertiNext account ledger (transaction history).                     │
+│ list-certificates  List SSL/TLS certificate orders from the CertiNext orders report.            │
+│ parent-dcv-status  Show DCV status and expiry for domains that require direct DCV validation.   │
+│ pending-dcv        List all active domains that have not completed DCV verification.            │
+│ setup              Store credentials and issuance defaults for later runs.                      │
+│ domains            Manage CertiNext domains                                                     │
+└─────────────────────────────────────────────────────────────────────────────────────────────────┘
+

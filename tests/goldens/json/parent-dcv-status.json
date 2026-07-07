@@ -1,0 +1,14 @@
+[
+  {
+    "domain": "maine.edu",
+    "dcv_status": "PENDING",
+    "dcv_expires": null,
+    "expiring_soon": false
+  },
+  {
+    "domain": "umaine.edu",
+    "dcv_status": "VERIFIED",
+    "dcv_expires": "2099-12-31T00:00:00+00:00",
+    "expiring_soon": false
+  }
+]

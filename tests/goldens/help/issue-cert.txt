@@ -1,0 +1,111 @@
+                                                                                                   
+ Usage: certinext issue-cert [OPTIONS] [CSR_FILE]                                                  
+                                                                                                   
+ Submit a CSR to CertiNext and download the issued certificate.                                    
+                                                                                                   
+ Domain and SANs are extracted from the CSR automatically.                                         
+                                                                                                   
+┌─ Arguments ─────────────────────────────────────────────────────────────────────────────────────┐
+│   [CSR_FILE]      TEXT  PEM-encoded CSR file (default: stdin; not required with --order-id)     │
+└─────────────────────────────────────────────────────────────────────────────────────────────────┘
+┌─ Options ───────────────────────────────────────────────────────────────────────────────────────┐
+│ --csr                                 FILE             PEM-encoded CSR file (alternative to     │
+│                                                        positional argument)                     │
+│ --domain                              FQDN             Override the primary domain (default:    │
+│                                                        extracted from CSR CN)                   │
+│ --san                                 FQDN             Override SANs (default: extracted from   │
+│                                                        CSR SAN extension; repeatable)           │
+│ --validity                            YEARS [1<=x<=3]  Certificate validity in years (1, 2, or  │
+│                                                        3; default: 1)                           │
+│ --type                                [dv|ov|ev]       Certificate validation type (default:    │
+│                                                        dv)                                      │
+│ --org-id                              ID               Organization ID, required for OV and EV  │
+│                                                        certificates                             │
+│ --product                             CODE             CERTInext product code (X-Product-Code)  │
+│                                                        selecting a specific catalog product;    │
+│                                                        list codes with 'certinext setup         │
+│                                                        defaults'. Default: the API's default    │
+│                                                        product for the --type.                  │
+│ --prevetting-token                    TOKEN            Organization Consent Token for OV/EV     │
+│                                                        orders. When provided, the CA            │
+│                                                        auto-approves without a manual approver  │
+│                                                        step. Retrieve from the CertiNext portal │
+│                                                        under Organization Management >          │
+│                                                        Organization Consent / Consent Tokens    │
+│                                                        for the target organization.             │
+│ --auto-secure-www                                      Request automatic www-redirect coverage  │
+│                                                        from the CA (default: false; the API     │
+│                                                        default is true if omitted)              │
+│ --requestor-name                      NAME             Full name of the certificate requestor   │
+│                                                        (env: CERTINEXT_REQUESTOR_NAME)          │
+│ --requestor-email                     EMAIL            Email address of the requestor (env:     │
+│                                                        CERTINEXT_REQUESTOR_EMAIL)               │
+│ --requestor-phone                     PHONE            Phone in E.164 format, e.g. +12075551234 │
+│                                                        (env: CERTINEXT_REQUESTOR_PHONE)         │
+│ --requestor-designation               TITLE            Job title or designation of the          │
+│                                                        requestor (env:                          │
+│                                                        CERTINEXT_REQUESTOR_DESIGNATION)         │
+│ --signer-place                        PLACE            City/location for the subscriber         │
+│                                                        agreement signature (env:                │
+│                                                        CERTINEXT_SIGNER_PLACE)                  │
+│ --output                      -o      FILE             Write certificate PEM to FILE instead of │
+│                                                        stdout                                   │
+│ --cert-out                            FILE             Write only the end-entity (leaf)         │
+│                                                        certificate PEM to FILE                  │
+│ --chain-out                           FILE             Write only the intermediate CA chain PEM │
+│                                                        to FILE                                  │
+│ --fullchain-out                       FILE             Write the leaf-first fullchain PEM       │
+│                                                        (certificate + intermediates) to FILE    │
+│ --der-out                             FILE             Write the end-entity certificate in DER  │
+│                                                        (binary) format to FILE                  │
+│ --all-formats-out                     DIR              Write all certificate formats to DIR:    │
+│                                                        {domain}.pem (PEM bundle) and            │
+│                                                        {domain}.der (DER). The domain stem      │
+│                                                        comes from the order's CN.               │
+│ --raw-chain                                            Emit the certificate chain exactly as    │
+│                                                        the API returns it, without re-sorting   │
+│                                                        into leaf-first signing order. By        │
+│                                                        default the chain is sorted (correct for │
+│                                                        IIS/Schannel); use this only for         │
+│                                                        debugging or if you cannot install the   │
+│                                                        'cryptography' package.                  │
+│ --wait                                SECONDS          Seconds to wait for issuance before      │
+│                                                        giving up (0 = submit and exit; default: │
+│                                                        300)                                     │
+│                                                        [default: 300]                           │
+│ --order-id                            ID               Resume polling an existing order rather  │
+│                                                        than creating a new one                  │
+│ --save-defaults                                        Store the effective                      │
+│                                                        requestor/certificate values as defaults │
+│                                                        for future runs (in the config file;     │
+│                                                        interactively confirms before the order  │
+│                                                        is created)                              │
+│ --no-domain-check                                      Skip the pre-creation check for existing │
+│                                                        orders on the same domain. By default    │
+│                                                        the command queries issued and           │
+│                                                        in-progress orders and prompts before    │
+│                                                        creating a new one. Set this flag in     │
+│                                                        automated pipelines.                     │
+│ --verbose                     -v      INTEGER          Increase verbosity: -v shows progress,   │
+│                                                        -vvv enables debug logging, -vvvv also   │
+│                                                        enables third-party debug logging        │
+│                                                        (httpx)                                  │
+│                                                        [default: 0]                             │
+│ --profile                             NAME             Credential profile for keyring lookup    │
+│                                                        (env: CERTINEXT_PROFILE; default: use    │
+│                                                        the default profile)                     │
+│ --sandbox                                              Connect to the CertiNext sandbox API;    │
+│                                                        implies --profile sandbox unless         │
+│                                                        --profile is set                         │
+│ --base-url                            URL              CertiNext base URL (default:             │
+│                                                        https://us-api.certinext.io, or the      │
+│                                                        profile/sandbox endpoint)                │
+│ --token-url                           URL              OAuth2 token endpoint URL (default:      │
+│                                                        derived from the base URL)               │
+│ --account-number,--client-id          ACCT             CertiNext account number / OAuth2        │
+│                                                        client_id (env: CERTINEXT_CLIENT_ID)     │
+│ --client-secret                       SECRET           OAuth2 client secret (env:               │
+│                                                        CERTINEXT_CLIENT_SECRET)                 │
+│ --help                                                 Show this message and exit.              │
+└─────────────────────────────────────────────────────────────────────────────────────────────────┘
+

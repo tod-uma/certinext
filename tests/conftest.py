@@ -16,6 +16,7 @@
 
 import json
 from pathlib import Path
+from typing import Callable
 from unittest.mock import MagicMock
 
 import pytest
@@ -24,6 +25,63 @@ from certinext.client import CertiNextClient
 from certinext.domains import Domain, DomainAccessor
 
 _FIXTURES_DIR = Path(__file__).parent / "fixtures"
+_GOLDENS_DIR = Path(__file__).parent / "goldens"
+
+
+def pytest_addoption(parser: pytest.Parser) -> None:
+    """Register the ``--update-goldens`` command-line option.
+
+    Args:
+        parser: The pytest argument parser to extend.
+    """
+    parser.addoption(
+        "--update-goldens",
+        action="store_true",
+        default=False,
+        help="Rewrite golden files under tests/goldens/ with the current output",
+    )
+
+
+@pytest.fixture
+def golden(request: pytest.FixtureRequest) -> Callable[[str, str], None]:
+    """Compare a string against a golden file under ``tests/goldens/``.
+
+    The returned callable takes ``(rel_path, actual)`` and asserts that
+    ``actual`` matches the golden file's content line-by-line (so CRLF/LF
+    checkout differences never matter). With ``pytest --update-goldens`` the
+    golden file is (re)written instead of compared.
+
+    Returns:
+        A ``check(rel_path, actual)`` callable.
+    """
+    update: bool = request.config.getoption("--update-goldens")
+
+    def check(rel_path: str, actual: str) -> None:
+        """Assert ``actual`` matches (or rewrite) the golden at ``rel_path``.
+
+        Args:
+            rel_path: Path of the golden file relative to ``tests/goldens/``.
+            actual: The output produced by the code under test.
+
+        Raises:
+            AssertionError: When the output differs from the recorded golden.
+        """
+        path = _GOLDENS_DIR / rel_path
+        if update:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(actual, encoding="utf-8", newline="\n")
+            return
+        if not path.exists():
+            pytest.fail(
+                f"golden file missing: {path} — record it with pytest --update-goldens"
+            )
+        expected = path.read_text(encoding="utf-8")
+        assert actual.splitlines() == expected.splitlines(), (
+            f"output differs from golden {rel_path} — if the change is deliberate, "
+            f"regenerate with pytest --update-goldens and note it in the migration guide"
+        )
+
+    return check
 
 
 # Two sentinel dates used across fixtures:

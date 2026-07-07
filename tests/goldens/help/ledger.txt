@@ -1,0 +1,30 @@
+                                                                                                   
+ Usage: certinext ledger [OPTIONS]                                                                 
+                                                                                                   
+ Show the CertiNext account ledger (transaction history).                                          
+                                                                                                   
+┌─ Options ───────────────────────────────────────────────────────────────────────────────────────┐
+│ --last                                N        Show only the N most recent transactions         │
+│ --json                                         Write output as JSON instead of human-readable   │
+│                                                text                                             │
+│ --verbose                     -v      INTEGER  Increase verbosity: -v shows progress, -vvv      │
+│                                                enables debug logging, -vvvv also enables        │
+│                                                third-party debug logging (httpx)                │
+│                                                [default: 0]                                     │
+│ --profile                             NAME     Credential profile for keyring lookup (env:      │
+│                                                CERTINEXT_PROFILE; default: use the default      │
+│                                                profile)                                         │
+│ --sandbox                                      Connect to the CertiNext sandbox API; implies    │
+│                                                --profile sandbox unless --profile is set        │
+│ --base-url                            URL      CertiNext base URL (default:                     │
+│                                                https://us-api.certinext.io, or the              │
+│                                                profile/sandbox endpoint)                        │
+│ --token-url                           URL      OAuth2 token endpoint URL (default: derived from │
+│                                                the base URL)                                    │
+│ --account-number,--client-id          ACCT     CertiNext account number / OAuth2 client_id      │
+│                                                (env: CERTINEXT_CLIENT_ID)                       │
+│ --client-secret                       SECRET   OAuth2 client secret (env:                       │
+│                                                CERTINEXT_CLIENT_SECRET)                         │
+│ --help                                         Show this message and exit.                      │
+└─────────────────────────────────────────────────────────────────────────────────────────────────┘
+
