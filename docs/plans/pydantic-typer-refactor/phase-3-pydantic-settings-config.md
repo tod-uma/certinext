@@ -43,7 +43,8 @@ production defaults. Encode both orders in tests *first* (they exist in
 
 `certinext-setup-defaults` *writes* config.toml; pydantic-settings only
 reads. Decided: adopt [tomlkit](https://tomlkit.readthedocs.io/en/latest/)
-for the write path; the hand-rolled `_render` is deleted.
+for the write path; the hand-rolled `_render` is deleted. Promoted to
+[ADR 0006](../../adr/0006-tomlkit-for-config-writes-tomllib-for-reads.md).
 
 <details>
 <summary>Why tomlkit, and why only for writes?</summary>
