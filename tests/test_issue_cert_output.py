@@ -12,13 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tests for certinext-issue-cert output flags and stderr prompting.
+"""Tests for `certinext issue-cert` output flags and stderr prompting.
 
 Covers the ``--cert-out`` / ``--chain-out`` / ``--fullchain-out`` /
 ``--der-out`` / ``--all-formats-out`` flags
-(:func:`certinext.issue_certificate_cli._write_outputs`) and the
-:func:`certinext._cli.prompt_stderr` helper that keeps interactive prompts
-off stdout so piped certificate output stays clean.
+(:func:`certinext.cli.issue_cert._write_outputs`) and the
+:func:`certinext.cli_support.prompt_stderr` helper that keeps interactive
+prompts off stdout so piped certificate output stays clean.
 
 Test certificate data is generated at module load time using the
 ``cryptography`` library so that binary-format round-trips (DER parse)
@@ -26,7 +26,6 @@ serve as real structural assertions, not just byte-equality checks against
 hand-crafted blobs.
 """
 
-import argparse
 import datetime
 import io
 from pathlib import Path
@@ -38,8 +37,9 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import NameOID
 
-from certinext._cli import prompt_stderr
-from certinext.issue_certificate_cli import _stem_from_domain, _write_outputs, build_parser
+from certinext.cli import main as cli_main
+from certinext.cli.issue_cert import OutputOptions, _stem_from_domain, _write_outputs
+from certinext.cli_support import prompt_stderr
 from certinext.ssl_certificates import CertificateDownload
 
 # ---------------------------------------------------------------------------
@@ -167,23 +167,17 @@ class FakeOrder:
 # ---------------------------------------------------------------------------
 
 
-def _args(**overrides: Any) -> argparse.Namespace:
-    """Build a Namespace with all output destinations defaulting to None.
+def _args(**overrides: Any) -> OutputOptions:
+    """Build an OutputOptions with all output destinations defaulting to None.
 
     Args:
         overrides: Output-flag attributes to set (e.g. ``cert_out="x.pem"``).
 
     Returns:
-        Namespace with ``output``, ``cert_out``, ``chain_out``,
-        ``fullchain_out``, ``der_out``, and ``all_formats_out`` attributes.
+        :class:`certinext.cli.issue_cert.OutputOptions` with the overrides
+        applied.
     """
-    ns = argparse.Namespace(
-        output=None, cert_out=None, chain_out=None, fullchain_out=None,
-        der_out=None, all_formats_out=None, raw_chain=False,
-    )
-    for key, value in overrides.items():
-        setattr(ns, key, value)
-    return ns
+    return OutputOptions(**overrides)
 
 
 # ---------------------------------------------------------------------------
@@ -217,81 +211,56 @@ def test_prompt_stderr_raises_eoferror_on_closed_stdin(
 # ---------------------------------------------------------------------------
 
 
-def test_parser_accepts_output_part_flags() -> None:
-    """--cert-out/--chain-out/--fullchain-out parse into the expected dests."""
-    cfg = {"requestor_name": "Jane", "requestor_phone": "+12075551234"}
-    args = build_parser(cfg).parse_args(
-        ["--cert-out", "c.pem", "--chain-out", "ch.pem", "--fullchain-out", "fc.pem"]
-    )
-    assert args.cert_out == "c.pem"
-    assert args.chain_out == "ch.pem"
-    assert args.fullchain_out == "fc.pem"
+def _issue_cert_params() -> dict[str, Any]:
+    """Map the issue-cert command's click parameters by their primary flag name."""
+    import typer.main
+
+    from certinext.cli import app
+
+    group = typer.main.get_command(app)
+    command = group.commands["issue-cert"]  # type: ignore[attr-defined]
+    return {param.opts[0]: param for param in command.params}
 
 
-def test_parser_output_part_flags_default_to_none() -> None:
-    """The PEM part flags default to None so stdout behavior is unchanged."""
-    cfg = {"requestor_name": "Jane", "requestor_phone": "+12075551234"}
-    args = build_parser(cfg).parse_args([])
-    assert args.cert_out is None
-    assert args.chain_out is None
-    assert args.fullchain_out is None
+def test_command_exposes_output_flags() -> None:
+    """Every 0.3.x output flag survives on the typer command, defaulting to None/False."""
+    params = _issue_cert_params()
+    for flag in ("--cert-out", "--chain-out", "--fullchain-out", "--der-out",
+                 "--all-formats-out", "--output"):
+        assert flag in params, f"missing flag: {flag}"
+        assert params[flag].default is None
+    assert params["--raw-chain"].default is False
 
 
-def test_parser_accepts_der_flag() -> None:
-    """--der-out parses into the expected dest."""
-    cfg = {"requestor_name": "Jane", "requestor_phone": "+12075551234"}
-    args = build_parser(cfg).parse_args(["--der-out", "cert.der"])
-    assert args.der_out == "cert.der"
+def test_output_options_default_to_stdout_bundle() -> None:
+    """OutputOptions defaults keep the stdout-bundle behavior (all dests None)."""
+    opts = OutputOptions()
+    assert opts.output is None
+    assert opts.cert_out is None
+    assert opts.chain_out is None
+    assert opts.fullchain_out is None
+    assert opts.der_out is None
+    assert opts.all_formats_out is None
+    assert opts.raw_chain is False
 
 
-def test_parser_der_flag_defaults_to_none() -> None:
-    """--der-out defaults to None so existing stdout behavior is unchanged."""
-    cfg = {"requestor_name": "Jane", "requestor_phone": "+12075551234"}
-    args = build_parser(cfg).parse_args([])
-    assert args.der_out is None
-
-
-def test_parser_accepts_all_formats_out_flag() -> None:
-    """--all-formats-out parses into the expected dest."""
-    cfg = {"requestor_name": "Jane", "requestor_phone": "+12075551234"}
-    args = build_parser(cfg).parse_args(["--all-formats-out", "/tmp/certs"])
-    assert args.all_formats_out == "/tmp/certs"
-
-
-def test_parser_all_formats_out_defaults_to_none() -> None:
-    """--all-formats-out defaults to None so stdout behavior is unchanged."""
-    cfg = {"requestor_name": "Jane", "requestor_phone": "+12075551234"}
-    args = build_parser(cfg).parse_args([])
-    assert args.all_formats_out is None
-
-
-def test_parser_raw_chain_defaults_false_and_sets_true() -> None:
-    """--raw-chain is a store_true flag defaulting to False."""
-    cfg = {"requestor_name": "Jane", "requestor_phone": "+12075551234"}
-    assert build_parser(cfg).parse_args([]).raw_chain is False
-    assert build_parser(cfg).parse_args(["--raw-chain"]).raw_chain is True
-
-
-def test_help_text_is_ascii() -> None:
-    """--help text must be pure ASCII so it never crashes on a non-UTF-8 console.
+def test_option_help_strings_are_ascii() -> None:
+    """Our option help strings must be pure ASCII so no console encoding chokes.
 
     A U+2192 arrow in a help string previously raised UnicodeEncodeError when
-    --help was printed to a cp1252 (Windows) pipe, because cp1252 cannot encode
-    that character. Keeping the help text ASCII avoids the whole class of
-    console-encoding failures regardless of locale.
+    --help was printed to a cp1252 (Windows) pipe. Rich (which renders typer
+    help) substitutes its own box characters per console encoding, so this
+    pins only the text we control: the help strings themselves.
     """
-    cfg = {"requestor_name": "Jane", "requestor_phone": "+12075551234"}
-    help_text = build_parser(cfg).format_help()
-    non_ascii = sorted({ch for ch in help_text if not ch.isascii()})
-    assert help_text.isascii(), f"non-ASCII characters in --help text: {non_ascii!r}"
+    for flag, param in _issue_cert_params().items():
+        help_text = getattr(param, "help", "") or ""
+        non_ascii = sorted({ch for ch in help_text if not ch.isascii()})
+        assert help_text.isascii(), f"non-ASCII in {flag} help: {non_ascii!r}"
 
 
 def test_help_flag_exits_zero(capsys: pytest.CaptureFixture[str]) -> None:
     """--help prints usage (including --raw-chain) and exits 0."""
-    cfg = {"requestor_name": "Jane", "requestor_phone": "+12075551234"}
-    with pytest.raises(SystemExit) as excinfo:
-        build_parser(cfg).parse_args(["--help"])
-    assert excinfo.value.code == 0
+    assert cli_main(["issue-cert", "--help"]) == 0
     assert "--raw-chain" in capsys.readouterr().out
 
 

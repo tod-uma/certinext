@@ -78,6 +78,11 @@ def domains() -> int:
     return _invoke("domains")
 
 
+def issue_cert() -> int:
+    """Entry point for the ``certinext-issue-cert`` alias."""
+    return _invoke("issue-cert")
+
+
 def setup_keyring() -> int:
     """Entry point for the ``certinext-setup-keyring`` alias."""
     return _invoke("setup", "keyring")

@@ -37,6 +37,7 @@ from certinext.cli import (  # noqa: F401
     domain_cert_count,
     domains,
     healthcheck,
+    issue_cert,
     ledger,
     list_certificates,
     parent_dcv_status,
