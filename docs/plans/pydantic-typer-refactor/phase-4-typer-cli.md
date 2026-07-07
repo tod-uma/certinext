@@ -1,5 +1,5 @@
 ---
-status: planned
+status: in-progress
 depends-on: [phase-1, phase-2, phase-3]
 implements-adr: [0003, 0004]
 ---
@@ -42,8 +42,15 @@ Removal no earlier than 2.0.
   `typer.prompt` writes prompts to stdout by default; wrap it or use
   `rich.prompt` on a stderr console. Do not regress this; it was a shipped
   bug fix).
-- **`--json` output byte-compatible** with 0.3.x — machine consumers are
-  unaudited (roadmap open question #1). Golden-file tests per command.
+- **Human/table stdout is NOT load-bearing** — roadmap open question #1
+  was answered 2026-07-07 (Tod): nothing in UMS parses CLI stdout, and the
+  default output may change under the 1.0 major bump. Rich tables need not
+  mimic tabulate's formatting.
+- **`--json` output stays byte-compatible** with 0.3.x — not because a
+  consumer demands it (none audited), but because phase 1's `as_dict()`
+  raw-payload identity makes parity nearly free. Golden-file tests per
+  command pin it as a **regression guard, not a contract**: a deliberate
+  improvement may change a golden, with a migration-guide note.
 - **Exit codes preserved**, healthcheck's especially (monitoring-relevant;
   its non-zero classes are DENIED/NOT_FOUND/SERVER_BUG/NETWORK, EMPTY under
   `--strict`).
@@ -99,7 +106,8 @@ preserves, not the in-process namespace.
    `tabulate` + `types-tabulate` out.
 6. Snapshot tests: `--help` trees recorded (they *will* differ from
    argparse; the snapshot documents the new contract), `--json` goldens
-   proving byte-parity.
+   pinning the 0.3.x format as a regression guard (deliberate changes
+   allowed with a migration-guide note).
 
 ## Verification
 
