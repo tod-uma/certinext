@@ -16,8 +16,9 @@ import structlog
 
 import certinext
 from certinext._config import ConfigError, connection_config
-from certinext._keyring import keyring_available, keyring_get, keyring_service, no_keyring_help
+from certinext._keyring import keyring_available, no_keyring_help
 from certinext.exceptions import CertiNextAPIError
+from certinext.settings import CertiNextSettings
 
 log = structlog.get_logger()
 
@@ -52,50 +53,42 @@ def prompt_stderr(prompt: str) -> str:
     return input()
 
 
-def _resolve(
-    arg_value: str | None,
+def _require_credential(
+    value: str | None,
     env_var: str,
     prompt: str,
     secret: bool = False,
-    kr_service: str | None = None,
-    kr_key: str | None = None,
     allow_prompt: bool = True,
 ) -> str:
-    """Resolve a credential from CLI arg, keyring, environment variable, or interactive prompt.
+    """Return an already-resolved credential, or fall back to an interactive prompt.
 
-    Checks in priority order: explicit argument → keyring → environment variable → prompt.
-    Secrets are read with getpass so they are not echoed to the terminal.
+    The CLI-arg → keyring → env resolution happens in
+    :class:`~certinext.settings.CertiNextSettings`; this handles the final
+    step of the precedence order — prompting — plus the error paths when
+    prompting is suppressed or impossible. Secrets are read with getpass so
+    they are not echoed to the terminal.
 
     Args:
-        arg_value: Value from a CLI argument, or None if not provided.
-        env_var: Environment variable name to fall back to.
+        value: The credential as resolved by settings, or None if absent.
+        env_var: Environment variable name to mention in messages.
         prompt: Text shown when prompting interactively.
         secret: If True, use getpass so input is not echoed.
-        kr_service: Keyring service name to check before the env var.
-        kr_key: Keyring key (username) to look up under kr_service.
         allow_prompt: If False, raise :exc:`CredentialsNotFoundError` instead
-            of prompting when the credential is not found in the keyring or
-            environment. Use this in setup scripts that want to try the API
-            but handle missing credentials gracefully.
+            of prompting when the credential was not resolved. Use this in
+            setup scripts that want to try the API but handle missing
+            credentials gracefully.
 
     Returns:
         The resolved credential string.
 
     Raises:
         CredentialsNotFoundError: If ``allow_prompt`` is False and the
-            credential is not available from the keyring or environment.
+            credential was not resolved.
         RuntimeError: If the credential is unset and stdin is not a TTY, so
             no interactive prompt is possible.
     """
-    if arg_value:
-        return arg_value
-    if kr_service and kr_key:
-        kr_value = keyring_get(kr_service, kr_key)
-        if kr_value:
-            return kr_value
-    env_value = os.environ.get(env_var)
-    if env_value:
-        return env_value
+    if value:
+        return value
     if not allow_prompt:
         raise CredentialsNotFoundError(
             f"{prompt} is not configured. "
@@ -342,10 +335,12 @@ def build_session(
     """Resolve credentials and return a configured :class:`~certinext.CertiNextSession`.
 
     Reads credentials in priority order: explicit CLI argument → keyring →
-    environment variable → interactive prompt.  When ``--account-number`` is
-    provided explicitly the keyring is **not** consulted for the client secret,
-    because the stored secret belongs to the previously configured account and
-    would cause an authentication failure if used with a different client ID.
+    environment variable → interactive prompt (the first three via
+    :class:`~certinext.settings.CertiNextSettings`).  When ``--account-number``
+    is provided explicitly the keyring is **not** consulted for the client
+    secret, because the stored secret belongs to the previously configured
+    account and would cause an authentication failure if used with a
+    different client ID.
 
     Args:
         args: Parsed CLI arguments. Must have ``profile``, ``base_url``,
@@ -363,25 +358,28 @@ def build_session(
         CredentialsNotFoundError: If ``prompt=False`` and credentials are not
             available from the keyring or environment.
     """
-    profile = getattr(args, "profile", None) or os.environ.get("CERTINEXT_PROFILE")
-    svc = keyring_service("certinext", profile)
-    client_id = _resolve(
-        args.account_number, "CERTINEXT_CLIENT_ID", "CertiNext account number",
-        kr_service=svc, kr_key="CERTINEXT_CLIENT_ID",
+    # Only pass kwargs the caller actually set: an init value of None would
+    # still outrank the keyring and env sources inside pydantic-settings.
+    init_kwargs: dict[str, Any] = {}
+    if getattr(args, "profile", None):
+        init_kwargs["profile"] = args.profile
+    if args.account_number:
+        init_kwargs["client_id"] = args.account_number
+    if args.client_secret:
+        init_kwargs["client_secret"] = args.client_secret
+    settings = CertiNextSettings(**init_kwargs)
+
+    client_id = _require_credential(
+        settings.client_id, "CERTINEXT_CLIENT_ID", "CertiNext account number",
         allow_prompt=prompt,
     )
-    # Skip keyring for secret when account number was explicitly overridden — the
-    # stored secret belongs to a different account and would cause a 401.
-    secret_kr_service = None if args.account_number else svc
-    secret_kr_key = None if args.account_number else "CERTINEXT_CLIENT_SECRET"
-    client_secret = _resolve(
-        args.client_secret, "CERTINEXT_CLIENT_SECRET", "CertiNext client secret", secret=True,
-        kr_service=secret_kr_service,
-        kr_key=secret_kr_key,
+    client_secret = _require_credential(
+        settings.client_secret.get_secret_value() if settings.client_secret else None,
+        "CERTINEXT_CLIENT_SECRET", "CertiNext client secret", secret=True,
         allow_prompt=prompt,
     )
     if prompt:
-        log.info("Connecting", url=args.base_url, account=client_id, profile=profile or "default")
+        log.info("Connecting", url=args.base_url, account=client_id, profile=settings.profile or "default")
     return certinext.session(
         base_url=args.base_url,
         token_url=args.token_url,

@@ -28,7 +28,7 @@ the table. Wishlist issues #7–#12 are deliberately *outside* the milestone
 | 0 — Guardrails & probe suite (**lands on `main`**) | [phase-0-guardrails-and-probe-suite.md](phase-0-guardrails-and-probe-suite.md) | #13 | planned | — | 0005 |
 | 1 — Pydantic models | [phase-1-pydantic-models.md](phase-1-pydantic-models.md) | #14 | done | phase-0 | 0003, 0005 |
 | 2 — httpx transport & exceptions | [phase-2-httpx-transport.md](phase-2-httpx-transport.md) | #15 | done | phase-1 | 0003 |
-| 3 — pydantic-settings config | [phase-3-pydantic-settings-config.md](phase-3-pydantic-settings-config.md) | #16 | planned | phase-0 | 0003 |
+| 3 — pydantic-settings config | [phase-3-pydantic-settings-config.md](phase-3-pydantic-settings-config.md) | #16 | done | phase-0 | 0003 |
 | 4 — typer CLI + rich | [phase-4-typer-cli.md](phase-4-typer-cli.md) | #17 | planned | phase-1, phase-2, phase-3 | 0003, 0004 |
 | 5 — Consumer migration | [phase-5-consumer-migration.md](phase-5-consumer-migration.md) | #18 | planned | phase-4 | — |
 | 6 — Docs, CI, release | [phase-6-docs-ci-release.md](phase-6-docs-ci-release.md) | #19 | planned | phase-4, phase-5 | — |
@@ -111,9 +111,10 @@ published** to the GitLab registry or PyPI. Phase 0 caps that pin before any
    evidence for multi-page behavior?
 3. **Probe cadence**: is the phase-0 probe suite also scheduled (cron/CI) or
    run on demand only?
-4. **TOML writer**: keep the hand-rolled `_config.py` renderer or adopt
-   [tomlkit](https://tomlkit.readthedocs.io/en/latest/) for round-tripping?
-   (Phase 3 sub-decision.)
+4. **TOML writer**: ~~keep the hand-rolled `_config.py` renderer or adopt
+   [tomlkit](https://tomlkit.readthedocs.io/en/latest/) for round-tripping?~~
+   **Answered 2026-07-06 (Tod): tomlkit, write path only** — rationale in
+   the [phase 3 doc](phase-3-pydantic-settings-config.md).
 5. **Python floor**: bump `requires-python` to `>=3.11` at 1.0? Drops the
    `tomli` backport dependency, and 3.10 reaches end-of-life 2026-10 —
    likely before 1.0.0 stable ships. Recommended unless a consumer is stuck

@@ -37,14 +37,21 @@ profile concept:
     base_url  = "https://staging-api.certinext.io"
     token_url = "https://staging-api.certinext.io/oauth/token"
 
-Two key families live side by side. Issue-cert defaults (see
-:data:`CONFIG_KEYS`) are read by :func:`config_defaults`; connection settings
-(see :data:`CONNECTION_KEYS`) are read by :func:`connection_config`. Each
-reader ignores the other family's keys, so a ``sandbox``/``base_url`` entry
-never trips an "unknown key" warning during certificate issuance.
+Two key families live side by side, each defined by a pydantic model in
+:mod:`certinext.settings`. Issue-cert defaults
+(:class:`~certinext.settings.IssuanceDefaults`) are read by
+:func:`config_defaults`; connection settings
+(:class:`~certinext.settings.ConnectionSettings`) are read by
+:func:`connection_config`. Each reader ignores the other family's keys, so a
+``sandbox``/``base_url`` entry never trips an "unknown key" warning during
+certificate issuance. Values are validated one key at a time, so a bad entry
+degrades into a warning while the rest of the file still applies.
 
 Resolution precedence (highest first): explicit CLI argument, environment
 variable, ``[profiles.NAME]`` value, ``[defaults]`` value, built-in default.
+
+Writes go through tomlkit, so comments and formatting in a hand-edited file
+survive ``certinext-setup-defaults`` / ``--save-defaults`` round trips.
 
 Secrets (client secret, prevetting token) must never be stored here — use
 the OS keyring via ``certinext-setup-keyring``.
@@ -54,38 +61,30 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import tomlkit
+import tomlkit.exceptions
+from pydantic import BaseModel, ValidationError
+
+from certinext.settings import ConnectionSettings, IssuanceDefaults, family_keys
+
 if sys.version_info >= (3, 11):
     import tomllib
 else:  # Python 3.10
     import tomli as tomllib
 
 #: TOML keys accepted in [defaults] / [profiles.NAME], mapped to the argparse
-#: dest they feed. Keys equal to their dest are listed with an identity value.
-CONFIG_KEYS: dict[str, str] = {
-    "requestor_name": "requestor_name",
-    "requestor_email": "requestor_email",
-    "requestor_phone": "requestor_phone",
-    "requestor_designation": "requestor_designation",
-    "signer_place": "signer_place",
-    "type": "cert_type",
-    "org_id": "org_id",
-    "validity": "validity",
-    "product": "product",
-}
+#: dest they feed. Derived from the IssuanceDefaults model (the TOML key is
+#: the field's alias where one is set, e.g. ``type`` -> ``cert_type``).
+CONFIG_KEYS: dict[str, str] = family_keys(IssuanceDefaults)
 
 #: Reverse map: argparse dest -> TOML key (for saving).
 DEST_TO_KEY: dict[str, str] = {dest: key for key, dest in CONFIG_KEYS.items()}
 
-#: Per-profile connection settings, mapped to their expected Python type. These
-#: live in the same [defaults]/[profiles.NAME] sections as the issue-cert
-#: defaults but are read by :func:`connection_config`, not :func:`config_defaults`.
-#: ``sandbox`` is a boolean shorthand for the sandbox endpoints; ``base_url`` /
-#: ``token_url`` point a profile at an arbitrary endpoint.
-CONNECTION_KEYS: dict[str, type] = {
-    "sandbox": bool,
-    "base_url": str,
-    "token_url": str,
-}
+#: Per-profile connection settings, mapped to their field name (always the
+#: TOML key itself). These live in the same [defaults]/[profiles.NAME]
+#: sections as the issue-cert defaults but are read by
+#: :func:`connection_config`, not :func:`config_defaults`.
+CONNECTION_KEYS: dict[str, str] = family_keys(ConnectionSettings)
 
 
 class ConfigError(Exception):
@@ -140,41 +139,98 @@ def load_config(path: Path | None = None) -> dict[str, Any]:
         raise ConfigError(f"Invalid TOML in {path}: {exc}") from exc
 
 
-def _validate(key: str, value: Any, source: str, warnings: list[str]) -> Any | None:
-    """Validate a single config value, returning it (coerced) or None to skip.
+def _sections(doc: dict[str, Any], profile: str | None) -> list[tuple[str, Any]]:
+    """Return the (label, section) pairs a profile's settings merge from.
+
+    Always ``[defaults]``, plus ``[profiles.NAME]`` when a profile is active
+    (profile values override).
 
     Args:
+        doc: The parsed config document.
+        profile: Profile name, or None for the default profile only.
+
+    Returns:
+        List of ``(section label, raw section value)`` pairs in merge order.
+    """
+    sections: list[tuple[str, Any]] = [("[defaults]", doc.get("defaults", {}))]
+    if profile:
+        profiles = doc.get("profiles")
+        section = profiles.get(profile, {}) if isinstance(profiles, dict) else {}
+        sections.append((f"[profiles.{profile}]", section))
+    return sections
+
+
+def _checked(
+    model_cls: type[BaseModel], key: str, value: Any, label: str, warnings: list[str]
+) -> Any | None:
+    """Validate a single config value through its family model.
+
+    Validates ``{key: value}`` alone, so one bad entry never blocks the rest
+    of the section.
+
+    Args:
+        model_cls: The family model declaring the key.
         key: TOML key name.
         value: Raw value from the parsed file.
-        source: Section label for warning messages (e.g. ``'[defaults]'``).
+        label: Section label for warning messages (e.g. ``'[defaults]'``).
         warnings: List that invalid-value messages are appended to.
 
     Returns:
-        The validated value, or None when the value should be ignored.
+        The validated value, or None (with a warning recorded) when the
+        value is invalid and should be ignored.
     """
-    if key == "validity":
-        if not isinstance(value, int) or value not in (1, 2, 3):
-            warnings.append(f"{source}: validity must be 1, 2, or 3 (got {value!r}); ignoring")
-            return None
-        return value
-    if key == "type":
-        if value not in ("dv", "ov", "ev"):
-            warnings.append(f"{source}: type must be dv, ov, or ev (got {value!r}); ignoring")
-            return None
-        return value
-    if not isinstance(value, str):
-        warnings.append(f"{source}: {key} must be a string (got {value!r}); ignoring")
+    try:
+        probe = model_cls.model_validate({key: value})
+    except ValidationError as exc:
+        detail = "; ".join(err["msg"] for err in exc.errors())
+        warnings.append(f"{label}: {key}: {detail} (got {value!r}); ignoring")
         return None
-    return value
+    return getattr(probe, family_keys(model_cls)[key])
 
 
-def config_defaults(profile: str | None, path: Path | None = None) -> tuple[dict[str, Any], list[str]]:
-    """Return stored defaults for a profile, keyed by argparse dest name.
+def issuance_defaults(profile: str | None, path: Path | None = None) -> tuple[IssuanceDefaults, list[str]]:
+    """Return stored issue-cert defaults for a profile as a validated model.
 
     Merges the ``[defaults]`` section with the matching ``[profiles.NAME]``
     section (profile values win). Unknown or invalid keys are skipped and
     reported via the warnings list rather than raising, so a typo in the
     config file never blocks issuance.
+
+    Args:
+        profile: Profile name, or None for the default profile only.
+        path: Config file to read; defaults to :func:`config_path`.
+
+    Returns:
+        An ``(IssuanceDefaults, warnings)`` tuple.
+
+    Raises:
+        ConfigError: If the config file exists but cannot be parsed.
+    """
+    doc = load_config(path)
+    warnings: list[str] = []
+    merged: dict[str, Any] = {}
+
+    for label, section in _sections(doc, profile):
+        if not isinstance(section, dict):
+            warnings.append(f"{label} is not a table; ignoring")
+            continue
+        for key, value in section.items():
+            if key in CONNECTION_KEYS:
+                continue  # connection settings are read by connection_config()
+            if key not in CONFIG_KEYS:
+                warnings.append(f"{label}: unknown key {key!r}; ignoring")
+                continue
+            checked = _checked(IssuanceDefaults, key, value, label, warnings)
+            if checked is not None:
+                merged[CONFIG_KEYS[key]] = checked
+    return IssuanceDefaults.model_validate(merged), warnings
+
+
+def config_defaults(profile: str | None, path: Path | None = None) -> tuple[dict[str, Any], list[str]]:
+    """Return stored defaults for a profile, keyed by argparse dest name.
+
+    Dict view of :func:`issuance_defaults` for the argparse-based CLIs
+    (values feed ``build_parser`` defaults).
 
     Args:
         profile: Profile name, or None for the default profile only.
@@ -187,38 +243,50 @@ def config_defaults(profile: str | None, path: Path | None = None) -> tuple[dict
     Raises:
         ConfigError: If the config file exists but cannot be parsed.
     """
+    model, warnings = issuance_defaults(profile, path)
+    return model.model_dump(exclude_none=True), warnings
+
+
+def connection_settings(profile: str | None, path: Path | None = None) -> tuple[ConnectionSettings, list[str]]:
+    """Return stored connection settings for a profile as a validated model.
+
+    Merges the ``[defaults]`` section with the matching ``[profiles.NAME]``
+    section (profile values win), keeping only the
+    :class:`~certinext.settings.ConnectionSettings` keys. Values of the wrong
+    type are skipped and reported via the warnings list rather than raising,
+    so a typo never blocks a CLI from connecting (it just falls back to the
+    production default).
+
+    Args:
+        profile: Profile name, or None for the default profile only.
+        path: Config file to read; defaults to :func:`config_path`.
+
+    Returns:
+        A ``(ConnectionSettings, warnings)`` tuple.
+
+    Raises:
+        ConfigError: If the config file exists but cannot be parsed.
+    """
     doc = load_config(path)
     warnings: list[str] = []
     merged: dict[str, Any] = {}
 
-    sections: list[tuple[str, Any]] = [("[defaults]", doc.get("defaults", {}))]
-    if profile:
-        sections.append((f"[profiles.{profile}]", doc.get("profiles", {}).get(profile, {})))
-
-    for label, section in sections:
+    for label, section in _sections(doc, profile):
         if not isinstance(section, dict):
-            warnings.append(f"{label} is not a table; ignoring")
-            continue
+            continue  # config_defaults() already warns about a non-table section
         for key, value in section.items():
-            if key in CONNECTION_KEYS:
-                continue  # connection settings are read by connection_config()
-            if key not in CONFIG_KEYS:
-                warnings.append(f"{label}: unknown key {key!r}; ignoring")
-                continue
-            checked = _validate(key, value, label, warnings)
+            if key not in CONNECTION_KEYS:
+                continue  # issue-cert defaults are read by config_defaults()
+            checked = _checked(ConnectionSettings, key, value, label, warnings)
             if checked is not None:
-                merged[CONFIG_KEYS[key]] = checked
-    return merged, warnings
+                merged[key] = checked
+    return ConnectionSettings.model_validate(merged), warnings
 
 
 def connection_config(profile: str | None, path: Path | None = None) -> tuple[dict[str, Any], list[str]]:
     """Return stored connection settings for a profile (endpoint selection).
 
-    Merges the ``[defaults]`` section with the matching ``[profiles.NAME]``
-    section (profile values win), keeping only the keys in
-    :data:`CONNECTION_KEYS`. Values of the wrong type are skipped and reported
-    via the warnings list rather than raising, so a typo never blocks a CLI
-    from connecting (it just falls back to the production default).
+    Dict view of :func:`connection_settings` for the argparse-based CLIs.
 
     Args:
         profile: Profile name, or None for the default profile only.
@@ -231,28 +299,8 @@ def connection_config(profile: str | None, path: Path | None = None) -> tuple[di
     Raises:
         ConfigError: If the config file exists but cannot be parsed.
     """
-    doc = load_config(path)
-    warnings: list[str] = []
-    merged: dict[str, Any] = {}
-
-    sections: list[tuple[str, Any]] = [("[defaults]", doc.get("defaults", {}))]
-    if profile:
-        sections.append((f"[profiles.{profile}]", doc.get("profiles", {}).get(profile, {})))
-
-    for label, section in sections:
-        if not isinstance(section, dict):
-            continue  # config_defaults() already warns about a non-table section
-        for key, value in section.items():
-            if key not in CONNECTION_KEYS:
-                continue  # issue-cert defaults are read by config_defaults()
-            expected = CONNECTION_KEYS[key]
-            # bool is a subclass of int, so a stray "base_url = true" must not
-            # pass the str check — reject any bool where a string is expected.
-            if not isinstance(value, expected) or (expected is str and isinstance(value, bool)):
-                warnings.append(f"{label}: {key} must be {expected.__name__} (got {value!r}); ignoring")
-                continue
-            merged[key] = value
-    return merged, warnings
+    model, warnings = connection_settings(profile, path)
+    return model.model_dump(exclude_none=True), warnings
 
 
 def profile_from_argv(argv: list[str]) -> str | None:
@@ -284,55 +332,36 @@ def profile_from_argv(argv: list[str]) -> str | None:
     return os.environ.get("CERTINEXT_PROFILE") or None
 
 
-def _toml_literal(value: Any) -> str:
-    """Render a scalar as a TOML literal (string, int, or bool)."""
-    if isinstance(value, bool):
-        return "true" if value else "false"
-    if isinstance(value, int):
-        return str(value)
-    escaped = str(value).replace("\\", "\\\\").replace('"', '\\"')
-    return f'"{escaped}"'
+def _parse_for_update(path: Path) -> tomlkit.TOMLDocument:
+    """Read the config file as a comment-preserving tomlkit document.
 
-
-def _render(doc: dict[str, Any]) -> str:
-    """Render the config document back to TOML text.
-
-    Emits ``[defaults]`` first, then ``[profiles.NAME]`` sections in sorted
-    order, then any other top-level tables. Comments from a previous file
-    are not preserved.
+    A missing file yields a fresh document with a short header comment; an
+    existing file is parsed so comments and formatting round-trip.
 
     Args:
-        doc: Parsed config document (nested dicts of scalars).
+        path: Config file to read.
 
     Returns:
-        TOML text ending in a newline.
+        The tomlkit document to update and write back.
+
+    Raises:
+        ConfigError: If the file exists but cannot be read or parsed (an
+            unparseable file is never blindly overwritten).
     """
-    chunks: list[str] = [
-        "# CertiNext stored defaults - see the certinext README.",
-        "# Managed by certinext-setup-defaults / --save-defaults; comments are not preserved.",
-        "",
-    ]
-
-    def emit(header: str, table: dict[str, Any]) -> None:
-        """Append one [section] with its key/value lines to chunks."""
-        chunks.append(f"[{header}]")
-        for key in sorted(table):
-            chunks.append(f"{key} = {_toml_literal(table[key])}")
-        chunks.append("")
-
-    if isinstance(doc.get("defaults"), dict):
-        emit("defaults", doc["defaults"])
-    profiles = doc.get("profiles")
-    if isinstance(profiles, dict):
-        for name in sorted(profiles):
-            if isinstance(profiles[name], dict):
-                emit(f"profiles.{name}", profiles[name])
-    for name, table in doc.items():
-        if name in ("defaults", "profiles"):
-            continue
-        if isinstance(table, dict):
-            emit(name, table)
-    return "\n".join(chunks)
+    try:
+        raw = path.read_bytes()
+    except FileNotFoundError:
+        doc = tomlkit.document()
+        doc.add(tomlkit.comment("CertiNext stored defaults - see the certinext README."))
+        doc.add(tomlkit.comment("Managed by certinext-setup-defaults / --save-defaults."))
+        doc.add(tomlkit.nl())
+        return doc
+    except OSError as exc:
+        raise ConfigError(f"Cannot read {path}: {exc}") from exc
+    try:
+        return tomlkit.parse(raw.decode("utf-8"))
+    except (tomlkit.exceptions.ParseError, UnicodeDecodeError) as exc:
+        raise ConfigError(f"Invalid TOML in {path}: {exc}") from exc
 
 
 def save_defaults(
@@ -349,7 +378,8 @@ def save_defaults(
     (:data:`CONNECTION_KEYS`) are accepted, by argparse dest name or TOML key
     name; ``None`` and empty-string values are skipped so a blank prompt answer
     never writes an empty default. Existing sections and keys not mentioned in
-    ``values`` are preserved; comments in a hand-written file are not.
+    ``values`` are preserved, and so are comments and formatting in a
+    hand-written file (tomlkit round-trip).
 
     Args:
         values: Defaults to store, keyed by dest or TOML key name.
@@ -366,16 +396,21 @@ def save_defaults(
             if the file cannot be written.
     """
     path = path or config_path()
-    doc = load_config(path)
+    doc = _parse_for_update(path)
 
-    section: dict[str, Any]
     if profile:
-        profiles = doc.setdefault("profiles", {})
+        if "profiles" not in doc:
+            doc["profiles"] = tomlkit.table(is_super_table=True)
+        profiles = doc["profiles"]
         if not isinstance(profiles, dict):
             raise ConfigError(f"[profiles] in {path} is not a table")
-        section = profiles.setdefault(profile, {})
+        if profile not in profiles:
+            profiles[profile] = tomlkit.table()
+        section = profiles[profile]
     else:
-        section = doc.setdefault("defaults", {})
+        if "defaults" not in doc:
+            doc["defaults"] = tomlkit.table()
+        section = doc["defaults"]
     if not isinstance(section, dict):
         raise ConfigError(f"Target section in {path} is not a table")
 
@@ -387,11 +422,16 @@ def save_defaults(
             continue
         section[key] = value
     for name in remove:
-        section.pop(DEST_TO_KEY.get(name, name), None)
+        key = DEST_TO_KEY.get(name, name)
+        if key in section:
+            del section[key]
 
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(_render(doc), encoding="utf-8")
+        # newline="" disables \n -> \r\n translation: tomlkit's output already
+        # carries the file's own line endings (preserved from parse), and
+        # translating them again would corrupt \r\n into \r\r\n on Windows.
+        path.write_text(tomlkit.dumps(doc), encoding="utf-8", newline="")
     except OSError as exc:
         raise ConfigError(f"Cannot write {path}: {exc}") from exc
     return path
