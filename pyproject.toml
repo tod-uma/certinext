@@ -38,8 +38,8 @@ dependencies = [
 
 [project.scripts]
 certinext = "certinext.cli:main"
-certinext-setup-keyring = "certinext.setup_keyring_cli:main"
-certinext-setup-defaults = "certinext.setup_defaults_cli:main"
+certinext-setup-keyring = "certinext.cli._aliases:setup_keyring"
+certinext-setup-defaults = "certinext.cli._aliases:setup_defaults"
 certinext-accounts = "certinext.cli._aliases:accounts"
 certinext-domains = "certinext.cli._aliases:domains"
 certinext-ledger = "certinext.cli._aliases:ledger"

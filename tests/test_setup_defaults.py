@@ -22,7 +22,7 @@ import pytest
 import certinext
 from certinext.accounts import Organization
 from certinext.catalog import ProductCategory
-from certinext.setup_defaults_cli import (
+from certinext.cli.setup_defaults import (
     _endpoint_default,
     _endpoint_from_flags,
     _endpoint_sandbox,

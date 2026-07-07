@@ -41,6 +41,8 @@ from certinext.cli import (  # noqa: F401
     list_certificates,
     parent_dcv_status,
     pending_dcv,
+    setup_defaults,
+    setup_keyring,
 )
 from certinext.cli._app import app
 

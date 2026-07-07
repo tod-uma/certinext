@@ -76,3 +76,13 @@ def parent_dcv_status() -> int:
 def domains() -> int:
     """Entry point for the ``certinext-domains`` alias."""
     return _invoke("domains")
+
+
+def setup_keyring() -> int:
+    """Entry point for the ``certinext-setup-keyring`` alias."""
+    return _invoke("setup", "keyring")
+
+
+def setup_defaults() -> int:
+    """Entry point for the ``certinext-setup-defaults`` alias."""
+    return _invoke("setup", "defaults")
