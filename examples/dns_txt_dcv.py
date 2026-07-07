@@ -50,11 +50,51 @@ import sys
 import uuid
 from typing import Any
 
-from certinext._cli import add_connection_args, apply_sandbox, build_session
+import certinext
+from certinext.cli_support import build_session, resolve_connection
 from certinext.domains import filter_needs_dcv
 from certinext.exceptions import CertiNextAPIError
 
 log = logging.getLogger(__name__)
+
+
+def _add_connection_args(target: Any) -> None:
+    """Add the standard CertiNext connection arguments to a parser or group.
+
+    Declares the same flags the bundled ``certinext`` CLI exposes
+    (``--profile``, ``--sandbox``, ``--base-url``, ``--token-url``,
+    ``--account-number``/``--client-id``, ``--client-secret``); the values
+    feed :func:`certinext.cli_support.resolve_connection` and
+    :func:`certinext.cli_support.build_session`.
+
+    Args:
+        target: An :class:`argparse.ArgumentParser` or argument group that
+            accepts ``add_argument`` calls.
+    """
+    target.add_argument(
+        "--profile", metavar="NAME", default=None,
+        help="Credential profile for keyring lookup (env: CERTINEXT_PROFILE; default: use the default profile)",
+    )
+    target.add_argument(
+        "--sandbox", action="store_true", default=False,
+        help="Connect to the CertiNext sandbox API; implies --profile sandbox unless --profile is set",
+    )
+    target.add_argument(
+        "--base-url", default=None, metavar="URL",
+        help=f"CertiNext base URL (default: {certinext.BASE_URL}, or the profile/sandbox endpoint)",
+    )
+    target.add_argument(
+        "--token-url", default=None, metavar="URL",
+        help="OAuth2 token endpoint URL (default: derived from the base URL)",
+    )
+    target.add_argument(
+        "--account-number", "--client-id", dest="account_number", default=None, metavar="ACCT",
+        help="CertiNext account number / OAuth2 client_id (env: CERTINEXT_CLIENT_ID)",
+    )
+    target.add_argument(
+        "--client-secret", default=None, metavar="SECRET",
+        help="OAuth2 client secret (env: CERTINEXT_CLIENT_SECRET)",
+    )
 
 
 def _sigterm_handler(_signum: int, _frame: object) -> None:
@@ -372,7 +412,7 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     cn_group = parser.add_argument_group("CertiNext connection")
-    add_connection_args(cn_group)
+    _add_connection_args(cn_group)
     parser.add_argument(
         "--include-subdomains",
         action="store_true",
@@ -438,13 +478,18 @@ def main() -> None:
         _setup_logging(args.verbose)
         signal.signal(signal.SIGTERM, _sigterm_handler)
 
-        apply_sandbox(args)
-        if args.sandbox:
+        conn = resolve_connection(
+            profile=args.profile, sandbox=args.sandbox,
+            base_url=args.base_url, token_url=args.token_url,
+        )
+        if conn.sandbox:
             log.warning("SANDBOX MODE - connecting to CertiNext sandbox API")
         if args.dry_run:
             log.info("DRY RUN - no changes will be made")
 
-        sess = build_session(args)
+        sess = build_session(
+            conn, account_number=args.account_number, client_secret=args.client_secret,
+        )
         log.info("Starting run pid=%d correlation_id=%s", os.getpid(), correlation_id)
 
         auth_ns_raw = args.auth_nameservers or os.environ.get("AUTH_NAMESERVERS") or _DEFAULT_AUTH_NAMESERVERS

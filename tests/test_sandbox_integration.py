@@ -404,12 +404,9 @@ class TestCertIssuance:
         # ------------------------------------------------------------------
         # --all-formats-out: PEM and DER written and parseable
         # ------------------------------------------------------------------
-        from certinext.issue_certificate_cli import _stem_from_domain, _write_outputs
+        from certinext.cli.issue_cert import OutputOptions, _stem_from_domain, _write_outputs
 
-        _write_outputs(order, type("_Args", (), {  # type: ignore[arg-type]
-            "cert_out": None, "chain_out": None, "fullchain_out": None,
-            "der_out": None, "all_formats_out": str(tmp_path), "output": None,
-        })(), pem)
+        _write_outputs(order, OutputOptions(all_formats_out=str(tmp_path)), pem)
 
         stem = _stem_from_domain(order.domain)
         pem_file = tmp_path / f"{stem}.pem"

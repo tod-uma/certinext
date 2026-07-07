@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # Copyright 2026 University of Maine System
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -13,33 +12,20 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Show all registered domains and how many certificates each one has.
+"""Per-domain certificate counting: join registered domains with order records.
 
-Fetches the full domain list and the orders report, then joins them by domain
-name to produce a per-domain certificate count. Use ``--status`` to restrict
-counts to only issued or only expired certificates.
-
-Usage:
-    certinext-domain-cert-count
-    certinext-domain-cert-count --status issued
-    certinext-domain-cert-count --status expired
-    certinext-domain-cert-count --condense
-    certinext-domain-cert-count --json
+Operations layer for ``certinext domain-cert-count`` — the CLI command in
+:mod:`certinext.cli` only parses options and renders the rows built here, so
+other frontends can reuse the join logic directly.
 """
 
-import argparse
-import json
-import sys
 from collections import Counter
 
-from tabulate import tabulate
-
-from certinext._cli import add_connection_args, apply_sandbox, build_session
 from certinext.domains import Domain
 from certinext.orders import OrderRecord
 
 
-def _match_domain(cn: str, registered: set[str]) -> str | None:
+def match_domain(cn: str, registered: set[str]) -> str | None:
     """Return the most specific registered domain that a certificate CN belongs to.
 
     Caller is responsible for lowercasing ``cn`` before calling this function.
@@ -61,7 +47,7 @@ def _match_domain(cn: str, registered: set[str]) -> str | None:
     return max(matches, key=len) if matches else None
 
 
-def _apex_domain(domain: str, registered: set[str]) -> str:
+def apex_domain(domain: str, registered: set[str]) -> str:
     """Return the topmost registered ancestor of a domain.
 
     Walks up the registered-domain tree until it finds an entry that has no
@@ -87,7 +73,7 @@ def _apex_domain(domain: str, registered: set[str]) -> str:
         current = max(parents, key=len)
 
 
-def _build_rows(
+def build_rows(
     domains: list[Domain],
     orders: list[OrderRecord],
     condense: bool = False,
@@ -123,11 +109,11 @@ def _build_rows(
         if not o.common_name:
             continue
         cn = o.common_name.lower()
-        matched = _match_domain(cn, registered)
+        matched = match_domain(cn, registered)
         if matched is None:
             orphan_counts[cn] += 1
         elif condense:
-            domain_counts[_apex_domain(matched, registered)] += 1
+            domain_counts[apex_domain(matched, registered)] += 1
         else:
             domain_counts[matched] += 1
 
@@ -146,60 +132,3 @@ def _build_rows(
         rows.append({"domain": f"{cn} (not registered)", "certificates": str(count)})
 
     return rows
-
-
-def build_parser() -> argparse.ArgumentParser:
-    """Return the argument parser for certinext-domain-cert-count.
-
-    Returns:
-        A configured ArgumentParser instance.
-    """
-    parser = argparse.ArgumentParser(
-        description="Show all registered domains and their certificate counts",
-    )
-    parser.add_argument(
-        "--status", metavar="STATUS", default=None,
-        choices=["issued", "expired"],
-        help="Filter certificates by status: 'issued' (active) or 'expired'",
-    )
-    parser.add_argument(
-        "--condense", action="store_true", default=False,
-        help="Show only top-level domains; subdomain counts roll up into their apex",
-    )
-    parser.add_argument(
-        "--json", action="store_true", default=False,
-        help="Output raw JSON instead of tabular format",
-    )
-    conn = parser.add_argument_group("connection")
-    add_connection_args(conn)
-    return parser
-
-
-def main() -> None:
-    """Entry point for certinext-domain-cert-count."""
-    try:
-        parser = build_parser()
-        args = parser.parse_args()
-        apply_sandbox(args)
-        sess = build_session(args)
-
-        domains = sess.domain.get_list()
-        orders = sess.orders.get_list(status=args.status)
-        rows = _build_rows(domains, orders, condense=args.condense)
-
-        if args.json:
-            print(json.dumps(rows, indent=2))
-        else:
-            if not rows:
-                print("(no results)")
-                return
-            status_label = f" ({args.status})" if args.status else ""
-            print(f"Certificate counts per domain{status_label}:\n")
-            print(tabulate(rows, headers="keys", tablefmt="simple"))
-    except KeyboardInterrupt:
-        print("\nAborted.", file=sys.stderr)
-        raise SystemExit(130)
-
-
-if __name__ == "__main__":
-    main()

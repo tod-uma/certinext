@@ -1,5 +1,5 @@
 ---
-status: planned
+status: done
 depends-on: [phase-1, phase-2, phase-3]
 implements-adr: [0003, 0004]
 ---
@@ -42,8 +42,15 @@ Removal no earlier than 2.0.
   `typer.prompt` writes prompts to stdout by default; wrap it or use
   `rich.prompt` on a stderr console. Do not regress this; it was a shipped
   bug fix).
-- **`--json` output byte-compatible** with 0.3.x — machine consumers are
-  unaudited (roadmap open question #1). Golden-file tests per command.
+- **Human/table stdout is NOT load-bearing** — roadmap open question #1
+  was answered 2026-07-07 (Tod): nothing in UMS parses CLI stdout, and the
+  default output may change under the 1.0 major bump. Rich tables need not
+  mimic tabulate's formatting.
+- **`--json` output stays byte-compatible** with 0.3.x — not because a
+  consumer demands it (none audited), but because phase 1's `as_dict()`
+  raw-payload identity makes parity nearly free. Golden-file tests per
+  command pin it as a **regression guard, not a contract**: a deliberate
+  improvement may change a golden, with a migration-guide note.
 - **Exit codes preserved**, healthcheck's especially (monitoring-relevant;
   its non-zero classes are DENIED/NOT_FOUND/SERVER_BUG/NETWORK, EMPTY under
   `--strict`).
@@ -99,7 +106,8 @@ preserves, not the in-process namespace.
    `tabulate` + `types-tabulate` out.
 6. Snapshot tests: `--help` trees recorded (they *will* differ from
    argparse; the snapshot documents the new contract), `--json` goldens
-   proving byte-parity.
+   pinning the 0.3.x format as a regression guard (deliberate changes
+   allowed with a migration-guide note).
 
 ## Verification
 
@@ -117,6 +125,39 @@ README CLI section restructured around subcommands with an alias table;
 shell-completion install note
 ([typer completion docs](https://typer.tiangolo.com/tutorial/options-autocompletion/));
 migration guide lists any flag divergences (target: none).
+
+## Completion record (2026-07-07)
+
+All six implementation steps done; README CLI section restructured
+(alias table + completion note; the full README pass stays with phase 6).
+No flag divergences found — the migration story is the alias table alone.
+
+Verification evidence:
+
+- **Tests:** 832 passed / 12 skipped; ruff + mypy clean. Step 6 landed as
+  22 `--help` snapshots and 10 `--json` goldens under `tests/goldens/`,
+  compared line-by-line; regenerate deliberately with
+  `pytest --update-goldens` (option lives in `tests/conftest.py`).
+- **Grep gates:** no `import argparse`, no `tabulate` in `certinext/`.
+- **Live, prod:** `certinext healthcheck` — 15/15 probes PASS, exit 0.
+- **Live, sandbox:** `certinext healthcheck --sandbox` — 15/15 PASS; alias
+  smoke test passed (`certinext-healthcheck --sandbox` stdout byte-identical,
+  same exit code).
+- **Live, sandbox issue-cert end-to-end:** OV order 5789819957 for
+  `phase4-cli-1783449150.maine.edu` — created from stored profile defaults,
+  auto-approved via keyring prevetting token, issued, downloaded with
+  `--all-formats-out`; chain verified leaf-first (leaf, intermediate,
+  staging root), DER matches the PEM leaf. Covers the R11/R12 paths.
+
+Findings (neither is a phase-4 regression):
+
+- Sandbox **DV** orders 422 with `EMS-1180 Organization Name cannot be
+  empty` — account/vendor behavior; OV with the stored sandbox profile is
+  the working issuance flow. The 0.3.x code path was identical.
+- `--all-formats-out DIR` requires DIR to exist (fails cleanly with an
+  `--order-id` resume hint; 0.3.x behaved the same —
+  `issue_certificate_cli.py:719` had no mkdir). Creating the directory
+  would be a small QoL improvement for phase 6 or a follow-up.
 
 ---
 > **AI-assistant disclaimer:** Drafted by Claude Code (Claude Fable 5,

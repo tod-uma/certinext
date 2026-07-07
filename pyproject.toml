@@ -27,25 +27,27 @@ requires-python = ">=3.10"
 dependencies = [
     "httpx>=0.27",
     "pydantic>=2",
-    "tabulate>=0.9.0",
     "structlog",
     "tomli>=2.0; python_version < '3.11'",
     "pydantic-settings>=2.3",
     "tomlkit>=0.13",
+    "typer>=0.12",
+    "rich>=13",
 ]
 
 [project.scripts]
-certinext-setup-keyring = "certinext.setup_keyring_cli:main"
-certinext-setup-defaults = "certinext.setup_defaults_cli:main"
-certinext-accounts = "certinext.accounts_cli:main"
-certinext-domains = "certinext.domains_cli:main"
-certinext-ledger = "certinext.ledger_cli:main"
-certinext-list-certificates = "certinext.list_certificates_cli:main"
-certinext-pending-dcv = "certinext.pending_dcv_cli:main"
-certinext-domain-cert-count = "certinext.domain_cert_count_cli:main"
-certinext-issue-cert = "certinext.issue_certificate_cli:main"
-certinext-parent-dcv-status = "certinext.parent_dcv_status_cli:main"
-certinext-healthcheck = "certinext.healthcheck_cli:main"
+certinext = "certinext.cli:main"
+certinext-setup-keyring = "certinext.cli._aliases:setup_keyring"
+certinext-setup-defaults = "certinext.cli._aliases:setup_defaults"
+certinext-accounts = "certinext.cli._aliases:accounts"
+certinext-domains = "certinext.cli._aliases:domains"
+certinext-ledger = "certinext.cli._aliases:ledger"
+certinext-list-certificates = "certinext.cli._aliases:list_certificates"
+certinext-pending-dcv = "certinext.cli._aliases:pending_dcv"
+certinext-domain-cert-count = "certinext.cli._aliases:domain_cert_count"
+certinext-issue-cert = "certinext.cli._aliases:issue_cert"
+certinext-parent-dcv-status = "certinext.cli._aliases:parent_dcv_status"
+certinext-healthcheck = "certinext.cli._aliases:healthcheck"
 
 [project.urls]
 Homepage = "https://github.com/tod-uma/certinext"
@@ -58,7 +60,6 @@ dev = [
     "pytest>=8.0",
     "pyright>=1.1",
     "ruff>=0.4",
-    "types-tabulate>=0.9",
     "keyring",
     "cryptography>=42.0.0",
     "dnspython>=2.0",

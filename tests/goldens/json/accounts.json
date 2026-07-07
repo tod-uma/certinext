@@ -1,0 +1,38 @@
+{
+  "account": {
+    "accountNumber": "42",
+    "accountName": "University of Maine System",
+    "accountType": "ENTERPRISE"
+  },
+  "groups": [
+    {
+      "groupNumber": "g1",
+      "groupName": "IT"
+    }
+  ],
+  "organizations": [
+    {
+      "organizationNumber": "ORG-001",
+      "organizationName": "University of Maine System",
+      "organizationLocality": "Bangor",
+      "organizationCountryCode": "US",
+      "organizationPostalCode": "04401",
+      "organizationStatusId": "1",
+      "isPreVettingOrg": "1",
+      "validationStatusId": "1",
+      "validationFor": "2",
+      "subscriberAgreement": {
+        "signed": true,
+        "signerName": "Jane Doe"
+      },
+      "orgRepresentatives": [
+        {
+          "name": "Jane Doe"
+        }
+      ],
+      "domains": [
+        "maine.edu"
+      ]
+    }
+  ]
+}

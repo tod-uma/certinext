@@ -1,0 +1,21 @@
+[
+  {
+    "domainId": "vuxwZgEXWWFXQQWC-3zElI5VlhinKlE8xyYJqfeYNtFE0SAP",
+    "domainName": "umaine.edu",
+    "organizationId": "FIEUvE_VbBgefXTlqmcE5nr8rN0VxcTA7k8GrMA11hbPIZG-",
+    "organizationName": "University of Maine System",
+    "status": "ACTIVE",
+    "dcvStatus": "VERIFIED",
+    "validTill": "2099-12-31T00:00:00Z",
+    "createdAt": "2026-05-04T21:27:14Z"
+  },
+  {
+    "domainId": "oj2GiHLqpmRZglKoImTK8qmpQAsV5ixqRi4-jwvLprmD6xoK",
+    "domainName": "maine.edu",
+    "organizationId": "FIEUvE_VbBgefXTlqmcE5nr8rN0VxcTA7k8GrMA11hbPIZG-",
+    "organizationName": "University of Maine System",
+    "status": "ACTIVE",
+    "dcvStatus": "PENDING",
+    "createdAt": "2026-05-04T21:27:14Z"
+  }
+]

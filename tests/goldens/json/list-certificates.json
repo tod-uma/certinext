@@ -1,0 +1,20 @@
+[
+  {
+    "orderNumber": "ORD-001",
+    "requestNumber": "REQ-001",
+    "productCode": "955",
+    "orderStatus": "Order Fulfilled",
+    "certificateStatus": "issued",
+    "domainName": "maine.edu",
+    "validTill": "2099-12-31T00:00:00Z"
+  },
+  {
+    "orderNumber": "ORD-002",
+    "requestNumber": "REQ-002",
+    "productCode": "970",
+    "orderStatus": "Order Fulfilled",
+    "certificateStatus": "issued",
+    "domainName": "sub.maine.edu",
+    "validTill": "2099-12-31T00:00:00Z"
+  }
+]

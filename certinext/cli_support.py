@@ -1,15 +1,47 @@
-"""Shared CLI utilities for certinext command-line scripts.
+# Copyright 2026 University of Maine System
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
-Provides argument registration, sandbox URL overrides, and session construction
-so each CLI entry point stays focused on its own logic rather than credential
-plumbing.
+"""Public CLI-support layer: connection resolution, session building, logging.
+
+This module is the supported surface for scripts that build their own
+CertiNext sessions with the same credential and endpoint resolution the
+bundled ``certinext`` CLI uses (ADR 0004). It replaces the private
+``certinext._cli`` argparse helpers; unlike those, nothing here depends on
+argparse, typer, or any specific argument-parsing library.
+
+Typical use::
+
+    from certinext.cli_support import build_session, resolve_connection
+
+    conn = resolve_connection(sandbox=True)
+    sess = build_session(conn)
+
+Resolution rules (unchanged from 0.3.x):
+
+- **Endpoints** (:func:`resolve_connection`): explicit URL argument →
+  ``--sandbox`` flag → the active profile's stored connection settings →
+  built-in production endpoints.
+- **Credentials** (:func:`build_session`): explicit argument → OS keyring →
+  environment variable → interactive prompt (see
+  :class:`certinext.settings.CertiNextSettings` for the first three).
 """
 
-import argparse
 import getpass
 import logging
 import os
 import sys
+from dataclasses import dataclass
 from typing import Any, NoReturn
 
 import structlog
@@ -36,7 +68,7 @@ def prompt_stderr(prompt: str) -> str:
 
     Built-in ``input()`` writes its prompt to stdout, which corrupts piped
     output for CLIs that print certificates or JSON to stdout. This writes
-    the prompt to stderr instead, so ``certinext-issue-cert ... > cert.pem``
+    the prompt to stderr instead, so ``certinext issue-cert ... > cert.pem``
     style redirection never captures prompt text.
 
     Args:
@@ -53,7 +85,7 @@ def prompt_stderr(prompt: str) -> str:
     return input()
 
 
-def _require_credential(
+def require_credential(
     value: str | None,
     env_var: str,
     prompt: str,
@@ -92,7 +124,7 @@ def _require_credential(
     if not allow_prompt:
         raise CredentialsNotFoundError(
             f"{prompt} is not configured. "
-            f"Set {env_var} or run certinext-setup-keyring to store it."
+            f"Set {env_var} or run 'certinext setup keyring' to store it."
         )
     if not sys.stdin.isatty():
         if keyring_available():
@@ -109,84 +141,69 @@ def _require_credential(
     return prompt_stderr(f"{prompt}: ")
 
 
-def add_connection_args(target: Any, *, scope: bool = False) -> None:
-    """Add standard connection arguments to a parser or argument group.
+@dataclass(frozen=True)
+class ResolvedConnection:
+    """A fully resolved connection target for :func:`build_session`.
 
-    Registers ``--profile``, ``--sandbox``, ``--base-url``, ``--token-url``,
-    ``--account-number`` / ``--client-id``, and ``--client-secret``. Optionally
-    also registers ``--scope`` when ``scope=True``.
-
-    Args:
-        target: An :class:`argparse.ArgumentParser` or argument group that
-            accepts ``add_argument`` calls.
-        scope: If ``True``, also add ``--scope`` for OAuth2 scope strings.
+    Attributes:
+        base_url: Concrete CertiNext API base URL.
+        token_url: Concrete OAuth2 token endpoint URL.
+        sandbox: The *effective* sandbox choice (CLI flag or profile config),
+            so :attr:`certinext.session.CertiNextSession.sandbox` and portal
+            hints are correct.
+        profile: The credential profile for keyring lookups, or None for the
+            default profile.
     """
-    target.add_argument(
-        "--profile", metavar="NAME", default=None,
-        help="Credential profile for keyring lookup (env: CERTINEXT_PROFILE; default: use the default profile)",
-    )
-    target.add_argument(
-        "--sandbox", action="store_true", default=False,
-        help="Connect to the CertiNext sandbox API; implies --profile sandbox unless --profile is set",
-    )
-    # Defaults are None (not the production URL) so apply_sandbox() can tell an
-    # explicit --base-url from "unset" and fall back to the profile config or
-    # the --sandbox flag. The resolved default is still production.
-    target.add_argument(
-        "--base-url", default=None, metavar="URL",
-        help=f"CertiNext base URL (default: {certinext.BASE_URL}, or the profile/sandbox endpoint)",
-    )
-    target.add_argument(
-        "--token-url", default=None, metavar="URL",
-        help="OAuth2 token endpoint URL (default: derived from the base URL)",
-    )
-    target.add_argument(
-        "--account-number", "--client-id", dest="account_number", default=None, metavar="ACCT",
-        help="CertiNext account number / OAuth2 client_id (env: CERTINEXT_CLIENT_ID)",
-    )
-    target.add_argument(
-        "--client-secret", default=None, metavar="SECRET",
-        help="OAuth2 client secret (env: CERTINEXT_CLIENT_SECRET)",
-    )
-    if scope:
-        target.add_argument("--scope", default="", metavar="SCOPE", help="OAuth2 scope (optional)")
+
+    base_url: str
+    token_url: str
+    sandbox: bool
+    profile: str | None
 
 
-def apply_sandbox(args: argparse.Namespace) -> None:
-    """Resolve ``base_url``, ``token_url``, ``sandbox``, and ``profile`` in place.
+def resolve_connection(
+    profile: str | None = None,
+    sandbox: bool = False,
+    base_url: str | None = None,
+    token_url: str | None = None,
+) -> ResolvedConnection:
+    """Resolve the connection endpoint and effective profile from CLI-level inputs.
 
     Fills in the connection endpoint from (in priority order):
 
-    1. An explicit ``--base-url`` / ``--token-url`` on the command line.
-    2. The ``--sandbox`` flag (the sandbox endpoints).
+    1. An explicit ``base_url`` / ``token_url`` argument.
+    2. The ``sandbox`` flag (the sandbox endpoints).
     3. The active profile's stored connection settings — an explicit
        ``base_url`` / ``token_url``, or ``sandbox = true`` — from the config
        file (see :func:`certinext._config.connection_config`).
     4. The built-in production endpoints.
 
-    After this call ``args.base_url`` / ``args.token_url`` are always concrete
-    strings, and ``args.sandbox`` reflects the *effective* choice (CLI flag or
-    profile config) so ``CertiNextSession.sandbox`` and portal hints are
-    correct. As before, the bare ``--sandbox`` flag also defaults
-    ``args.profile`` to ``'sandbox'`` so keyring lookups find sandbox
-    credentials; a profile configured with ``sandbox = true`` keeps its own
-    name.
+    As in 0.3.x, the bare ``sandbox`` flag also defaults the profile to
+    ``'sandbox'`` so keyring lookups find sandbox credentials; a profile
+    configured with ``sandbox = true`` keeps its own name.
 
     Args:
-        args: Parsed CLI arguments (modified in place).
+        profile: Explicit profile name from the CLI, or None.
+        sandbox: The ``--sandbox`` CLI flag.
+        base_url: Explicit ``--base-url`` CLI value, or None.
+        token_url: Explicit ``--token-url`` CLI value, or None.
+
+    Returns:
+        A :class:`ResolvedConnection` with concrete URLs and the effective
+        sandbox flag and profile.
     """
-    cli_sandbox = bool(args.sandbox)
+    cli_sandbox = bool(sandbox)
 
     # Mirror build_session's profile precedence so the stored connection
     # settings are read for the profile that will actually be used.
-    profile = args.profile
-    if profile is None and cli_sandbox:
-        profile = "sandbox"
-    if profile is None:
-        profile = os.environ.get("CERTINEXT_PROFILE") or None
+    lookup_profile = profile
+    if lookup_profile is None and cli_sandbox:
+        lookup_profile = "sandbox"
+    if lookup_profile is None:
+        lookup_profile = os.environ.get("CERTINEXT_PROFILE") or None
 
     try:
-        conn, warnings = connection_config(profile)
+        conn, warnings = connection_config(lookup_profile)
     except ConfigError as exc:
         # A broken config file should not silently send traffic to production;
         # surface it and fall back to no stored connection settings.
@@ -199,40 +216,46 @@ def apply_sandbox(args: argparse.Namespace) -> None:
     cfg_base = conn.get("base_url")
     cfg_token = conn.get("token_url")
 
-    if args.base_url is not None:
-        pass  # explicit CLI value wins
+    if base_url is not None:
+        resolved_base = base_url  # explicit CLI value wins
     elif cli_sandbox:
-        args.base_url = certinext.SANDBOX_BASE_URL
+        resolved_base = certinext.SANDBOX_BASE_URL
     elif cfg_base is not None:
-        args.base_url = cfg_base
+        resolved_base = str(cfg_base)
     elif cfg_sandbox:
-        args.base_url = certinext.SANDBOX_BASE_URL
+        resolved_base = certinext.SANDBOX_BASE_URL
     else:
-        args.base_url = certinext.BASE_URL
+        resolved_base = certinext.BASE_URL
 
-    if args.token_url is not None:
-        pass  # explicit CLI value wins
+    if token_url is not None:
+        resolved_token = token_url  # explicit CLI value wins
     elif cli_sandbox:
-        args.token_url = certinext.SANDBOX_TOKEN_URL
+        resolved_token = certinext.SANDBOX_TOKEN_URL
     elif cfg_token is not None:
-        args.token_url = cfg_token
+        resolved_token = str(cfg_token)
     elif cfg_base is not None:
         # Custom base_url without a matching token_url — keep the production
-        # token endpoint; setup-defaults always writes the two together.
-        args.token_url = certinext.TOKEN_URL
+        # token endpoint; setup defaults always writes the two together.
+        resolved_token = certinext.TOKEN_URL
     elif cfg_sandbox:
-        args.token_url = certinext.SANDBOX_TOKEN_URL
+        resolved_token = certinext.SANDBOX_TOKEN_URL
     else:
-        args.token_url = certinext.TOKEN_URL
+        resolved_token = certinext.TOKEN_URL
 
-    # Effective sandbox flag: a profile that targets sandbox counts even without
-    # the CLI flag, so sess.sandbox and the org-picker portal hint stay right.
-    args.sandbox = cli_sandbox or cfg_sandbox
+    # Only the bare CLI flag auto-selects the 'sandbox' keyring profile; a
+    # named profile with sandbox = true keeps its own credentials.
+    effective_profile = profile
+    if cli_sandbox and profile is None:
+        effective_profile = "sandbox"
 
-    # Only the bare CLI flag auto-selects the 'sandbox' keyring profile; a named
-    # profile with sandbox = true keeps its own credentials.
-    if cli_sandbox and args.profile is None:
-        args.profile = "sandbox"
+    # Effective sandbox flag: a profile that targets sandbox counts even
+    # without the CLI flag, so sess.sandbox and portal hints stay right.
+    return ResolvedConnection(
+        base_url=resolved_base,
+        token_url=resolved_token,
+        sandbox=cli_sandbox or cfg_sandbox,
+        profile=effective_profile,
+    )
 
 
 def _reorder_log_keys(_logger: Any, _method: str, event_dict: structlog.typing.EventDict) -> structlog.typing.EventDict:
@@ -255,7 +278,7 @@ def _reorder_log_keys(_logger: Any, _method: str, event_dict: structlog.typing.E
     return reordered
 
 
-def _setup_logging(verbose: int) -> None:
+def setup_logging(verbose: int) -> None:
     """Route all output — structlog and third-party stdlib — through a shared renderer.
 
     Uses structlog.stdlib.ProcessorFormatter as the single stdlib handler formatter so
@@ -328,24 +351,30 @@ def _setup_logging(verbose: int) -> None:
 
 
 def build_session(
-    args: argparse.Namespace,
+    connection: ResolvedConnection,
     *,
+    account_number: str | None = None,
+    client_secret: str | None = None,
+    scope: str = "",
     prompt: bool = True,
 ) -> certinext.CertiNextSession:
     """Resolve credentials and return a configured :class:`~certinext.CertiNextSession`.
 
-    Reads credentials in priority order: explicit CLI argument → keyring →
+    Reads credentials in priority order: explicit argument → keyring →
     environment variable → interactive prompt (the first three via
-    :class:`~certinext.settings.CertiNextSettings`).  When ``--account-number``
+    :class:`~certinext.settings.CertiNextSettings`). When ``account_number``
     is provided explicitly the keyring is **not** consulted for the client
     secret, because the stored secret belongs to the previously configured
     account and would cause an authentication failure if used with a
     different client ID.
 
     Args:
-        args: Parsed CLI arguments. Must have ``profile``, ``base_url``,
-            ``token_url``, ``account_number``, and ``client_secret`` attributes.
-            ``scope`` is optional (defaults to ``""`` when absent).
+        connection: The resolved endpoint/profile, from
+            :func:`resolve_connection`.
+        account_number: Explicit CertiNext account number (OAuth2 client_id),
+            or None to resolve from keyring/env/prompt.
+        client_secret: Explicit OAuth2 client secret, or None to resolve.
+        scope: OAuth2 scope string (optional).
         prompt: If ``False``, raise :exc:`CredentialsNotFoundError` instead of
             prompting interactively when credentials are absent. Use this in
             setup scripts that want to attempt an API call but handle missing
@@ -361,99 +390,33 @@ def build_session(
     # Only pass kwargs the caller actually set: an init value of None would
     # still outrank the keyring and env sources inside pydantic-settings.
     init_kwargs: dict[str, Any] = {}
-    if getattr(args, "profile", None):
-        init_kwargs["profile"] = args.profile
-    if args.account_number:
-        init_kwargs["client_id"] = args.account_number
-    if args.client_secret:
-        init_kwargs["client_secret"] = args.client_secret
+    if connection.profile:
+        init_kwargs["profile"] = connection.profile
+    if account_number:
+        init_kwargs["client_id"] = account_number
+    if client_secret:
+        init_kwargs["client_secret"] = client_secret
     settings = CertiNextSettings(**init_kwargs)
 
-    client_id = _require_credential(
+    client_id = require_credential(
         settings.client_id, "CERTINEXT_CLIENT_ID", "CertiNext account number",
         allow_prompt=prompt,
     )
-    client_secret = _require_credential(
+    secret = require_credential(
         settings.client_secret.get_secret_value() if settings.client_secret else None,
         "CERTINEXT_CLIENT_SECRET", "CertiNext client secret", secret=True,
         allow_prompt=prompt,
     )
     if prompt:
-        log.info("Connecting", url=args.base_url, account=client_id, profile=settings.profile or "default")
+        log.info("Connecting", url=connection.base_url, account=client_id,
+                 profile=settings.profile or "default")
     return certinext.session(
-        base_url=args.base_url,
-        token_url=args.token_url,
+        base_url=connection.base_url,
+        token_url=connection.token_url,
         client_id=client_id,
-        client_secret=client_secret,
-        scope=getattr(args, "scope", ""),
-        sandbox=getattr(args, "sandbox", False),
-    )
-
-
-def add_requestor_args(target: Any, config: dict[str, Any] | None = None) -> None:
-    """Add standard certificate requestor arguments to a parser or argument group.
-
-    Registers ``--requestor-name``, ``--requestor-email``, ``--requestor-phone``,
-    ``--requestor-designation``, and ``--signer-place``. When not supplied on
-    the command line, values fall back to the corresponding
-    ``CERTINEXT_REQUESTOR_*`` environment variable, then to the stored config
-    defaults (see :mod:`certinext._config`).
-
-    Args:
-        target: An :class:`argparse.ArgumentParser` or argument group that
-            accepts ``add_argument`` calls.
-        config: Stored defaults keyed by argparse dest name, as returned by
-            :func:`certinext._config.config_defaults`. Optional.
-    """
-    cfg = config or {}
-
-    def _default(env_var: str, dest: str) -> str:
-        """Resolve a fallback value: environment variable, then stored config."""
-        return os.environ.get(env_var, "") or str(cfg.get(dest, "") or "")
-
-    _rname = _default("CERTINEXT_REQUESTOR_NAME", "requestor_name")
-    _remail = _default("CERTINEXT_REQUESTOR_EMAIL", "requestor_email")
-    _rphone = _default("CERTINEXT_REQUESTOR_PHONE", "requestor_phone")
-    target.add_argument(
-        "--requestor-name", metavar="NAME",
-        default=_rname or None, required=not _rname,
-        help="Full name of the certificate requestor (env: CERTINEXT_REQUESTOR_NAME)",
-    )
-    target.add_argument(
-        "--requestor-email", metavar="EMAIL",
-        default=_remail or None,
-        help="Email address of the requestor (env: CERTINEXT_REQUESTOR_EMAIL)",
-    )
-    target.add_argument(
-        "--requestor-phone", metavar="PHONE",
-        default=_rphone or None, required=not _rphone,
-        help="Phone in E.164 format, e.g. +12075551234 (env: CERTINEXT_REQUESTOR_PHONE)",
-    )
-    target.add_argument(
-        "--requestor-designation", metavar="TITLE",
-        default=_default("CERTINEXT_REQUESTOR_DESIGNATION", "requestor_designation"),
-        help="Job title or designation of the requestor (env: CERTINEXT_REQUESTOR_DESIGNATION)",
-    )
-    target.add_argument(
-        "--signer-place", metavar="PLACE",
-        default=_default("CERTINEXT_SIGNER_PLACE", "signer_place"),
-        help="City/location for the subscriber agreement signature (env: CERTINEXT_SIGNER_PLACE)",
-    )
-
-
-def add_json_output_arg(target: Any) -> None:
-    """Add a ``--json`` flag to a parser or argument group.
-
-    When set, the CLI writes its output as machine-readable JSON instead of
-    human-readable text.
-
-    Args:
-        target: An :class:`argparse.ArgumentParser` or argument group that
-            accepts ``add_argument`` calls.
-    """
-    target.add_argument(
-        "--json", dest="output_json", action="store_true", default=False,
-        help="Write output as JSON instead of human-readable text",
+        client_secret=secret,
+        scope=scope,
+        sandbox=connection.sandbox,
     )
 
 

@@ -1,12 +1,22 @@
-#!/usr/bin/env python3
-"""Store issue-cert defaults in the certinext config file.
+# Copyright 2026 University of Maine System
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
-Interactively prompts for the values that ``certinext-issue-cert`` would
+"""``certinext setup defaults`` — store issue-cert defaults in the config file.
+
+Interactively prompts for the values that ``certinext issue-cert`` would
 otherwise need on every run (requestor identity, certificate type, org ID,
-validity) and stores them in the config file. After this, issuing a
-certificate is just::
-
-    certinext-issue-cert new.csr
+validity) and stores them in the config file.
 
 The default profile writes the ``[defaults]`` section. Named profiles write a
 ``[profiles.NAME]`` section that overrides ``[defaults]`` when that profile is
@@ -17,33 +27,38 @@ organization IDs for OV/EV orders are fetched from the API and presented as a
 numbered menu rather than requiring the user to look them up manually.
 
 Secrets (client secret, prevetting token) are NOT stored here — use
-``certinext-setup-keyring`` for credentials.
+``certinext setup keyring`` for credentials.
 
 The profile's API endpoint is stored too: ``--sandbox`` records
 ``sandbox = true``, ``--base-url`` (with optional ``--token-url``) records a
 custom endpoint for non-US regions, and with no flag the tool prompts for it.
-
-Usage:
-    certinext-setup-defaults                  # default profile
-    certinext-setup-defaults --profile prod   # named profile
-    certinext-setup-defaults --sandbox        # store sandbox = true on the profile
-    certinext-setup-defaults --profile eu --base-url https://eu-api.certinext.io
 """
-import argparse
+
+import dataclasses
 import sys
 from typing import Any
 
 import certinext
-from certinext._cli import (
-    CredentialsNotFoundError,
-    add_connection_args,
-    apply_sandbox,
-    build_session,
-)
 from certinext._config import ConfigError, config_path, load_config, save_defaults
 from certinext._keyring import keyring_available, keyring_get, keyring_service
 from certinext.accounts import Organization
 from certinext.catalog import Product, ProductCategory
+from certinext.cli._app import setup_app
+from certinext.cli._shared import (
+    AccountNumberOption,
+    BaseUrlOption,
+    ClientSecretOption,
+    ProfileOption,
+    SandboxOption,
+    TokenUrlOption,
+    VerboseOption,
+)
+from certinext.cli_support import (
+    CredentialsNotFoundError,
+    build_session,
+    resolve_connection,
+    setup_logging,
+)
 from certinext.exceptions import CertiNextAPIError
 
 # Post-type fields in display order:
@@ -62,9 +77,9 @@ _POST_TYPE_FIELDS: list[tuple[str, str, bool, bool, str]] = [
      "Requestor job title/designation",
      False, False, ""),
     # org_id comes before signer_place so the chosen org's location can be
-    # offered as the signer_place default (see main()).
+    # offered as the signer_place default (see setup_defaults()).
     ("org_id",
-     "Organization ID (from certinext-accounts)",
+     "Organization ID (from certinext accounts)",
      False, True, "not needed for DV"),
     ("signer_place",
      "Signer place (city/location, e.g. 'Orono, ME')",
@@ -156,7 +171,7 @@ def _endpoint_from_flags(
 ) -> tuple[dict[str, Any], list[str], list[str]] | None:
     """Resolve endpoint persistence from explicit connection flags (no prompts).
 
-    Lets the connection flags on a ``certinext-setup-defaults`` run persist to
+    Lets the connection flags on a ``certinext setup defaults`` run persist to
     the profile: ``--sandbox`` stores ``sandbox = true``; ``--base-url`` (with
     an optional ``--token-url``, otherwise derived as ``<base_url>/oauth/token``)
     stores a custom endpoint — useful for non-US regions with their own API
@@ -306,37 +321,35 @@ def _validated(key: str, value: str) -> Any:
     return value
 
 
-def _maybe_setup_keyring(args: argparse.Namespace) -> None:
-    """Offer to run certinext-setup-keyring when no credentials are stored for this profile.
+def _maybe_setup_keyring(profile: str | None) -> None:
+    """Offer to run the keyring setup when no credentials are stored for this profile.
 
     Silently returns when credentials are already present or when no usable
-    keyring backend is available.  Otherwise prompts the user and either runs
+    keyring backend is available. Otherwise prompts the user and either runs
     ``certinext-setup-keyring`` for the active profile or prints the manual
     command.
 
     Args:
-        args: Parsed CLI arguments.  Reads ``args.profile`` (already resolved
-            by :func:`apply_sandbox`, so ``--sandbox`` has become profile
-            ``'sandbox'`` when no other profile was given).
+        profile: The resolved profile (``--sandbox`` has already become
+            profile ``'sandbox'`` when no other profile was given).
     """
     import subprocess
 
-    service = keyring_service("certinext", args.profile)
+    service = keyring_service("certinext", profile)
     if keyring_get(service, "CERTINEXT_CLIENT_ID") is not None:
         return  # credentials already configured
 
     if not keyring_available():
         return  # no usable backend — don't offer what can't work
 
-    # Forward the resolved profile (not --sandbox) so credentials land under the
-    # same service the lookup above checked — apply_sandbox has already turned a
-    # bare --sandbox into profile 'sandbox'.
+    # Forward the resolved profile (not --sandbox) so credentials land under
+    # the same service the lookup above checked.
     cmd = ["certinext-setup-keyring"]
-    if args.profile:
-        cmd.extend(["--profile", args.profile])
+    if profile:
+        cmd.extend(["--profile", profile])
     cmd_str = " ".join(cmd)
 
-    profile_label = f"the {args.profile!r} profile" if args.profile else "the default profile"
+    profile_label = f"the {profile!r} profile" if profile else "the default profile"
     print(f"No API credentials are stored in the keyring for {profile_label}.")
     print("Credentials are needed to look up valid organization IDs for OV/EV orders.")
     try:
@@ -509,188 +522,184 @@ def _pick_org(
         print(f"  Enter a number between 1 and {len(orgs)}", file=sys.stderr)
 
 
-def main() -> None:
+@setup_app.command("defaults")
+def setup_defaults(
+    verbose: VerboseOption = 0,
+    profile: ProfileOption = None,
+    sandbox: SandboxOption = False,
+    base_url: BaseUrlOption = None,
+    token_url: TokenUrlOption = None,
+    account_number: AccountNumberOption = None,
+    client_secret: ClientSecretOption = None,
+) -> None:
     """Interactively store issue-cert defaults in the config file."""
+    setup_logging(verbose)
+    # The raw flags (before resolution folds profile config in) decide what
+    # persists — only values explicit on *this* run should be stored.
+    cli_sandbox = bool(sandbox)
+    cli_base_url = base_url
+    cli_token_url = token_url
+    conn = resolve_connection(profile=profile, sandbox=sandbox, base_url=base_url, token_url=token_url)
+
+    path = config_path()
+    section_label = f"[profiles.{conn.profile}]" if conn.profile else "[defaults]"
+    print(f"Store certinext issue-cert defaults in {path}")
+    print(f"Section: {section_label}")
+    print()
+    print("The domain and SANs are always read from the CSR and are not stored here.")
+    print("Press Enter to keep a shown value, or enter '-' to clear it.")
+    print()
+
     try:
-        parser = argparse.ArgumentParser(
-            description=__doc__,
-            formatter_class=argparse.RawDescriptionHelpFormatter,
+        doc = load_config(path)
+    except ConfigError as exc:
+        raise SystemExit(f"Error: {exc}")
+    if conn.profile:
+        current = doc.get("profiles", {}).get(conn.profile, {})
+    else:
+        current = doc.get("defaults", {})
+    if not isinstance(current, dict):
+        current = {}
+
+    values: dict[str, Any] = {}
+    cleared: list[str] = []
+
+    # Endpoint selection FIRST: the org picker below calls the API, so the
+    # live session must point at the chosen endpoint before we build it.
+    # Explicit flags (--sandbox / --base-url) persist directly; otherwise
+    # prompt with a menu and apply the choice to the connection for this run.
+    from_flags = _endpoint_from_flags(cli_sandbox, cli_base_url, cli_token_url, current)
+    if from_flags is not None:
+        ep_values, ep_cleared, ep_messages = from_flags
+        for message in ep_messages:
+            print(message)
+    else:
+        ep_values, ep_cleared, live = _prompt_endpoint(current)
+        if live is not None:
+            conn = dataclasses.replace(conn, base_url=live[0], token_url=live[1], sandbox=live[2])
+    values.update(ep_values)
+    cleared.extend(ep_cleared)
+    print()
+
+    # Offer keyring setup next — credentials are needed for the org picker.
+    _maybe_setup_keyring(conn.profile)
+
+    # Try to build a session for API-assisted lookups (org and product
+    # pickers), now that the endpoint is settled. prompt=False means we fall
+    # back silently rather than blocking when credentials are absent.
+    sess = None
+    orgs: list[Organization] = []
+    product_categories: list[ProductCategory] = []
+    try:
+        sess = build_session(
+            conn, account_number=account_number, client_secret=client_secret, prompt=False,
         )
-        add_connection_args(parser)
-        args = parser.parse_args()
-        # Capture the raw connection flags before apply_sandbox() folds profile
-        # config into them — only values explicit on *this* run should persist.
-        # base_url/token_url default to None, so "not None" means user-supplied.
-        cli_sandbox = bool(args.sandbox)
-        cli_base_url = args.base_url
-        cli_token_url = args.token_url
-        apply_sandbox(args)
-
-        path = config_path()
-        section_label = f"[profiles.{args.profile}]" if args.profile else "[defaults]"
-        print(f"Store certinext-issue-cert defaults in {path}")
-        print(f"Section: {section_label}")
-        print()
-        print("The domain and SANs are always read from the CSR and are not stored here.")
-        print("Press Enter to keep a shown value, or enter '-' to clear it.")
-        print()
-
-        try:
-            doc = load_config(path)
-        except ConfigError as exc:
-            sys.exit(f"Error: {exc}")
-        if args.profile:
-            current = doc.get("profiles", {}).get(args.profile, {})
-        else:
-            current = doc.get("defaults", {})
-        if not isinstance(current, dict):
-            current = {}
-
-        values: dict[str, Any] = {}
-        cleared: list[str] = []
-
-        # Endpoint selection FIRST: the org picker below calls the API, so the
-        # live session must point at the chosen endpoint before we build it.
-        # Explicit flags (--sandbox / --base-url) persist directly; otherwise
-        # prompt with a menu and apply the choice to args for this run.
-        from_flags = _endpoint_from_flags(cli_sandbox, cli_base_url, cli_token_url, current)
-        if from_flags is not None:
-            ep_values, ep_cleared, ep_messages = from_flags
-            for message in ep_messages:
-                print(message)
-        else:
-            ep_values, ep_cleared, live = _prompt_endpoint(current)
-            if live is not None:
-                args.base_url, args.token_url, args.sandbox = live
-        values.update(ep_values)
-        cleared.extend(ep_cleared)
-        print()
-
-        # Offer keyring setup next — credentials are needed for the org picker.
-        _maybe_setup_keyring(args)
-
-        # Try to build a session for API-assisted lookups (org and product
-        # pickers), now that the endpoint is settled. prompt=False means we fall
-        # back silently rather than blocking when credentials are absent.
+    except (CredentialsNotFoundError, CertiNextAPIError, Exception):
         sess = None
-        orgs: list[Organization] = []
-        product_categories: list[ProductCategory] = []
+    if sess is not None:
+        # Fetch each list independently so one failing endpoint doesn't
+        # suppress the other picker.
         try:
-            sess = build_session(args, prompt=False)
-        except (CredentialsNotFoundError, CertiNextAPIError, Exception):
-            sess = None
-        if sess is not None:
-            # Fetch each list independently so one failing endpoint doesn't
-            # suppress the other picker.
-            try:
-                orgs = sess.accounts.list_organizations()
-            except (CertiNextAPIError, Exception):
-                pass
-            try:
-                product_categories = sess.catalog.list_products()
-            except (CertiNextAPIError, Exception):
-                pass
+            orgs = sess.accounts.list_organizations()
+        except (CertiNextAPIError, Exception):
+            pass
+        try:
+            product_categories = sess.catalog.list_products()
+        except (CertiNextAPIError, Exception):
+            pass
 
-        # Ask certificate type first — determines which remaining fields are required.
+    # Ask certificate type first — determines which remaining fields are required.
+    while True:
+        entered = _prompt("Certificate type [required] (dv/ov/ev)", current.get("type"))
+        if entered is None:
+            cert_type = str(current.get("type", "dv"))
+            break
+        if entered == "":
+            cleared.append("type")
+            cert_type = "dv"
+            break
+        try:
+            values["type"] = _validated("type", entered)
+            cert_type = values["type"]
+            break
+        except ValueError as exc:
+            print(f"  {exc}", file=sys.stderr)
+    print()
+
+    # Product selection, filtered to the chosen type. Skipped silently when
+    # the catalog couldn't be fetched (no credentials / API error).
+    if product_categories:
+        products = _filter_products(product_categories, cert_type)
+        if products:
+            prod_values, prod_cleared = _prompt_product(products, current.get("product"))
+            values.update(prod_values)
+            cleared.extend(prod_cleared)
+            print()
+
+    is_ov_ev = cert_type in ("ov", "ev")
+    chosen_org: Organization | None = None
+
+    for key, base_label, req_dv, req_ov_ev, note in _POST_TYPE_FIELDS:
+        required = req_ov_ev if is_ov_ev else req_dv
+        tag = "[required]" if required else "[optional]"
+        label = f"{base_label} {tag}"
+        if note:
+            label += f" - {note}"
+
+        # For org_id on OV/EV orders, use the API picker when available.
+        if key == "org_id" and is_ov_ev and orgs:
+            print(f"{label}:")
+            chosen = _pick_org(orgs, cert_type, current.get("org_id"), sandbox=conn.sandbox)
+            if chosen is not None:
+                # Remember the org so signer_place (asked next) can default
+                # to its location.
+                chosen_org = next(
+                    (o for o in orgs if str(o.organization_number) == chosen), None
+                )
+                if chosen != str(current.get("org_id", "")):
+                    values["org_id"] = chosen
+                continue
+            # Fall through to free-text if picker returned nothing.
+
+        # For signer_place, offer the chosen org's location as the default
+        # when nothing is stored yet — Enter accepts it.
+        if (
+            key == "signer_place"
+            and chosen_org is not None
+            and not current.get("signer_place")
+            and _org_location(chosen_org)
+        ):
+            org_loc = _org_location(chosen_org)
+            raw = input(f"{label} [{org_loc}] (from chosen org): ").strip()
+            if raw != "-":
+                values[key] = raw or org_loc
+            continue
+
         while True:
-            entered = _prompt("Certificate type [required] (dv/ov/ev)", current.get("type"))
+            entered = _prompt(label, current.get(key))
             if entered is None:
-                cert_type = str(current.get("type", "dv"))
                 break
             if entered == "":
-                cleared.append("type")
-                cert_type = "dv"
+                cleared.append(key)
                 break
             try:
-                values["type"] = _validated("type", entered)
-                cert_type = values["type"]
+                values[key] = _validated(key, entered)
                 break
             except ValueError as exc:
                 print(f"  {exc}", file=sys.stderr)
-        print()
 
-        # Product selection, filtered to the chosen type. Skipped silently when
-        # the catalog couldn't be fetched (no credentials / API error).
-        if product_categories:
-            products = _filter_products(product_categories, cert_type)
-            if products:
-                prod_values, prod_cleared = _prompt_product(products, current.get("product"))
-                values.update(prod_values)
-                cleared.extend(prod_cleared)
-                print()
+    if not values and not cleared:
+        print(f"\nNothing to change. Config file: {path}")
+    else:
+        try:
+            saved_path = save_defaults(values, conn.profile, path, remove=tuple(cleared))
+        except ConfigError as exc:
+            raise SystemExit(f"Error: {exc}")
 
-        is_ov_ev = cert_type in ("ov", "ev")
-        chosen_org: Organization | None = None
-
-        for key, base_label, req_dv, req_ov_ev, note in _POST_TYPE_FIELDS:
-            required = req_ov_ev if is_ov_ev else req_dv
-            tag = "[required]" if required else "[optional]"
-            label = f"{base_label} {tag}"
-            if note:
-                label += f" - {note}"
-
-            # For org_id on OV/EV orders, use the API picker when available.
-            if key == "org_id" and is_ov_ev and orgs:
-                print(f"{label}:")
-                chosen = _pick_org(orgs, cert_type, current.get("org_id"), sandbox=args.sandbox)
-                if chosen is not None:
-                    # Remember the org so signer_place (asked next) can default
-                    # to its location.
-                    chosen_org = next(
-                        (o for o in orgs if str(o.organization_number) == chosen), None
-                    )
-                    if chosen != str(current.get("org_id", "")):
-                        values["org_id"] = chosen
-                    continue
-                # Fall through to free-text if picker returned nothing.
-
-            # For signer_place, offer the chosen org's location as the default
-            # when nothing is stored yet — Enter accepts it.
-            if (
-                key == "signer_place"
-                and chosen_org is not None
-                and not current.get("signer_place")
-                and _org_location(chosen_org)
-            ):
-                org_loc = _org_location(chosen_org)
-                raw = input(f"{label} [{org_loc}] (from chosen org): ").strip()
-                if raw != "-":
-                    values[key] = raw or org_loc
-                continue
-
-            while True:
-                entered = _prompt(label, current.get(key))
-                if entered is None:
-                    break
-                if entered == "":
-                    cleared.append(key)
-                    break
-                try:
-                    values[key] = _validated(key, entered)
-                    break
-                except ValueError as exc:
-                    print(f"  {exc}", file=sys.stderr)
-
-        if not values and not cleared:
-            print(f"\nNothing to change. Config file: {path}")
-        else:
-            try:
-                saved_path = save_defaults(values, args.profile, path, remove=tuple(cleared))
-            except ConfigError as exc:
-                sys.exit(f"Error: {exc}")
-
-            print(f"\nSaved to {saved_path}")
-            print(f"Section {section_label}:")
-            for key, value in values.items():
-                print(f"  {key} = {value}")
-            for key in cleared:
-                print(f"  {key} (cleared)")
-            print("Precedence: CLI argument > environment variable > profile section > [defaults].")
-
-    except KeyboardInterrupt:
-        print("\nAborted.", file=sys.stderr)
-        raise SystemExit(130)
-
-
-if __name__ == "__main__":
-    main()
+        print(f"\nSaved to {saved_path}")
+        print(f"Section {section_label}:")
+        for key, value in values.items():
+            print(f"  {key} = {value}")
+        for key in cleared:
+            print(f"  {key} (cleared)")
+        print("Precedence: CLI argument > environment variable > profile section > [defaults].")

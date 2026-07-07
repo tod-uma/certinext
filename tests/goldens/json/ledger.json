@@ -1,0 +1,18 @@
+[
+  {
+    "date": "2026-05-01",
+    "description": "DV SSL Certificate #1",
+    "orderNumber": "ORD-001",
+    "type": "NEW_ORDER",
+    "debit": "50.00",
+    "credit": null
+  },
+  {
+    "date": "2026-05-02",
+    "description": "Account credit",
+    "orderNumber": null,
+    "type": "CREDIT",
+    "debit": null,
+    "credit": "100.00"
+  }
+]

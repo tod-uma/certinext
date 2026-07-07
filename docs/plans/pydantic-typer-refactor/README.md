@@ -29,7 +29,7 @@ the table. Wishlist issues #7–#12 are deliberately *outside* the milestone
 | 1 — Pydantic models | [phase-1-pydantic-models.md](phase-1-pydantic-models.md) | #14 | done | phase-0 | 0003, 0005 |
 | 2 — httpx transport & exceptions | [phase-2-httpx-transport.md](phase-2-httpx-transport.md) | #15 | done | phase-1 | 0003 |
 | 3 — pydantic-settings config | [phase-3-pydantic-settings-config.md](phase-3-pydantic-settings-config.md) | #16 | done | phase-0 | 0003 |
-| 4 — typer CLI + rich | [phase-4-typer-cli.md](phase-4-typer-cli.md) | #17 | planned | phase-1, phase-2, phase-3 | 0003, 0004 |
+| 4 — typer CLI + rich | [phase-4-typer-cli.md](phase-4-typer-cli.md) | #17 | done | phase-1, phase-2, phase-3 | 0003, 0004 |
 | 5 — Consumer migration | [phase-5-consumer-migration.md](phase-5-consumer-migration.md) | #18 | planned | phase-4 | — |
 | 6 — Docs, CI, release | [phase-6-docs-ci-release.md](phase-6-docs-ci-release.md) | #19 | planned | phase-4, phase-5 | — |
 
@@ -102,10 +102,13 @@ published** to the GitLab registry or PyPI. Phase 0 caps that pin before any
 
 ## Open questions (answers change phases 4–5)
 
-1. **What parses the CLIs today?** Do any cron jobs, monitoring, or runbooks
-   consume stdout or exit codes of the eleven scripts beyond `--json`?
-   (Known: healthcheck exit codes are monitoring-relevant.) Until audited,
-   phase 4 treats all stdout formats as load-bearing.
+1. **What parses the CLIs today?** ~~Do any cron jobs, monitoring, or runbooks
+   consume stdout or exit codes of the eleven scripts beyond `--json`?~~
+   **Answered 2026-07-07 (Tod): nothing in UMS parses the scripts' stdout**,
+   and changing the default output is acceptable under the 1.0 major bump —
+   human/table stdout is not load-bearing. Healthcheck **exit codes remain
+   monitoring-relevant** and stay preserved; the [phase 4
+   doc](phase-4-typer-cli.md) carries the revised compatibility rules.
 2. **Sandbox seeding**: multi-page pagination probes need >200 domains;
    sandbox had ~107 (2026-06-24). Seed more, or accept prod(read-only)-only
    evidence for multi-page behavior?
