@@ -98,7 +98,7 @@ wheels = [
 
 [[package]]
 name = "certinext"
-version = "1.0.0rc2"
+version = "1.0.0rc3"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },
@@ -137,7 +137,7 @@ requires-dist = [
     { name = "cryptography", marker = "extra == 'dev'", specifier = ">=42.0.0" },
     { name = "dnspython", marker = "extra == 'dev'", specifier = ">=2.0" },
     { name = "dnspython", marker = "extra == 'dns'", specifier = ">=2.0" },
-    { name = "httpx", specifier = ">=0.27" },
+    { name = "httpx", specifier = ">=0.27,<1" },
     { name = "keyring", marker = "extra == 'dev'" },
     { name = "keyring", marker = "extra == 'keyring'" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.10" },
