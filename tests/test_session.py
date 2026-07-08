@@ -27,42 +27,42 @@ from certinext.ssl_certificates import SslAccessor
 class TestCertiNextSession:
     """CertiNextSession initialises correctly and mounts accessors."""
 
-    def test_accounts_accessor_is_mounted(self):
+    def test_accounts_accessor_is_mounted(self) -> None:
         """session.accounts is an AccountAccessor instance."""
         sess = CertiNextSession(client_id="acct", client_secret="secret")
         assert isinstance(sess.accounts, AccountAccessor)
 
-    def test_catalog_accessor_is_mounted(self):
+    def test_catalog_accessor_is_mounted(self) -> None:
         """session.catalog is a CatalogAccessor instance."""
         sess = CertiNextSession(client_id="acct", client_secret="secret")
         assert isinstance(sess.catalog, CatalogAccessor)
 
-    def test_domain_accessor_is_mounted(self):
+    def test_domain_accessor_is_mounted(self) -> None:
         """session.domain is a DomainAccessor instance."""
         sess = CertiNextSession(client_id="acct", client_secret="secret")
         assert isinstance(sess.domain, DomainAccessor)
 
-    def test_ledger_accessor_is_mounted(self):
+    def test_ledger_accessor_is_mounted(self) -> None:
         """session.ledger is a LedgerAccessor instance."""
         sess = CertiNextSession(client_id="acct", client_secret="secret")
         assert isinstance(sess.ledger, LedgerAccessor)
 
-    def test_orders_accessor_is_mounted(self):
+    def test_orders_accessor_is_mounted(self) -> None:
         """session.orders is an OrderAccessor instance."""
         sess = CertiNextSession(client_id="acct", client_secret="secret")
         assert isinstance(sess.orders, OrderAccessor)
 
-    def test_ssl_accessor_is_mounted(self):
+    def test_ssl_accessor_is_mounted(self) -> None:
         """session.ssl is an SslAccessor instance."""
         sess = CertiNextSession(client_id="acct", client_secret="secret")
         assert isinstance(sess.ssl, SslAccessor)
 
-    def test_base_url_default(self):
+    def test_base_url_default(self) -> None:
         """The default base URL is https://us-api.certinext.io."""
         sess = CertiNextSession(client_id="acct", client_secret="secret")
         assert sess._client.base_url == "https://us-api.certinext.io"
 
-    def test_base_url_trailing_slash_stripped(self):
+    def test_base_url_trailing_slash_stripped(self) -> None:
         """A trailing slash in base_url is stripped."""
         sess = CertiNextSession(
             base_url="https://us-api.certinext.io/",
@@ -71,7 +71,7 @@ class TestCertiNextSession:
         )
         assert sess._client.base_url == "https://us-api.certinext.io"
 
-    def test_custom_base_url(self):
+    def test_custom_base_url(self) -> None:
         """A custom base_url is forwarded to the underlying client."""
         sess = CertiNextSession(
             base_url="https://eu-api.certinext.io",
@@ -84,22 +84,22 @@ class TestCertiNextSession:
 class TestSessionFactory:
     """certinext.session() factory returns a correctly configured CertiNextSession."""
 
-    def test_returns_certinext_session(self):
+    def test_returns_certinext_session(self) -> None:
         """session() returns a CertiNextSession instance."""
         sess = certinext.session(client_id="acct", client_secret="secret")
         assert isinstance(sess, CertiNextSession)
 
-    def test_domain_accessor_available(self):
+    def test_domain_accessor_available(self) -> None:
         """session().domain is a DomainAccessor."""
         sess = certinext.session(client_id="acct", client_secret="secret")
         assert isinstance(sess.domain, DomainAccessor)
 
-    def test_orders_accessor_available(self):
+    def test_orders_accessor_available(self) -> None:
         """session().orders is an OrderAccessor."""
         sess = certinext.session(client_id="acct", client_secret="secret")
         assert isinstance(sess.orders, OrderAccessor)
 
-    def test_custom_urls_forwarded(self):
+    def test_custom_urls_forwarded(self) -> None:
         """session() forwards custom base_url and token_url to the session."""
         sess = certinext.session(
             base_url="https://eu-api.certinext.io",
@@ -109,23 +109,23 @@ class TestSessionFactory:
         )
         assert sess._client.base_url == "https://eu-api.certinext.io"
 
-    def test_sandbox_true_uses_sandbox_base_url(self):
+    def test_sandbox_true_uses_sandbox_base_url(self) -> None:
         """session(sandbox=True) defaults to the sandbox base URL, not production."""
         sess = certinext.session(client_id="acct", client_secret="secret", sandbox=True)
         assert sess._client.base_url == certinext.SANDBOX_BASE_URL
         assert sess._client.base_url != certinext.BASE_URL
 
-    def test_sandbox_true_uses_sandbox_token_url(self):
+    def test_sandbox_true_uses_sandbox_token_url(self) -> None:
         """session(sandbox=True) defaults to the sandbox token URL."""
         sess = certinext.session(client_id="acct", client_secret="secret", sandbox=True)
         assert "sandbox" in sess._client._auth.token_url
 
-    def test_sandbox_false_uses_production_urls(self):
+    def test_sandbox_false_uses_production_urls(self) -> None:
         """session(sandbox=False) uses production URLs (default behaviour)."""
         sess = certinext.session(client_id="acct", client_secret="secret", sandbox=False)
         assert sess._client.base_url == certinext.BASE_URL
 
-    def test_explicit_url_overrides_sandbox_flag(self):
+    def test_explicit_url_overrides_sandbox_flag(self) -> None:
         """An explicit base_url takes precedence over sandbox=True."""
         custom = "https://custom-api.example.com"
         sess = certinext.session(
@@ -133,7 +133,7 @@ class TestSessionFactory:
         )
         assert sess._client.base_url == custom
 
-    def test_sandbox_flag_stored_on_session(self):
+    def test_sandbox_flag_stored_on_session(self) -> None:
         """session.sandbox reflects the sandbox argument."""
         assert certinext.session(sandbox=True).sandbox is True
         assert certinext.session(sandbox=False).sandbox is False
@@ -142,17 +142,17 @@ class TestSessionFactory:
 class TestCertiNextSessionSandbox:
     """CertiNextSession.__init__ sandbox URL defaulting."""
 
-    def test_sandbox_true_defaults_to_sandbox_base_url(self):
+    def test_sandbox_true_defaults_to_sandbox_base_url(self) -> None:
         """CertiNextSession(sandbox=True) uses sandbox base URL by default."""
         sess = CertiNextSession(client_id="acct", client_secret="secret", sandbox=True)
         assert sess._client.base_url == certinext.SANDBOX_BASE_URL
 
-    def test_sandbox_false_defaults_to_production_base_url(self):
+    def test_sandbox_false_defaults_to_production_base_url(self) -> None:
         """CertiNextSession(sandbox=False) uses production base URL by default."""
         sess = CertiNextSession(client_id="acct", client_secret="secret", sandbox=False)
         assert sess._client.base_url == certinext.BASE_URL
 
-    def test_explicit_base_url_overrides_sandbox(self):
+    def test_explicit_base_url_overrides_sandbox(self) -> None:
         """An explicit base_url overrides the sandbox=True default."""
         custom = "https://eu-api.certinext.io"
         sess = CertiNextSession(

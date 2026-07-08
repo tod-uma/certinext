@@ -62,9 +62,11 @@ Cut a release for certinext. The tag message is the source of truth — GitLab C
    - `--cleanup=verbatim` is required: git's default strips lines starting with `#`, silently deleting every Markdown heading.
    - To re-cut a tag (e.g. after fixing the notes), add `-f`: `git tag -a vX.Y.Z --cleanup=verbatim -F <notes-file> -f`
 
-7. **Push the tag.** Use `AskUserQuestion` to confirm before pushing.
+7. **Push the tag.** Use `AskUserQuestion` to confirm before pushing. Push to
+   the `gitlab` remote — this repo has no `origin` (see the `git-remotes`
+   skill); GitHub is a mirror populated by GitLab CI, not pushed to directly.
    ```bash
-   git push origin vX.Y.Z
+   git push gitlab vX.Y.Z
    ```
 
 8. **Verify all three destinations:**

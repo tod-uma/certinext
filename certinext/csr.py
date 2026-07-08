@@ -19,11 +19,10 @@ Requires the ``csr`` optional dependency::
     pip install certinext[csr]
 """
 
-from dataclasses import dataclass, field
+from pydantic import BaseModel, Field
 
 
-@dataclass
-class CsrInfo:
+class CsrInfo(BaseModel):
     """Structured information extracted from a PEM-encoded CSR.
 
     Returned by :func:`parse_csr`. All string fields are ``None`` when the
@@ -49,12 +48,15 @@ class CsrInfo:
         print(info.common_name, info.email, info.signer_place)
     """
 
-    common_name: str | None
-    email: str | None
-    locality: str | None
-    state: str | None
-    organization: str | None
-    sans: list[str] = field(default_factory=list)
+    common_name: str | None = Field(description="Common Name (CN) from the subject.")
+    email: str | None = Field(description="Email address (``emailAddress`` OID) from the subject.")
+    locality: str | None = Field(description="City or locality (L) from the subject.")
+    state: str | None = Field(description="State or province (ST) from the subject.")
+    organization: str | None = Field(description="Organisation name (O) from the subject.")
+    sans: list[str] = Field(
+        default_factory=list,
+        description="DNS Subject Alternative Names, excluding the common name.",
+    )
 
     @property
     def signer_place(self) -> str | None:

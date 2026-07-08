@@ -34,7 +34,7 @@ def _make_auth(client_id: str = "test-account", client_secret: str = "test-secre
 def _mock_token_response(token: str = "test-bearer-token-abc123", expires_in: int = 3600) -> MagicMock:
     """Return a mock response that yields a valid token payload."""
     resp = MagicMock()
-    resp.ok = True
+    resp.is_success = True
     resp.json.return_value = {
         "access_token": token,
         "token_type": "Bearer",
@@ -46,37 +46,37 @@ def _mock_token_response(token: str = "test-bearer-token-abc123", expires_in: in
 class TestGetToken:
     """OAuth2ClientCredentials.get_token fetches and caches bearer tokens."""
 
-    def test_fetches_token_on_first_call(self):
+    def test_fetches_token_on_first_call(self) -> None:
         """get_token fetches a new token when none is cached."""
         auth = _make_auth()
-        with patch("certinext.auth.requests.post", return_value=_mock_token_response()) as mock_post:
+        with patch("certinext.auth.httpx.post", return_value=_mock_token_response()) as mock_post:
             token = auth.get_token()
         assert token == "test-bearer-token-abc123"
         mock_post.assert_called_once()
 
-    def test_returns_cached_token(self):
+    def test_returns_cached_token(self) -> None:
         """get_token returns the cached token without making a second request."""
         auth = _make_auth()
-        with patch("certinext.auth.requests.post", return_value=_mock_token_response()) as mock_post:
+        with patch("certinext.auth.httpx.post", return_value=_mock_token_response()) as mock_post:
             first = auth.get_token()
             second = auth.get_token()
         assert first == second
         mock_post.assert_called_once()
 
-    def test_refreshes_expired_token(self):
+    def test_refreshes_expired_token(self) -> None:
         """get_token fetches a new token when the cached one is within 60s of expiry."""
         auth = _make_auth()
-        with patch("certinext.auth.requests.post", return_value=_mock_token_response()) as mock_post:
+        with patch("certinext.auth.httpx.post", return_value=_mock_token_response()) as mock_post:
             auth.get_token()
             # Wind the expiry back so the token appears about to expire.
             auth._expires_at = time.monotonic() + 30
             auth.get_token()
         assert mock_post.call_count == 2
 
-    def test_sends_correct_form_fields(self):
+    def test_sends_correct_form_fields(self) -> None:
         """get_token POSTs the expected client_credentials form fields."""
         auth = _make_auth(client_id="my-account", client_secret="my-secret")
-        with patch("certinext.auth.requests.post", return_value=_mock_token_response()) as mock_post:
+        with patch("certinext.auth.httpx.post", return_value=_mock_token_response()) as mock_post:
             auth.get_token()
         _, kwargs = mock_post.call_args
         data = kwargs["data"]
@@ -84,7 +84,7 @@ class TestGetToken:
         assert data["client_id"] == "my-account"
         assert data["client_secret"] == "my-secret"
 
-    def test_includes_scope_when_set(self):
+    def test_includes_scope_when_set(self) -> None:
         """get_token includes the scope field when one is configured."""
         auth = OAuth2ClientCredentials(
             token_url="https://us-api.certinext.io/oauth/token",
@@ -92,48 +92,56 @@ class TestGetToken:
             client_secret="secret",
             scope="read:domains",
         )
-        with patch("certinext.auth.requests.post", return_value=_mock_token_response()) as mock_post:
+        with patch("certinext.auth.httpx.post", return_value=_mock_token_response()) as mock_post:
             auth.get_token()
         _, kwargs = mock_post.call_args
         assert kwargs["data"]["scope"] == "read:domains"
 
-    def test_omits_scope_when_empty(self):
+    def test_omits_scope_when_empty(self) -> None:
         """get_token omits the scope field when scope is an empty string."""
         auth = _make_auth()
-        with patch("certinext.auth.requests.post", return_value=_mock_token_response()) as mock_post:
+        with patch("certinext.auth.httpx.post", return_value=_mock_token_response()) as mock_post:
             auth.get_token()
         _, kwargs = mock_post.call_args
         assert "scope" not in kwargs["data"]
+
+    def test_sets_request_timeout(self) -> None:
+        """get_token sends the token request with a finite timeout."""
+        auth = _make_auth()
+        with patch("certinext.auth.httpx.post", return_value=_mock_token_response()) as mock_post:
+            auth.get_token()
+        _, kwargs = mock_post.call_args
+        assert kwargs["timeout"] is not None
 
 
 class TestFetchTokenErrors:
     """OAuth2ClientCredentials surfaces clear errors on failed token requests."""
 
-    def test_raises_on_http_error(self):
+    def test_raises_on_http_error(self) -> None:
         """get_token raises RuntimeError when the token endpoint returns a non-2xx status."""
         auth = _make_auth()
         bad_resp = MagicMock()
-        bad_resp.ok = False
+        bad_resp.is_success = False
         bad_resp.status_code = 401
-        bad_resp.reason = "Unauthorized"
+        bad_resp.reason_phrase = "Unauthorized"
         bad_resp.url = "https://us-api.certinext.io/oauth/token"
         bad_resp.text = '{"error": "invalid_client"}'
 
-        with patch("certinext.auth.requests.post", return_value=bad_resp):
+        with patch("certinext.auth.httpx.post", return_value=bad_resp):
             with pytest.raises(RuntimeError, match="401"):
                 auth.get_token()
 
-    def test_raises_on_non_json_response(self):
+    def test_raises_on_non_json_response(self) -> None:
         """get_token raises RuntimeError when the response body is not valid JSON."""
         auth = _make_auth()
         bad_resp = MagicMock()
-        bad_resp.ok = True
+        bad_resp.is_success = True
         bad_resp.status_code = 200
         bad_resp.url = "https://us-api.certinext.io/oauth/token"
         bad_resp.text = "<html>Service Unavailable</html>"
         bad_resp.json.side_effect = ValueError("No JSON")
 
-        with patch("certinext.auth.requests.post", return_value=bad_resp):
+        with patch("certinext.auth.httpx.post", return_value=bad_resp):
             with pytest.raises(RuntimeError, match="non-JSON"):
                 auth.get_token()
 
@@ -141,19 +149,19 @@ class TestFetchTokenErrors:
 class TestInvalidate:
     """OAuth2ClientCredentials.invalidate() clears the cached token."""
 
-    def test_invalidate_causes_fresh_fetch(self):
+    def test_invalidate_causes_fresh_fetch(self) -> None:
         """invalidate() forces get_token() to fetch a new token on the next call."""
         auth = _make_auth()
-        with patch("certinext.auth.requests.post", return_value=_mock_token_response()) as mock_post:
+        with patch("certinext.auth.httpx.post", return_value=_mock_token_response()) as mock_post:
             auth.get_token()
             auth.invalidate()
             auth.get_token()
         assert mock_post.call_count == 2
 
-    def test_invalidate_clears_cached_token(self):
+    def test_invalidate_clears_cached_token(self) -> None:
         """After invalidate(), the cached token attribute is None."""
         auth = _make_auth()
-        with patch("certinext.auth.requests.post", return_value=_mock_token_response()):
+        with patch("certinext.auth.httpx.post", return_value=_mock_token_response()):
             auth.get_token()
         auth.invalidate()
         assert auth._access_token is None

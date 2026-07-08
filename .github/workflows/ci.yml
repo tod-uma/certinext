@@ -26,9 +26,10 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-      - run: pip install -e .[dev]
-      - run: ruff check .
-      - run: mypy certinext
+      - run: pip install uv
+      - run: uv sync --locked --extra dev
+      - run: uv run ruff check .
+      - run: uv run mypy .
 
   typecheck:
     runs-on: ubuntu-latest
@@ -37,8 +38,9 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-      - run: pip install -e .[dev]
-      - run: pyright
+      - run: pip install uv
+      - run: uv sync --locked --extra dev
+      - run: uv run pyright
 
   test:
     runs-on: ubuntu-latest
@@ -52,8 +54,9 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
           allow-prereleases: true
-      - run: pip install -e .[dev]
-      - run: pytest tests/ -v --junitxml=report.xml
+      - run: pip install uv
+      - run: uv sync --locked --extra dev --python ${{ matrix.python-version }}
+      - run: uv run pytest tests/ -v --junitxml=report.xml
       - uses: actions/upload-artifact@v7
         if: always()
         with:
@@ -96,29 +99,6 @@ jobs:
       - run: pip install build
       - run: python -m build
       - uses: pypa/gh-action-pypi-publish@release/v1
-
-  publish-main:
-    runs-on: ubuntu-latest
-    needs: [lint, typecheck, test]
-    if: false  # disabled — re-enable by restoring the condition below
-    # if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    permissions:
-      packages: write
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-python@v6
-        with:
-          python-version: "3.12"
-      - run: pip install build
-      - run: |
-          BASE_VERSION=$(python -c "import re; print(re.search(r'(?m)^version\s*=\s*\"([^\"]+)\"', open('pyproject.toml').read()).group(1))")
-          DEV_VERSION="${BASE_VERSION}.dev${{ github.run_id }}"
-          sed -i "s/^version = \"${BASE_VERSION}\"/version = \"${DEV_VERSION}\"/" pyproject.toml
-          python -m build
-      - uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          repository-url: https://upload.pypi.pkg.github.com/tod-uma/
-          password: ${{ secrets.GITHUB_TOKEN }}
 
   release:
     runs-on: ubuntu-latest

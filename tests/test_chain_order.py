@@ -238,11 +238,11 @@ def test_requires_cryptography(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_as_pem_chain_sorts_by_default() -> None:
     """as_pem_chain() re-orders a scrambled JSON chain into signing order."""
-    dl = CertificateDownload({"certificatePem": _LEAF_K, "chainPem": [_ROOT_K, _OV_K, _TLS_K]})
+    dl = CertificateDownload.model_validate({"certificatePem": _LEAF_K, "chainPem": [_ROOT_K, _OV_K, _TLS_K]})
     assert dl.as_pem_chain() == "\n".join(_CORRECT_K) + "\n"
 
 
 def test_as_pem_chain_raw_preserves_api_order() -> None:
     """as_pem_chain(sort=False) concatenates the fields in API order, unsorted."""
-    dl = CertificateDownload({"certificatePem": _LEAF_K, "chainPem": [_ROOT_K, _OV_K, _TLS_K]})
+    dl = CertificateDownload.model_validate({"certificatePem": _LEAF_K, "chainPem": [_ROOT_K, _OV_K, _TLS_K]})
     assert dl.as_pem_chain(sort=False) == "\n".join(_BUG_ORDER_K) + "\n"

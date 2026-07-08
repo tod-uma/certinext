@@ -83,7 +83,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-import requests
+import httpx
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -264,7 +264,7 @@ def sanitize_path(path: str) -> str:
     )
 
 
-def raw_get(client: CertiNextClient, path: str, params: dict[str, Any] | None = None) -> requests.Response:
+def raw_get(client: CertiNextClient, path: str, params: dict[str, Any] | None = None) -> httpx.Response:
     """Perform an authenticated GET and return the raw Response (with headers).
 
     Uses the client's internal session/token plumbing (`_execute` /
@@ -346,7 +346,7 @@ def capture(client: CertiNextClient, out_dir: Path, raw_dir: Path | None) -> int
         nonlocal failures
         try:
             resp = raw_get(client, path, params)
-        except (CertiNextAPIError, requests.RequestException) as exc:
+        except (CertiNextAPIError, httpx.HTTPError) as exc:
             print(f"  FAIL  {slug}: {exc}", file=sys.stderr)
             failures += 1
             return None
@@ -435,7 +435,7 @@ def capture(client: CertiNextClient, out_dir: Path, raw_dir: Path | None) -> int
     for cert_id in cert_ids[:20]:
         try:
             raw_get(client, f"/api/certinext/v2/ssl-certificates/{cert_id}/certificate")
-        except (CertiNextAPIError, requests.RequestException):
+        except (CertiNextAPIError, httpx.HTTPError):
             continue
         one("ssl-certificates-detail", f"/api/certinext/v2/ssl-certificates/{cert_id}")
         one("ssl-certificates-certificate", f"/api/certinext/v2/ssl-certificates/{cert_id}/certificate")

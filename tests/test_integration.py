@@ -36,7 +36,7 @@ import certinext
 from certinext._keyring import keyring_get, keyring_service
 from certinext.accounts import AccountInfo, Group, Organization
 from certinext.catalog import ProductCategory
-from certinext.domain_cert_count_cli import _build_rows
+from certinext.domain_cert_count import build_rows as _build_rows
 from certinext.domains import Domain
 from certinext.ledger import LedgerRecord
 from certinext.orders import OrderRecord

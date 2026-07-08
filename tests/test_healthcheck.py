@@ -18,14 +18,15 @@ from collections.abc import Callable
 from typing import Any
 from unittest.mock import MagicMock
 
-import requests
+import httpx
+from pydantic import BaseModel, ValidationError
 
 from certinext.exceptions import (
     CertiNextAPIError,
     CertiNextNotFoundError,
     CertiNextRateLimitError,
 )
-from certinext.healthcheck_cli import (
+from certinext.healthcheck import (
     REGISTRY,
     Outcome,
     Probe,
@@ -43,7 +44,7 @@ from certinext.healthcheck_cli import (
 
 
 def _probe(
-    call: Callable[[Any, dict], Any],
+    call: Callable[[Any, dict[str, Any]], Any],
     *,
     name: str = "test.probe",
     tier: int = 1,
@@ -58,14 +59,14 @@ def _probe(
     )
 
 
-def _raise(exc: Exception) -> Callable[[Any, dict], Any]:
+def _raise(exc: Exception) -> Callable[[Any, dict[str, Any]], Any]:
     """Return a probe call that raises ``exc`` when invoked."""
-    def _call(_session: Any, _ctx: dict) -> Any:
+    def _call(_session: Any, _ctx: dict[str, Any]) -> Any:
         raise exc
     return _call
 
 
-def _classify(call: Callable[[Any, dict], Any], **kwargs: Any) -> ProbeResult:
+def _classify(call: Callable[[Any, dict[str, Any]], Any], **kwargs: Any) -> ProbeResult:
     """Run ``classify`` over a one-off probe with an empty context."""
     return classify(_probe(call, **kwargs), MagicMock(), {})
 
@@ -78,42 +79,42 @@ def _classify(call: Callable[[Any, dict], Any], **kwargs: Any) -> ProbeResult:
 class TestClassifyOutcomes:
     """classify() maps each call result/exception to the correct outcome."""
 
-    def test_pass_with_count(self):
+    def test_pass_with_count(self) -> None:
         """A non-empty list result is PASS with the element count recorded."""
         result = _classify(lambda s, c: ["a", "b", "c"], count_of=len)
         assert result.outcome == Outcome.PASS
         assert result.count == 3
 
-    def test_pass_scalar_result(self):
+    def test_pass_scalar_result(self) -> None:
         """A scalar (non-countable) 2xx result is PASS with count None."""
         result = _classify(lambda s, c: object())
         assert result.outcome == Outcome.PASS
         assert result.count is None
 
-    def test_empty_when_suspect(self):
+    def test_empty_when_suspect(self) -> None:
         """An empty list is EMPTY when the probe marks empty as suspect."""
         result = _classify(lambda s, c: [], count_of=len, empty_is_suspect=True)
         assert result.outcome == Outcome.EMPTY
         assert result.count == 0
 
-    def test_empty_list_passes_when_not_suspect(self):
+    def test_empty_list_passes_when_not_suspect(self) -> None:
         """An empty list is PASS for probes where empty is legitimate."""
         result = _classify(lambda s, c: [], count_of=len, empty_is_suspect=False)
         assert result.outcome == Outcome.PASS
 
-    def test_denied_on_401(self):
+    def test_denied_on_401(self) -> None:
         """A 401 API error is DENIED."""
         result = _classify(_raise(CertiNextAPIError(401, {"title": "Unauthorized"})))
         assert result.outcome == Outcome.DENIED
         assert result.http_status == 401
 
-    def test_denied_on_403(self):
+    def test_denied_on_403(self) -> None:
         """A 403 API error is DENIED."""
         result = _classify(_raise(CertiNextAPIError(403, {"title": "Forbidden"})))
         assert result.outcome == Outcome.DENIED
         assert result.http_status == 403
 
-    def test_denied_on_token_runtime_error(self):
+    def test_denied_on_token_runtime_error(self) -> None:
         """A token RuntimeError naming invalid_client is DENIED (no status code)."""
         result = _classify(_raise(RuntimeError(
             "Token request failed: 401 Unauthorized\nBody: '{\"error\": \"invalid_client\"}'"
@@ -121,20 +122,20 @@ class TestClassifyOutcomes:
         assert result.outcome == Outcome.DENIED
         assert result.http_status is None
 
-    def test_network_on_non_auth_token_runtime_error(self):
+    def test_network_on_non_auth_token_runtime_error(self) -> None:
         """A token RuntimeError without auth markers is NETWORK."""
         result = _classify(_raise(RuntimeError(
             "Token endpoint returned non-JSON (status 200)"
         )))
         assert result.outcome == Outcome.NETWORK
 
-    def test_not_found_on_404(self):
+    def test_not_found_on_404(self) -> None:
         """A 404 (CertiNextNotFoundError) is NOT_FOUND."""
         result = _classify(_raise(CertiNextNotFoundError(404, {"title": "Not Found"})))
         assert result.outcome == Outcome.NOT_FOUND
         assert result.http_status == 404
 
-    def test_server_bug_on_422_captures_raw_body(self):
+    def test_server_bug_on_422_captures_raw_body(self) -> None:
         """A 422 is SERVER_BUG with the raw RFC 7807 body preserved verbatim."""
         body = {"type": "about:blank", "title": "Unprocessable Entity", "status": 422}
         result = _classify(_raise(CertiNextAPIError(422, body)))
@@ -142,43 +143,63 @@ class TestClassifyOutcomes:
         assert result.http_status == 422
         assert result.detail == body
 
-    def test_server_bug_extracts_ems_code(self):
+    def test_server_bug_extracts_ems_code(self) -> None:
         """SERVER_BUG surfaces the EMS code when the body carries one."""
         result = _classify(_raise(CertiNextAPIError(422, {"detail": "EMS-921: CSR malformed"})))
         assert result.outcome == Outcome.SERVER_BUG
         assert result.ems_code == "EMS-921"
 
-    def test_server_bug_on_500(self):
+    def test_server_bug_on_500(self) -> None:
         """A 500 is SERVER_BUG."""
         result = _classify(_raise(CertiNextAPIError(500, "Internal Server Error")))
         assert result.outcome == Outcome.SERVER_BUG
         assert result.http_status == 500
 
-    def test_rate_limited_on_429(self):
+    def test_rate_limited_on_429(self) -> None:
         """A 429 is RATE_LIMITED and is not exit-affecting."""
         result = _classify(_raise(CertiNextRateLimitError(429, {"title": "Too Many"}, retry_after=30.0)))
         assert result.outcome == Outcome.RATE_LIMITED
         assert result.http_status == 429
 
-    def test_network_on_connection_error(self):
-        """A requests ConnectionError (no HTTP response) is NETWORK."""
-        result = _classify(_raise(requests.ConnectionError("connection refused")))
+    def test_network_on_connection_error(self) -> None:
+        """An httpx ConnectError (no HTTP response) is NETWORK."""
+        result = _classify(_raise(httpx.ConnectError("connection refused")))
         assert result.outcome == Outcome.NETWORK
 
-    def test_network_on_timeout(self):
-        """A requests Timeout is NETWORK."""
-        result = _classify(_raise(requests.Timeout("timed out")))
+    def test_network_on_timeout(self) -> None:
+        """An httpx ReadTimeout is NETWORK."""
+        result = _classify(_raise(httpx.ReadTimeout("timed out")))
         assert result.outcome == Outcome.NETWORK
 
-    def test_skipped_when_required_input_missing(self):
+    def test_server_bug_on_validation_error(self) -> None:
+        """A pydantic ValidationError (2xx with drifted shape) is SERVER_BUG, not PASS.
+
+        ValidationError subclasses ValueError, so this guards the catch order in
+        classify(): shape drift must not be misread as a benign parse note.
+        """
+
+        class _Shape(BaseModel):
+            count: int
+
+        try:
+            _Shape.model_validate({"count": "not-an-int"})
+            raise AssertionError("model_validate must raise")
+        except ValidationError as exc:
+            err = exc
+
+        result = _classify(_raise(err))
+        assert result.outcome == Outcome.SERVER_BUG
+        assert "shape drift" in result.message
+
+    def test_skipped_when_required_input_missing(self) -> None:
         """A Tier-2 probe whose input is absent is SKIPPED — the call never runs."""
-        def _boom(_s: Any, _c: dict) -> Any:
+        def _boom(_s: Any, _c: dict[str, Any]) -> Any:
             raise AssertionError("call must not run when input is missing")
 
         result = classify(_probe(_boom, tier=2, requires=("order_id",)), MagicMock(), {})
         assert result.outcome == Outcome.SKIPPED
 
-    def test_value_error_after_2xx_is_pass_with_note(self):
+    def test_value_error_after_2xx_is_pass_with_note(self) -> None:
         """A ValueError (raised after a 2xx parse) is PASS — the endpoint responded."""
         result = _classify(_raise(ValueError("Unexpected DCV method 'CNAME'")))
         assert result.outcome == Outcome.PASS
@@ -196,29 +217,29 @@ class TestExitCode:
     def _result(self, outcome: str) -> ProbeResult:
         return ProbeResult(name="p", tier=1, endpoint="GET /x", outcome=outcome)
 
-    def test_zero_when_all_pass(self):
+    def test_zero_when_all_pass(self) -> None:
         """exit_code is 0 when every probe passes or is skipped/rate-limited."""
         results = [self._result(o) for o in (Outcome.PASS, Outcome.SKIPPED, Outcome.RATE_LIMITED)]
         assert exit_code(results) == 0
 
-    def test_one_on_server_bug(self):
+    def test_one_on_server_bug(self) -> None:
         """A SERVER_BUG makes the exit code non-zero."""
         results = [self._result(Outcome.PASS), self._result(Outcome.SERVER_BUG)]
         assert exit_code(results) == 1
 
-    def test_one_on_denied(self):
+    def test_one_on_denied(self) -> None:
         """A DENIED makes the exit code non-zero."""
         assert exit_code([self._result(Outcome.DENIED)]) == 1
 
-    def test_one_on_network(self):
+    def test_one_on_network(self) -> None:
         """A NETWORK failure makes the exit code non-zero."""
         assert exit_code([self._result(Outcome.NETWORK)]) == 1
 
-    def test_empty_is_clean_without_strict(self):
+    def test_empty_is_clean_without_strict(self) -> None:
         """EMPTY does not affect the exit code unless --strict is set."""
         assert exit_code([self._result(Outcome.EMPTY)]) == 0
 
-    def test_empty_fails_with_strict(self):
+    def test_empty_fails_with_strict(self) -> None:
         """EMPTY makes the exit code non-zero under --strict."""
         assert exit_code([self._result(Outcome.EMPTY)], strict=True) == 1
 
@@ -272,20 +293,20 @@ def _by_name(results: list[ProbeResult]) -> dict[str, str]:
 class TestRun:
     """run() orchestrates the registry, feeds context, and skips correctly."""
 
-    def test_happy_path_all_pass(self):
+    def test_happy_path_all_pass(self) -> None:
         """Every probe passes when the session returns well-formed data."""
         results = run(_ok_session())
         assert len(results) == len(REGISTRY)
         assert all(r.outcome == Outcome.PASS for r in results)
         assert exit_code(results) == 0
 
-    def test_quick_runs_tier_1_only(self):
+    def test_quick_runs_tier_1_only(self) -> None:
         """--quick runs only Tier-1 probes."""
         results = run(_ok_session(), quick=True)
         assert all(r.tier == 1 for r in results)
         assert len(results) == sum(1 for p in REGISTRY if p.tier == 1)
 
-    def test_domain_outage_is_selective(self):
+    def test_domain_outage_is_selective(self) -> None:
         """A 422 on /domains is SERVER_BUG; dependent Tier-2 domain probes SKIPPED.
 
         This mirrors the live production scenario the probe is built to catch:
@@ -312,7 +333,7 @@ class TestRun:
         assert outcomes["ssl.get"] == Outcome.PASS
         assert exit_code(run(sess)) == 1
 
-    def test_empty_domain_list_is_empty_outcome(self):
+    def test_empty_domain_list_is_empty_outcome(self) -> None:
         """An empty /domains list is EMPTY (suspect masked-failure)."""
         sess = _ok_session()
         sess.domain.get_list.return_value = []
@@ -325,20 +346,20 @@ class TestRun:
 class TestRenderers:
     """The table and summary renderers produce output without crashing."""
 
-    def test_summary_counts_outcomes(self):
+    def test_summary_counts_outcomes(self) -> None:
         """render_summary tallies outcomes in the fixed order."""
         results = run(_ok_session())
         summary = render_summary(results)
         assert summary == f"PASS {len(REGISTRY)}"
 
-    def test_table_includes_every_probe(self):
+    def test_table_includes_every_probe(self) -> None:
         """render_table lists a row for every probe."""
         results = run(_ok_session())
         table = render_table(results)
         for probe in REGISTRY:
             assert probe.name in table
 
-    def test_to_dict_excludes_payload(self):
+    def test_to_dict_excludes_payload(self) -> None:
         """ProbeResult.to_dict drops the raw payload but keeps the detail body."""
         body = {"status": 422, "detail": "boom"}
         result = ProbeResult(

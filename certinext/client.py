@@ -15,7 +15,7 @@
 from collections.abc import Callable
 from typing import Any, cast
 
-import requests
+import httpx
 
 from .auth import OAuth2ClientCredentials
 from .exceptions import (
@@ -25,6 +25,11 @@ from .exceptions import (
     CertiNextRateLimitError,
 )
 
+#: Timeouts for API requests. The old ``requests`` implementation had no
+#: timeout at all, so any finite value is stricter. The read timeout is
+#: generous because report/list endpoints can be slow server-side.
+_TIMEOUT = httpx.Timeout(10.0, read=60.0)
+
 
 class CertiNextClient:
     """Low-level HTTP client for the CertiNext REST API.
@@ -32,6 +37,12 @@ class CertiNextClient:
     Handles authentication automatically by delegating to
     `OAuth2ClientCredentials`. All requests include a Bearer token and
     JSON content-type headers. HTTP errors raise `CertiNextAPIError`.
+
+    Every API request flows through this class (the single HTTP choke
+    point); do not issue ad-hoc ``httpx`` calls elsewhere, so that a
+    caching transport can wrap the client later without touching accessors
+    (wishlist IDEA-006). The token endpoint in :mod:`certinext.auth` is the
+    one allowed exception.
     """
 
     def __init__(
@@ -52,7 +63,9 @@ class CertiNextClient:
         """
         self.base_url = base_url.rstrip("/")
         self._auth = OAuth2ClientCredentials(token_url, client_id, client_secret, scope)
-        self._session = requests.Session()
+        # follow_redirects matches the requests.Session default this client
+        # was originally built on; httpx does not follow redirects by default.
+        self._session = httpx.Client(timeout=_TIMEOUT, follow_redirects=True)
 
     def _headers(self) -> dict[str, str]:
         """Build request headers with a fresh bearer token."""
@@ -62,8 +75,8 @@ class CertiNextClient:
             "Accept": "application/json",
         }
 
-    def _raise_api_error(self, resp: requests.Response) -> None:
-        """Raise a typed CertiNextAPIError subclass if the response has a non-2xx status.
+    def _raise_api_error(self, resp: httpx.Response) -> None:
+        """Raise a typed CertiNextAPIError subclass if the response has a 4xx/5xx status.
 
         Parses the RFC 7807 ``application/problem+json`` body and raises the
         most specific exception type available:
@@ -79,38 +92,40 @@ class CertiNextClient:
             resp: The HTTP response to check.
 
         Raises:
-            CertiNextAPIError: On a non-2xx response.
+            CertiNextAPIError: On a 4xx/5xx response.
         """
+        if not resp.is_error:
+            return
         try:
-            resp.raise_for_status()
-        except requests.HTTPError as exc:
-            try:
-                body: dict[str, Any] | str = resp.json()
-            except Exception:
-                body = resp.text
+            body: dict[str, Any] | str = resp.json()
+        except Exception:
+            body = resp.text
 
-            status = resp.status_code
-            if status == 404:
-                raise CertiNextNotFoundError(status, body, response=resp) from exc
-            if status == 409:
-                raise CertiNextConflictError(status, body, response=resp) from exc
-            if status == 429:
-                retry_after: float | None = None
-                raw = resp.headers.get("Retry-After")
-                if raw is not None:
-                    try:
-                        retry_after = float(raw)
-                    except (ValueError, TypeError):
-                        pass
-                raise CertiNextRateLimitError(status, body, retry_after=retry_after, response=resp) from exc
-            raise CertiNextAPIError(status, body, response=resp) from exc
+        status = resp.status_code
+        if status == 404:
+            raise CertiNextNotFoundError(status, body, response=resp)
+        if status == 409:
+            raise CertiNextConflictError(status, body, response=resp)
+        if status == 429:
+            retry_after: float | None = None
+            raw = resp.headers.get("Retry-After")
+            if raw is not None:
+                try:
+                    retry_after = float(raw)
+                except (ValueError, TypeError):
+                    pass
+            raise CertiNextRateLimitError(status, body, retry_after=retry_after, response=resp)
+        raise CertiNextAPIError(status, body, response=resp)
 
-    def _execute(self, make_request: Callable[[], requests.Response]) -> requests.Response:
+    def _execute(self, make_request: Callable[[], httpx.Response]) -> httpx.Response:
         """Execute a request callable, retrying once with a fresh token on 401.
 
         If the server returns 401 (e.g. ``ACCESS_TOKEN_REVOKED`` when the token
         expires mid-poll), the cached token is invalidated and the request is
         retried once. If the retry also returns 401, the error propagates normally.
+
+        No other retry or backoff happens here — callers and
+        :class:`~certinext.orders.OrderWorkflow` own retries deliberately.
 
         Args:
             make_request: Zero-argument callable that performs the HTTP request
@@ -164,7 +179,7 @@ class CertiNextClient:
         Raises:
             CertiNextAPIError: On a non-2xx response. Provides ``.status_code`` and ``.body``.
         """
-        def _req() -> requests.Response:
+        def _req() -> httpx.Response:
             headers = self._headers()
             headers["Accept"] = accept
             return self._session.get(f"{self.base_url}{path}", headers=headers, params=params)
@@ -192,7 +207,7 @@ class CertiNextClient:
         Raises:
             CertiNextAPIError: On a non-2xx response. Provides ``.status_code`` and ``.body``.
         """
-        def _req() -> requests.Response:
+        def _req() -> httpx.Response:
             headers = self._headers()
             if extra_headers:
                 headers.update(extra_headers)
@@ -220,7 +235,7 @@ class CertiNextClient:
         Raises:
             CertiNextAPIError: On a non-2xx response. Provides ``.status_code`` and ``.body``.
         """
-        def _req() -> requests.Response:
+        def _req() -> httpx.Response:
             headers = self._headers()
             if extra_headers:
                 headers.update(extra_headers)

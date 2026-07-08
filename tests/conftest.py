@@ -15,7 +15,9 @@
 """Shared fixtures for the certinext test suite."""
 
 import json
+import os
 from pathlib import Path
+from typing import Any, Callable, cast
 from unittest.mock import MagicMock
 
 import pytest
@@ -24,6 +26,91 @@ from certinext.client import CertiNextClient
 from certinext.domains import Domain, DomainAccessor
 
 _FIXTURES_DIR = Path(__file__).parent / "fixtures"
+_GOLDENS_DIR = Path(__file__).parent / "goldens"
+
+
+def pytest_configure(config: pytest.Config) -> None:  # noqa: ARG001
+    """Pin typer's help-rendering width and terminal detection before import.
+
+    typer reads ``TERMINAL_WIDTH`` into ``rich_utils.MAX_WIDTH`` *and*
+    ``GITHUB_ACTIONS``/``FORCE_COLOR``/``PY_COLORS`` into
+    ``rich_utils.FORCE_TERMINAL`` at **import** time, so a per-test fixture
+    set too late cannot affect either — this hook runs before test
+    collection imports ``certinext.cli``. The GitHub Actions runner sets
+    ``GITHUB_ACTIONS=true`` unconditionally, which without this pin makes
+    typer force rich's bold/dim ANSI styling into captured ``--help`` output
+    even though ``NO_COLOR`` is set and stdout isn't a real terminal — the
+    ``--help`` snapshot goldens were recorded without it and CI-only would
+    fail every one of them. ``_TYPER_FORCE_DISABLE_TERMINAL`` is typer's own
+    documented override for this. (Nothing imported by this conftest itself
+    pulls in typer; if that ever changes, these pins must move earlier.)
+
+    Args:
+        config: The pytest configuration object (unused).
+    """
+    os.environ["_TYPER_FORCE_DISABLE_TERMINAL"] = "1"
+    os.environ["TERMINAL_WIDTH"] = "100"
+    # Belt and braces: rich consoles created without an explicit width fall
+    # back to terminal-size detection, which reads COLUMNS. Pin it so any
+    # help-rendering path that misses MAX_WIDTH still sizes identically.
+    os.environ["COLUMNS"] = "100"
+    os.environ["LINES"] = "50"
+
+
+def pytest_addoption(parser: pytest.Parser) -> None:
+    """Register the ``--update-goldens`` command-line option.
+
+    Args:
+        parser: The pytest argument parser to extend.
+    """
+    parser.addoption(
+        "--update-goldens",
+        action="store_true",
+        default=False,
+        help="Rewrite golden files under tests/goldens/ with the current output",
+    )
+
+
+@pytest.fixture
+def golden(request: pytest.FixtureRequest) -> Callable[[str, str], None]:
+    """Compare a string against a golden file under ``tests/goldens/``.
+
+    The returned callable takes ``(rel_path, actual)`` and asserts that
+    ``actual`` matches the golden file's content line-by-line (so CRLF/LF
+    checkout differences never matter). With ``pytest --update-goldens`` the
+    golden file is (re)written instead of compared.
+
+    Returns:
+        A ``check(rel_path, actual)`` callable.
+    """
+    update = bool(request.config.getoption("--update-goldens"))
+
+    def check(rel_path: str, actual: str) -> None:
+        """Assert ``actual`` matches (or rewrite) the golden at ``rel_path``.
+
+        Args:
+            rel_path: Path of the golden file relative to ``tests/goldens/``.
+            actual: The output produced by the code under test.
+
+        Raises:
+            AssertionError: When the output differs from the recorded golden.
+        """
+        path = _GOLDENS_DIR / rel_path
+        if update:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(actual, encoding="utf-8", newline="\n")
+            return
+        if not path.exists():
+            pytest.fail(
+                f"golden file missing: {path} — record it with pytest --update-goldens"
+            )
+        expected = path.read_text(encoding="utf-8")
+        assert actual.splitlines() == expected.splitlines(), (
+            f"output differs from golden {rel_path} — if the change is deliberate, "
+            f"regenerate with pytest --update-goldens and note it in the migration guide"
+        )
+
+    return check
 
 
 # Two sentinel dates used across fixtures:
@@ -76,7 +163,7 @@ SAMPLE_DCV_VERIFIED = {"method": "dns-txt"}
 # PENDING domain with an active challenge: method + txtToken (hex token value).
 SAMPLE_DCV_PENDING_WITH_TOKEN = {"method": "dns-txt", "txtToken": "9B2CA888948836F803ECEA19F0AAEE0B"}
 # PENDING domain with no method set yet (freshly created, never had change_dcv_method called).
-SAMPLE_DCV_UNSET = {}
+SAMPLE_DCV_UNSET: dict[str, Any] = {}
 
 TOKEN_RESPONSE = {
     "access_token": "test-bearer-token-abc123",
@@ -94,7 +181,7 @@ def mock_client() -> MagicMock:
 @pytest.fixture
 def domain(mock_client: MagicMock) -> Domain:
     """A Domain instance backed by mock_client and SAMPLE_DOMAIN_DATA."""
-    return Domain(mock_client, dict(SAMPLE_DOMAIN_DATA))
+    return Domain.from_payload(mock_client, dict(SAMPLE_DOMAIN_DATA))
 
 
 @pytest.fixture
@@ -104,18 +191,18 @@ def accessor(mock_client: MagicMock) -> DomainAccessor:
 
 
 @pytest.fixture
-def bad_domain_data() -> list[dict]:
+def bad_domain_data() -> list[dict[str, Any]]:
     """List of malformed/incomplete domain dicts loaded from the bad-data fixture file."""
-    return json.loads((_FIXTURES_DIR / "bad_domain_data.json").read_text())
+    return cast(list[dict[str, Any]], json.loads((_FIXTURES_DIR / "bad_domain_data.json").read_text()))
 
 
 @pytest.fixture
-def domains_list_data() -> list[dict]:
+def domains_list_data() -> list[dict[str, Any]]:
     """Raw list of 43 anonymized domain dicts loaded from the fixture file."""
-    return json.loads((_FIXTURES_DIR / "domains_list.json").read_text())
+    return cast(list[dict[str, Any]], json.loads((_FIXTURES_DIR / "domains_list.json").read_text()))
 
 
 @pytest.fixture
-def domains_list(mock_client: MagicMock, domains_list_data: list[dict]) -> list[Domain]:
+def domains_list(mock_client: MagicMock, domains_list_data: list[dict[str, Any]]) -> list[Domain]:
     """43 Domain objects built from the anonymized fixture data."""
-    return [Domain(mock_client, item) for item in domains_list_data]
+    return [Domain.from_payload(mock_client, item) for item in domains_list_data]

@@ -1,0 +1,14 @@
+                                                                                                    
+ Usage: certinext domains change-dcv-method [OPTIONS] ID METHOD:{DNS-TXT|HTTP-                      
+                                            URL}                                                    
+                                                                                                    
+ Change the DCV method for a domain.                                                                
+                                                                                                    
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    ID                             TEXT    Domain ID [required]                                 │
+│ *    method:{DNS-TXT|HTTP-URL}      CHOICE  DCV method: DNS-TXT or HTTP-URL [required]           │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+

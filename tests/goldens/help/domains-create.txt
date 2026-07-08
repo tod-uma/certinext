@@ -1,0 +1,13 @@
+                                                                                                    
+ Usage: certinext domains create [OPTIONS] NAME [KEY=VALUE]...                                      
+                                                                                                    
+ Create a new domain.                                                                               
+                                                                                                    
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    name                TEXT  Domain name (e.g. example.com) [required]                         │
+│      [KEY=VALUE]...      TEXT  Additional fields to include in the request body                  │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --help          Show this message and exit.                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+

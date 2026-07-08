@@ -1,0 +1,26 @@
+[
+  {
+    "name": "accounts.me",
+    "tier": 1,
+    "endpoint": "GET /auth/me",
+    "outcome": "PASS",
+    "http_status": null,
+    "ems_code": null,
+    "count": null,
+    "detail": null,
+    "duration_ms": 12.0,
+    "message": ""
+  },
+  {
+    "name": "domain.get_list",
+    "tier": 1,
+    "endpoint": "GET /domains",
+    "outcome": "PASS",
+    "http_status": null,
+    "ems_code": null,
+    "count": 2,
+    "detail": null,
+    "duration_ms": 34.0,
+    "message": ""
+  }
+]
