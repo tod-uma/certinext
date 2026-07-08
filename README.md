@@ -7,8 +7,14 @@ Python library and CLI scripts for managing your [CertiNext](https://us.certinex
 ## Contents
 
 - [Requirements](#requirements)
+- [AI-agent quickstart](#ai-agent-quickstart)
 - [Installation](#installation)
 - [Credentials](#credentials)
+  - [Storing credentials in the OS keychain](#storing-credentials-in-the-os-keychain-recommended)
+  - [Prevetting token](#prevetting-token-optional-ovev-orders)
+  - [Storing issue-cert defaults](#storing-issue-cert-defaults-optional)
+  - [Sandbox environment](#sandbox-environment)
+  - [Integration tests](#integration-tests)
 - [Using the CLI tools](#using-the-cli-tools)
   - [Old command names (aliases)](#old-command-names-aliases)
   - [Shell completion](#shell-completion)
@@ -25,16 +31,59 @@ Python library and CLI scripts for managing your [CertiNext](https://us.certinex
   - [certinext healthcheck](#certinext-healthcheck)
 - [Log output](#log-output)
 - [Python library](#python-library)
+  - [Working with domains](#working-with-domains)
+  - [Working with orders](#working-with-orders)
+  - [Working with accounts](#working-with-accounts)
+  - [Working with the catalog](#working-with-the-catalog)
+  - [Working with the ledger](#working-with-the-ledger)
+  - [Working with SSL/TLS certificates](#working-with-ssltls-certificates)
+  - [Error handling](#error-handling)
 - [Examples](#examples)
 - [API documentation](#api-documentation)
 - [Project structure](#project-structure)
+- [Migrating from 0.3.x to 1.0](docs/migrating-to-1.0.md)
 
 ## Requirements
 
 - Python 3.10+ (installed automatically when using uv — see [Installation](#installation))
 - A CertiNext account with OAuth API credentials (account number + client secret)
 
-**Runtime dependencies** (`httpx`, `pydantic`, `tabulate`, `structlog`) are installed automatically. `structlog` provides structured logging for the CLI tools and library internals — in cron or redirected contexts all output is emitted as JSON; in a terminal it uses a human-readable format. If you use certinext purely as a library and have a strong reason to exclude `structlog`, open an issue and we'll consider making it optional.
+**Runtime dependencies** (`httpx`, `pydantic`, `pydantic-settings`, `tomlkit`, `typer`, `rich`, `structlog`) are installed automatically. `structlog` provides structured logging for the CLI tools and library internals — in cron or redirected contexts all output is emitted as JSON; in a terminal it uses a human-readable format. If you use certinext purely as a library and have a strong reason to exclude `structlog`, open an issue and we'll consider making it optional.
+
+## AI-agent quickstart
+
+The short version, for an agent wiring up certinext without reading the
+whole README:
+
+```bash
+uv tool install "certinext[csr,keyring]"   # CLI
+uv add certinext                            # or, as a library dependency
+```
+
+```python
+import certinext
+
+sess = certinext.session(client_id="ACCOUNT_NUMBER", client_secret="CLIENT_SECRET")
+domain = sess.domain.get("example.com")
+```
+
+- **Run `certinext healthcheck` (or `--sandbox`) first**, before assuming any
+  endpoint works for a given account — it's read-only, safe against
+  production, and tells you in one shot what's reachable and what's returning
+  vendor errors right now. See [certinext healthcheck](#certinext-healthcheck).
+- **All API errors are `CertiNextAPIError`** (`.status_code`, `.body`); network
+  failures are `httpx.HTTPError`. See [Error handling](#error-handling).
+- **Known vendor API quirks** (broken filters, pagination gotchas, chain
+  ordering) are documented inline next to the affected calls — search this
+  README for "Note:" — and tracked as GitLab issues; see the in-repo
+  `.claude/skills/certinext-api-bugs/SKILL.md` for the current list if you
+  have repo access.
+- **Migrating code written against 0.3.x?** See
+  [Migrating from 0.3.x to 1.0](docs/migrating-to-1.0.md) — it's short; almost
+  nothing changed except one exception base class and one internal import path.
+- Full operational facts (config file, keyring, CI, release process) also
+  live in [AGENTS.md](AGENTS.md); a machine-readable index of this README's
+  sections is in [llms.txt](llms.txt).
 
 ## Installation
 
@@ -1283,6 +1332,8 @@ domain = sess.domain.create("newdomain.example.com")
 | `organization_id` | `str \| None` | Organization ID |
 | `organization_name` | `str \| None` | Organization display name |
 | `created_at` | `datetime \| None` | Creation timestamp (timezone-aware UTC) |
+| `verified_at` | `datetime \| None` | Timestamp DCV was last completed, or `None` if not yet verified |
+| `dcv_expires` | `datetime \| None` | DCV token expiry (timezone-aware UTC); only set once DCV has completed |
 | `needs_dcv` | `bool` | `True` if status is `ACTIVE` and `dcv_status` is not `VERIFIED` |
 
 `Domain` objects support `str()` and `repr()`:
@@ -1293,6 +1344,7 @@ print(domain)
 #   id:              vuxwZgEXWWFXQQWC-...
 #   status:          ACTIVE
 #   dcv_status:      VERIFIED
+#   dcv_expires:     2026-12-14 00:00:00+00:00   (only shown once DCV has completed)
 #   organization:    University of Maine System
 #   created:         2026-05-04 21:27:14+00:00
 
@@ -1329,11 +1381,23 @@ print(dcv.host)                    # sub-domain prefix for the challenge record
 
 result = domain.verify()           # trigger verification; returns a DcvVerifyResult summary
 domain.change_dcv_method("DNS-TXT")   # accepted values: "DNS-TXT", "HTTP-URL"
+domain.reinitiate_dcv()            # force a fresh challenge token (e.g. after tokenExpiry lapses)
 attempt = domain.last_dcv_attempt()   # returns raw API response dict
 history = domain.dcv_attempt_history() # returns raw API response dict or list
 
-# Get the raw API response dict
+# Is the DCV token about to expire?
+if domain.dcv_expires_soon(days=30):
+    print(f"{domain.name} needs re-validation soon")
+
+# Does a registered ancestor already cover this domain's DCV?
+# (used by `certinext parent-dcv-status`; requires certinext[dns] for the
+# NS zone-boundary check — see that command's section above)
+all_names = {d.name for d in sess.domain.get_list()}
+parent = domain.dcv_covering_parent(all_names)
+
+# Get the raw API response dict, or a flat dict[str, str] for tabular display
 raw = domain.as_dict()
+row = domain.to_row()
 ```
 
 #### Example: verify all pending domains
@@ -1428,6 +1492,19 @@ for o in orgs:
 org = sess.accounts.get_organization("8921215")
 ```
 
+`Organization` also exposes detail-endpoint properties not present in the
+list response — `state_code`, `state_name`, `street_address_1`,
+`street_address_2`, `business_category_id`, `validation_status_id`,
+`validation_status`, `validation_for_id`, `validation_for`,
+`subscriber_agreement_signed`, `subscriber_agreement_signer`,
+`subscriber_agreement_date`, `org_representatives`, and `domains`. The
+first access of any of these lazily fetches
+`GET /api/certinext/v2/organizations/{number}` once and caches the result
+(`org.as_dict()` reflects whatever has been fetched so far); an object
+returned by `get_organization()` already has the detail loaded. On a
+detached `Organization` (no attached client) or if the fetch fails, these
+properties return `None`/empty rather than raising.
+
 ### Working with the catalog
 
 `sess.catalog` lists available certificate products and their custom fields.
@@ -1458,7 +1535,7 @@ page = sess.ledger.get_page(page=1, size=50)
 ```
 
 `get_list()` paginates automatically. `LedgerRecord.to_row()` returns a flat
-`dict[str, str]` suitable for `tabulate`.
+`dict[str, str]` suitable for tabular display (the CLI renders it with `rich`).
 
 ### Working with SSL/TLS certificates
 
@@ -1508,8 +1585,8 @@ for challenge in order.get_dcv():
 
 # 2. (Publish the DNS TXT or HTTP file challenge externally)
 
-# 3. Trigger verification (publish the challenge first, then call this)
-order.verify_dcv()
+# 3. Trigger verification for each domain (publish the challenge first, then call this)
+order.verify_dcv(domain="example.com", method="DNS-TXT")
 order.refresh()
 print(order.status)  # "pending-csr" once DCV passes
 
@@ -1518,7 +1595,7 @@ order.submit_csr(csr_pem)
 order.refresh()
 
 # 5. Accept agreement
-order.accept_agreement()
+order.accept_agreement(signer_name="Jane Doe", signer_place="Portland, ME")
 order.refresh()
 print(order.status)  # "pending-approval" or "issued"
 
@@ -1528,6 +1605,12 @@ pem  = order.download_certificate_pem()      # raw PEM bundle (API order — see
 chain = order.download_certificate().as_pem_chain()  # leaf-first fullchain, sorted into signing order
 der  = order.download_certificate_der()      # raw DER bytes
 ```
+
+> **UMS note:** `get_dcv()`/`verify_dcv()` are for CAs that require explicit
+> per-domain DCV. University of Maine System domains are pre-validated, so
+> production UMS orders normally skip straight from `pending-agreement` to
+> `pending-csr`/`issued` and these two methods are rarely called in practice
+> (see [certinext issue-cert](#certinext-issue-cert)'s lifecycle notes).
 
 **Complete end-to-end DV example:**
 
@@ -1544,9 +1627,9 @@ for ch in order.get_dcv():
 
 input("Press Enter once DNS TXT records are published…")
 
-order.verify_dcv()
+order.verify_dcv(domain="example.com", method="DNS-TXT")
 order.submit_csr(open("csr.pem").read())
-order.accept_agreement()
+order.accept_agreement(signer_name="Jane Doe", signer_place="Portland, ME")
 
 while True:
     order.refresh()
@@ -1605,9 +1688,10 @@ when writing a `fullchain.pem` for an ACME server).
 #### Other lifecycle operations
 
 ```python
-order.cancel()
-order.revoke(reason="keyCompromise")
-order.reissue("rekey", csr=new_csr_pem)
+order.cancel()                              # cancel an in-progress order
+order.reject()                              # reject a draft order
+order.revoke(reason="keyCompromise")        # revoke an issued certificate
+order.reissue("rekey", csr=new_csr_pem)     # reissue with a new key
 ```
 
 ### Error handling
@@ -1711,37 +1795,56 @@ The Swagger spec is the most authoritative source — it exposes fields not pres
 ```
 certinext/
     __init__.py                   # session() factory, top-level exports, URL constants
-    _cli.py                       # shared CLI utilities (add_connection_args, add_requestor_args, fatal_api_error, build_session)
-    _config.py                    # stored issue-cert defaults (config.toml load/merge/save)
-    _keyring.py                   # shared keyring helpers (keyring_service, keyring_get, keyring_available, no_keyring_help)
-    accounts.py                   # AccountInfo, Group, Organization, AccountAccessor
-    accounts_cli.py               # certinext accounts CLI entry point
-    auth.py                       # OAuth 2.0 client credentials token management
-    catalog.py                    # Product, ProductCategory, CustomField, CatalogAccessor
-    client.py                     # HTTP session wrapper (get/post/put/delete/get_bytes)
-    csr.py                        # parse_csr() — extract CN and SANs from a PEM CSR (requires certinext[csr])
-    domain_cert_count_cli.py      # certinext domain-cert-count CLI entry point
-    domains.py                    # Domain class and DomainAccessor
-    domains_cli.py                # certinext domains CLI entry point
-    exceptions.py                 # CertiNextAPIError
-    issue_certificate_cli.py      # certinext issue-cert CLI entry point
-    ledger.py                     # LedgerRecord and LedgerAccessor
-    ledger_cli.py                 # certinext ledger CLI entry point
-    list_certificates_cli.py      # certinext list-certificates CLI entry point
-    orders.py                     # OrderRecord and OrderAccessor
-    pending_dcv_cli.py            # certinext pending-dcv CLI entry point
-    session.py                    # CertiNextSession (accounts, catalog, domain, ledger, orders, ssl)
-    setup_defaults_cli.py         # certinext setup defaults CLI entry point
-    setup_keyring_cli.py          # certinext setup keyring CLI entry point
-    ssl_certificates.py           # SslOrder, DcvChallenge, CertificateDownload, SslAccessor, OrderWorkflow
+    cli_support.py                # public CLI-support layer: resolve_connection, build_session,
+                                  #   setup_logging, prompt_stderr, require_credential, fatal_api_error
+                                  #   (replaces the pre-1.0 private certinext._cli)
+    cli/                          # the consolidated `certinext` typer application (ADR 0004)
+        __init__.py                #   main() entry point, exit-code handling
+        _app.py                    #   the shared typer app object
+        _aliases.py                #   certinext-* alias scripts pre-selecting a subcommand
+        _shared.py                 #   shared Annotated option types, table/pairs rendering
+        accounts.py, domains.py, domain_cert_count.py, healthcheck.py,
+        issue_cert.py, ledger.py, list_certificates.py,
+        parent_dcv_status.py, pending_dcv.py, setup_defaults.py,
+        setup_keyring.py           #   one module per subcommand
+    models/                       # pydantic response models (ADR 0003/0005)
+        __init__.py, _base.py      #   CertiNextModel base, lenient_enum, coerce_flag
+        accounts.py, catalog.py, domains.py, ledger.py, orders.py,
+        ssl_certificates.py        #   per-API-area model classes; legacy modules below re-export these
+    _config.py                     # stored issue-cert defaults (config.toml load/merge/save; writes via tomlkit)
+    _keyring.py                    # shared keyring helpers (keyring_service, keyring_get, keyring_available)
+    _chain.py                      # certificate-chain re-sorting (leaf-first signing order; GitLab #4)
+    settings.py                    # pydantic-settings models: IssuanceDefaults, ConnectionSettings,
+                                  #   CertiNextSettings (init → keyring → env precedence)
+    accounts.py                    # AccountInfo, Group, Organization, AccountAccessor
+    auth.py                        # OAuth 2.0 client credentials token management
+    catalog.py                     # Product, ProductCategory, CustomField, CatalogAccessor
+    client.py                      # httpx-based HTTP client (get/post/put/delete/get_bytes)
+    csr.py                         # parse_csr() — extract CN and SANs from a PEM CSR (requires certinext[csr])
+    domains.py                     # Domain class and DomainAccessor
+    domain_cert_count.py           # operations layer for `certinext domain-cert-count` (join logic)
+    exceptions.py                  # CertiNextAPIError and typed subclasses
+    healthcheck.py                 # read-only probe engine for `certinext healthcheck`
+    ledger.py                      # LedgerRecord and LedgerAccessor
+    orders.py                      # OrderRecord and OrderAccessor
+    session.py                     # CertiNextSession (accounts, catalog, domain, ledger, orders, ssl)
+    ssl_certificates.py            # SslOrder, DcvChallenge, CertificateDownload, SslAccessor, OrderWorkflow
                                   #   SslAccessor.create() — DV/OV/EV dispatcher
                                   #   CertificateDownload.as_pem_chain() — leaf-first fullchain
                                   #   OrderWorkflow.download_chain() — 422-retry + normalised chain
                                   #   OrderWorkflow.from_order_id() — resume from persisted order ID
 tests/
-    test_integration.py           # integration tests against the sandbox API (pytest -m integration)
+    test_integration.py, test_sandbox_integration.py  # live sandbox tests (pytest -m integration)
+    test_probes.py                 # live probe suite backing `certinext healthcheck` (pytest -m probe)
+    test_corpus_models.py          # parses committed sanitized API-response corpus through the models
+    test_cli_help_snapshots.py, test_cli_json_goldens.py  # golden-file CLI regression tests
+docs/
+    migrating-to-1.0.md            # 0.3.x → 1.0 migration guide
+    adr/                           # architecture decision records
+    plans/pydantic-typer-refactor/ # phased refactor plan + per-phase implementation records
+    wishlist/                      # deferred ideas
 examples/
-    dns_txt_dcv.py                # DNS-TXT DCV automation example (see Examples above)
+    dns_txt_dcv.py                 # DNS-TXT DCV automation example (see Examples above)
 ```
 
 </details>

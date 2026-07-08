@@ -1,0 +1,45 @@
+# certinext
+
+> Python library and CLI (`certinext`) for managing a CertiNext PKI account
+> via its REST API: domains, DCV, SSL/TLS certificate issuance and
+> lifecycle, orders, ledger, and account/catalog data. Requires CertiNext
+> OAuth API credentials (account number + client secret), not a portal
+> login.
+
+Start with the [AI-agent quickstart](README.md#ai-agent-quickstart) section
+of the README — install command, minimal session example, and the rule to
+run `certinext healthcheck` before relying on any endpoint.
+
+## Core docs
+
+- [README](README.md): full CLI reference (one subcommand per section),
+  Python library reference (`sess.domain`, `sess.orders`, `sess.accounts`,
+  `sess.catalog`, `sess.ledger`, `sess.ssl`), credentials/config/keyring
+  setup, error handling, and known vendor-API quirks (search for "Note:").
+- [AGENTS.md](AGENTS.md): operational facts for coding agents working in
+  this repo — dev setup, test/lint/type-check commands, release process,
+  branch conventions.
+- [Migrating from 0.3.x to 1.0](docs/migrating-to-1.0.md): what changed in
+  the 1.0 rewrite (pydantic models, httpx transport, typer CLI) and what
+  didn't — read this before touching code written against certinext <1.0.
+- [DNS-TXT DCV automation example](examples/dns_txt_dcv.py): a
+  ready-to-adapt script for the most common automation task (publish a DNS
+  challenge, wait for propagation, verify).
+
+## Reference
+
+- [Architecture decision records](docs/adr/): why the library is built the
+  way it is (pydantic/typer/httpx stack, lenient response models, CLI
+  aliasing strategy, tomlkit for config writes).
+- [Refactor plan and phase records](docs/plans/pydantic-typer-refactor/README.md):
+  detailed implementation history of the 0.3.x → 1.0 rewrite, useful when a
+  behavior seems to have changed and you want to know why.
+- CertiNext's own OpenAPI spec (sandbox):
+  https://sandbox-us-api.certinext.io/v3/api-docs/certinext-v2 — the
+  authoritative source for request/response shapes this library wraps.
+
+## Optional
+
+- [Wishlist](docs/wishlist/): deferred feature ideas (TUI, MCP server, docs
+  site, doctest infra, async client, response caching) — check before
+  proposing new work in these areas, it may already be scoped and parked.
