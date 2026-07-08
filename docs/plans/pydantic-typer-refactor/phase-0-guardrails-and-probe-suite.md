@@ -1,10 +1,17 @@
 ---
-status: planned
+status: done
 depends-on: []
 implements-adr: [0005]
 ---
 
 # Phase 0 — Guardrails and probe suite (lands on `main`)
+
+> **Status note (2026-07-08):** executed 2026-07-02 (MRs !76/!77 merged on
+> `main`); the frontmatter had been left at `planned`. The last open exit
+> criterion — R08's `DcvInfo` docstring correction — landed with phase 5.
+> Deliberately open: 11 sandbox-lifecycle probe skips (R10–R15, R18, R19,
+> R21 need a mutating issuance run; R13/R14 need TTL/429 runs) and the
+> R24 tag-pipeline observation.
 
 Tracking: issue #13 · milestone %v1.0.0 · label ~"refactor-v1"
 
