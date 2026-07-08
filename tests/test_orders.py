@@ -14,6 +14,7 @@
 
 """Tests for certinext.orders (OrderRecord, OrderAccessor) and domain_cert_count.build_rows."""
 
+from datetime import datetime
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -173,6 +174,29 @@ class TestOrderRecordProperties:
         """common_name returns None when no domain field is present."""
         rec = OrderRecord.model_validate(dict(SAMPLE_ORDER_NO_CN))
         assert rec.common_name is None
+
+    def test_order_date_parses_naive_datetime(self) -> None:
+        """order_date parses orderDate to a *naive* datetime (no tzinfo, no Z on the wire).
+
+        GitLab issue #20: unlike every other CertiNext v2 timestamp, the
+        orders report sends this with no UTC offset, so it can't be assumed
+        UTC-aware.
+        """
+        rec = OrderRecord.model_validate({"orderDate": "2026-07-02 17:07:14"})
+        assert rec.order_date == datetime(2026, 7, 2, 17, 7, 14)
+        assert rec.order_date is not None
+        assert rec.order_date.tzinfo is None
+
+    def test_certificate_expiry_date_parses_naive_datetime(self) -> None:
+        """certificate_expiry_date parses certificateExpiryDate to a naive datetime (GitLab issue #20)."""
+        rec = OrderRecord.model_validate({"certificateExpiryDate": "2026-08-01 17:09:36"})
+        assert rec.certificate_expiry_date == datetime(2026, 8, 1, 17, 9, 36)
+        assert rec.certificate_expiry_date is not None
+        assert rec.certificate_expiry_date.tzinfo is None
+
+    def test_order_date_none_when_missing(self, order: OrderRecord) -> None:
+        """order_date is None when orderDate is absent from the response."""
+        assert order.order_date is None
 
     def test_as_dict_returns_raw_data(self, order: OrderRecord) -> None:
         """as_dict() returns the original raw data dict (identity, not a copy)."""

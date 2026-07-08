@@ -1,5 +1,6 @@
 {
   "method": "DNS-TXT",
   "token": "9B2CA888948836F803ECEA19F0AAEE0B",
-  "host": ""
+  "host": "",
+  "token_expiry": "2026-08-01T00:00:00Z"
 }

@@ -121,7 +121,9 @@ _ROUTES: dict[str, Any] = {
     f"{_API}/organizations/ORG-001": _ORG_DETAIL,
     f"{_API}/domains": [dict(SAMPLE_DOMAIN_DATA), dict(SAMPLE_DOMAIN_DATA_2)],
     f"{_API}/domains/{_DOMAIN_ID}": dict(SAMPLE_DOMAIN_DETAIL_DATA),
-    f"{_API}/domains/{_DOMAIN_ID}/dcv": dict(SAMPLE_DCV_PENDING_WITH_TOKEN),
+    # tokenExpiry included deliberately: proves the --json path serializes
+    # DcvInfo.token_expiry (a datetime) without crashing json.dumps().
+    f"{_API}/domains/{_DOMAIN_ID}/dcv": {**SAMPLE_DCV_PENDING_WITH_TOKEN, "tokenExpiry": "2026-08-01T00:00:00Z"},
     f"{_API}/reports/orders": _ORDERS,
     f"{_API}/reports/ledger": _LEDGER,
 }

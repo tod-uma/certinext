@@ -195,6 +195,53 @@ explicitly instead of relying on generic `str()`, matching `Domain.to_row()`.
 Updated `tests/test_ssl_certificates.py` assertions from string equality to
 `datetime` equality. 770 unit tests, ruff, mypy --strict, pyright all green.
 
+**Follow-up audit (same session):** the datetime find prompted a broader
+sweep — every model field cross-referenced against the CertiNext OpenAPI
+spec (`sandbox-us-api.certinext.io/v3/api-docs/certinext-v2`, mostly typed
+generic `object` for report/list endpoints, but a few schemas — `DcvDetails`,
+`DomainCreateResponse`, `OAuth2TokenResponse` — do carry real types) plus the
+sanitized corpus for everything the spec doesn't type. Confirmed correct
+and left alone: product/order/org/domain/group IDs (verified as strings on
+the wire in every corpus sample; `coerce_numbers_to_str=True` protects them
+even if the vendor ever drifts to ints), prices and ledger debit/credit/
+balance (deliberately `str`; nothing in the codebase does arithmetic on
+them), `is_pre_vetting_org` (explicit bool→`"1"`/`"0"` coercion, matches the
+documented 0.3.x contract), `validity_years` (only ever a request
+parameter, already `int` everywhere).
+
+Three genuine gaps found and fixed:
+
+- **`SslOrder.expires_at`** (new field, `expiresAt`): the order-detail
+  response has a top-level certificate-expiry timestamp that no field
+  read; only reachable via raw `.as_dict()` before this fix. Distinct from
+  `CertificateDownload.not_after`, which comes from a different endpoint
+  (the certificate-download response, not the order detail).
+- **`DcvInfo.token_expiry`** / **`DcvChallenge.token_expiry`** (new fields,
+  `tokenExpiry`, domains.py and ssl_certificates.py respectively): the
+  OpenAPI spec documents `DcvDetails.tokenExpiry` as `date-time`, and
+  `Domain.reinitiate_dcv()`'s own docstring talks about calling it "when
+  the challenge token has lapsed" — but there was no field to check that
+  against, only an empty-token heuristic. `reinitiate_dcv()`'s docstring
+  updated to point at the new field.
+- **`OrderRecord.order_date`/`.certificate_expiry_date`** (new fields,
+  `orderDate`/`certificateExpiryDate`): missing entirely from the orders
+  report model. Filed as **GitLab issue #20** rather than just fixed
+  silently — the wire format for these two specifically has no timezone
+  marker at all (`"2026-08-01 17:09:36"`, confirmed in
+  `reports-orders.json`), unlike every other CertiNext v2 timestamp
+  observed. Verified `_lenient_datetime` parses this shape successfully but
+  produces a **naive** `datetime` — a real footgun if mixed with the
+  timezone-aware datetimes everywhere else in the library. Both fields'
+  docstrings carry an explicit naive-datetime warning; not using the
+  `_LenientDatetime` name for a "sometimes naive" type would be
+  misleading, so the warning lives in the field description instead of a
+  new type alias.
+
+Also fixed in passing: `SslOrder`'s own class docstring example called
+`order.verify_dcv()`/`order.accept_agreement()` with no arguments — the
+same stale-signature bug already found and fixed in the README earlier
+this phase, just missed in the source docstring.
+
 ---
 > **AI-assistant disclaimer:** Drafted by Claude Code (Claude Fable 5,
 > `claude-fable-5`) from a conversation with Tod Detre. May contain

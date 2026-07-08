@@ -72,6 +72,7 @@ _ORDER_DATA = {
     "domain": "example.com",
     "additionalDomains": ["www.example.com"],
     "createdAt": "2026-05-27T12:00:00Z",
+    "expiresAt": "2027-05-27T12:00:00Z",
     "tags": ["foo", "bar"],
     "remarks": "some note",
 }
@@ -123,6 +124,16 @@ class TestDcvChallenge:
         """host reads dnsHost."""
         c = DcvChallenge.model_validate({"dnsHost": "_emudhra-challenge.example.com"})
         assert c.host == "_emudhra-challenge.example.com"
+
+    def test_token_expiry_parses_iso_datetime(self) -> None:
+        """token_expiry reads tokenExpiry, parsed to a UTC datetime."""
+        c = DcvChallenge.model_validate({"tokenExpiry": "2026-08-01T00:00:00Z"})
+        assert c.token_expiry == datetime(2026, 8, 1, tzinfo=timezone.utc)
+
+    def test_token_expiry_none_when_missing(self) -> None:
+        """token_expiry is None when tokenExpiry is absent."""
+        c = DcvChallenge.model_validate({"domain": "example.com"})
+        assert c.token_expiry is None
 
     def test_value_aliases_token(self) -> None:
         """value returns the same as token when no explicit 'value' field."""
@@ -286,6 +297,16 @@ class TestSslOrderProperties:
         """created_at reads createdAt, parsed to a UTC datetime."""
         order = SslOrder.from_payload(MagicMock(), _ORDER_DATA)
         assert order.created_at == datetime(2026, 5, 27, 12, 0, tzinfo=timezone.utc)
+
+    def test_expires_at(self) -> None:
+        """expires_at reads expiresAt, parsed to a UTC datetime."""
+        order = SslOrder.from_payload(MagicMock(), _ORDER_DATA)
+        assert order.expires_at == datetime(2027, 5, 27, 12, 0, tzinfo=timezone.utc)
+
+    def test_expires_at_none_when_missing(self) -> None:
+        """expires_at is None when the order has no expiresAt (not yet issued)."""
+        order = SslOrder.from_payload(MagicMock(), {"orderId": "ORDER-002"})
+        assert order.expires_at is None
 
     def test_tags(self) -> None:
         """tags reads the tags list."""

@@ -1361,6 +1361,7 @@ repr(domain)
 | `method` | `str` | DCV method in upper case: `DNS-TXT` or `HTTP-URL` |
 | `token` | `str` | Challenge value to publish (TXT record content for DNS-TXT, file token for HTTP-URL) |
 | `host` | `str` | Sub-domain prefix for the challenge record (e.g. `_emudhra-challenge`). Empty string if not returned by the API. |
+| `token_expiry` | `datetime \| None` | Timezone-aware UTC expiry of `token`, or `None` if absent/unparseable. Check this (or an empty `token`) before calling `domain.reinitiate_dcv()`. |
 
 </details>
 
@@ -1374,10 +1375,11 @@ domain.refresh()
 domain.deactivate()
 
 # DCV — Domain Control Validation
-dcv = domain.get_dcv()             # returns DcvInfo(method, token, host)
+dcv = domain.get_dcv()             # returns DcvInfo(method, token, host, token_expiry)
 print(dcv.method)                  # e.g. "DNS-TXT" or "HTTP-URL"
 print(dcv.token)                   # challenge value to publish
 print(dcv.host)                    # sub-domain prefix for the challenge record
+print(dcv.token_expiry)            # UTC datetime, or None
 
 result = domain.verify()           # trigger verification; returns a DcvVerifyResult summary
 domain.change_dcv_method("DNS-TXT")   # accepted values: "DNS-TXT", "HTTP-URL"
@@ -1462,6 +1464,8 @@ page = sess.orders.get_page(page=1, size=50, status="issued")
 | `order_status` | `str \| None` | Order lifecycle status (e.g. `complete`) |
 | `certificate_status` | `str \| None` | Certificate status (`issued`, `expired`, etc.) |
 | `common_name` | `str \| None` | Certificate common name (hostname or domain) |
+| `order_date` | `datetime \| None` | Order creation timestamp — **naive** (no UTC offset on the wire, unlike every other CertiNext timestamp); see [GitLab issue #20](https://gitlab.its.maine.edu/sysadmin/python-libs/certinext/-/issues/20) |
+| `certificate_expiry_date` | `datetime \| None` | Certificate expiry timestamp — **naive** for the same reason as `order_date` |
 
 ```python
 o.as_dict()   # raw API response dict
@@ -1646,7 +1650,7 @@ print("Certificate written to cert.pem")
 
 ```python
 order = sess.ssl.get("ORDER-ID")
-print(order.status, order.domain, order.created_at)
+print(order.status, order.domain, order.created_at, order.expires_at)
 order.refresh()   # re-fetch current state from the API
 ```
 
