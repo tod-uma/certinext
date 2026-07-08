@@ -25,7 +25,7 @@ from typing import Any, Literal
 from pydantic import Field, PrivateAttr, field_validator, model_validator
 
 from ..client import CertiNextClient
-from ._base import CertiNextModel, coerce_flag
+from ._base import CertiNextModel, _LenientDatetime, coerce_flag
 
 _SSL_BASE = "/api/certinext/v2/ssl-certificates"
 
@@ -93,6 +93,11 @@ class DcvChallenge(CertiNextModel):
         default=None,
         description="DNS sub-domain or HTTP path where the challenge must be published.",
     )
+    token_expiry: _LenientDatetime = Field(
+        default=None,
+        alias="tokenExpiry",
+        description="Timezone-aware UTC expiry of `token`, or `None` if absent/unparseable.",
+    )
 
     @model_validator(mode="before")
     @classmethod
@@ -102,7 +107,8 @@ class DcvChallenge(CertiNextModel):
         Chains (falsy values fall through, which ``AliasChoices`` cannot
         express): ``domain``/``domainName``; ``dcvMethod``/``method``
         (upper-cased, ``None`` when empty); ``txtToken``/``fileToken``/
-        ``token``/``dnsContents``; ``dnsHost``/``host``.
+        ``token``/``dnsContents``; ``dnsHost``/``host``. ``tokenExpiry`` has
+        a single wire name, so it's left to the field's own alias.
 
         Args:
             data: The raw wire payload.
@@ -188,15 +194,15 @@ class CertificateDownload(CertiNextModel):
         default=None,
         description="Certificate issuer distinguished name.",
     )
-    not_before: str | None = Field(
+    not_before: _LenientDatetime = Field(
         default=None,
         alias="notBefore",
-        description="Certificate validity start timestamp (ISO 8601).",
+        description="Certificate validity start, as a timezone-aware UTC datetime, or ``None``.",
     )
-    not_after: str | None = Field(
+    not_after: _LenientDatetime = Field(
         default=None,
         alias="notAfter",
-        description="Certificate validity end timestamp (ISO 8601).",
+        description="Certificate validity end, as a timezone-aware UTC datetime, or ``None``.",
     )
     certificate_pem: str | None = Field(
         default=None,
@@ -301,7 +307,7 @@ class SslOrder(CertiNextModel):
         for challenge in order.get_dcv():
             print(f"Add TXT record: {challenge.host}  {challenge.token}")
         # ... publish DNS challenge ...
-        order.verify_dcv()
+        order.verify_dcv(domain="example.com", method="DNS-TXT")
         order.accept_agreement(signer_name="John Doe", signer_place="Portland, ME")
         cert = order.download_certificate()
         print(cert.certificate_pem)
@@ -335,10 +341,21 @@ class SslOrder(CertiNextModel):
         alias="additionalDomains",
         description="Additional subject-alternative-name domains for this order.",
     )
-    created_at: str | None = Field(
+    created_at: _LenientDatetime = Field(
         default=None,
         alias="createdAt",
-        description="Order creation timestamp as an ISO 8601 string.",
+        description="Order creation timestamp as a timezone-aware UTC datetime, or ``None``.",
+    )
+    expires_at: _LenientDatetime = Field(
+        default=None,
+        alias="expiresAt",
+        description=(
+            "Certificate expiry timestamp as a timezone-aware UTC datetime, or "
+            "``None``. Present on the order-detail response once a certificate "
+            "has been issued; distinct from :meth:`download_certificate`'s "
+            ":attr:`CertificateDownload.not_after`, which comes from the "
+            "certificate-download endpoint instead."
+        ),
     )
     csr_submitted: bool = Field(
         default=False,
@@ -490,7 +507,7 @@ class SslOrder(CertiNextModel):
 
         Returns:
             Dict with keys ``order_id``, ``domain``, ``status``,
-            ``product_variant``, ``created_at``.
+            ``product_variant``, ``created_at``, ``expires_at``.
         """
         def _s(val: Any) -> str:
             return str(val) if val is not None else ""
@@ -499,7 +516,8 @@ class SslOrder(CertiNextModel):
             "domain": _s(self.domain),
             "status": _s(self.status),
             "product_variant": _s(self.product_variant),
-            "created_at": _s(self.created_at),
+            "created_at": self.created_at.isoformat() if self.created_at else "",
+            "expires_at": self.expires_at.isoformat() if self.expires_at else "",
         }
 
     def __repr__(self) -> str:

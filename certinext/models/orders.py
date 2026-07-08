@@ -22,7 +22,7 @@ from typing import Any, Literal
 
 from pydantic import Field, model_validator
 
-from ._base import CertiNextModel
+from ._base import CertiNextModel, _LenientDatetime
 
 CertificateStatus = Literal[
     "pending-dcv",
@@ -105,6 +105,25 @@ class OrderRecord(CertiNextModel):
             "Common name (primary domain) of the certificate, resolved from "
             "``commonName``/``cn``/``domain``/``domainName`` in order; ``None`` "
             "when no candidate has a non-empty value."
+        ),
+    )
+    order_date: _LenientDatetime = Field(
+        default=None,
+        alias="orderDate",
+        description=(
+            "Order creation timestamp. **Naive** (the wire value carries no "
+            "UTC offset or ``Z`` suffix, unlike every other CertiNext v2 "
+            "timestamp) - do not compare directly against timezone-aware "
+            "datetimes elsewhere in this library without first confirming "
+            "the vendor's convention. See GitLab issue #20."
+        ),
+    )
+    certificate_expiry_date: _LenientDatetime = Field(
+        default=None,
+        alias="certificateExpiryDate",
+        description=(
+            "Certificate expiry timestamp. **Naive** for the same reason as "
+            ":attr:`order_date` - see GitLab issue #20."
         ),
     )
 

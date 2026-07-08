@@ -21,13 +21,13 @@ Wire shapes are validated leniently per ADR 0005; see
 """
 
 from datetime import datetime, timedelta, timezone
-from typing import Annotated, Any, Literal, cast
+from typing import Any, Literal, cast
 
 import structlog
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, PrivateAttr, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 
 from ..client import CertiNextClient
-from ._base import CertiNextModel
+from ._base import CertiNextModel, _LenientDatetime
 
 log = structlog.get_logger()
 
@@ -72,31 +72,6 @@ def _has_ns_records(name: str) -> bool:
         return False
 
 
-def _lenient_datetime(value: Any) -> datetime | None:
-    """Parse a wire timestamp into a timezone-aware datetime, or ``None``.
-
-    Mirrors the 0.3.x property behavior: absent/null/empty values and
-    unparseable strings yield ``None`` rather than a ``ValidationError``
-    (ADR 0005).
-
-    Args:
-        value: The raw wire value (ISO 8601 string expected).
-
-    Returns:
-        The parsed datetime, or ``None``.
-    """
-    if not value:
-        return None
-    if isinstance(value, datetime):
-        return value
-    try:
-        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-    except (ValueError, TypeError):
-        return None
-
-
-_LenientDatetime = Annotated[datetime | None, BeforeValidator(_lenient_datetime)]
-
 
 class DcvInfo(BaseModel):
     """Parsed DCV configuration returned by :meth:`Domain.get_dcv`.
@@ -120,6 +95,10 @@ class DcvInfo(BaseModel):
                 :attr:`~certinext.models.ssl_certificates.DcvChallenge.host`,
                 which the API does populate with values like
                 ``_emudhra-challenge.<domain>``.)
+        token_expiry: Timezone-aware UTC expiry of :attr:`token`, or ``None``
+                when absent/unparseable. Use this instead of inferring
+                staleness from an empty :attr:`token` — see
+                :meth:`Domain.reinitiate_dcv`.
     """
 
     model_config = ConfigDict(populate_by_name=True)
@@ -127,6 +106,10 @@ class DcvInfo(BaseModel):
     method: str = Field(description="DCV method in upper case, e.g. ``DNS-TXT`` or ``HTTP-URL``.")
     token: str = Field(description="Challenge value to publish.")
     host: str = Field(description="Sub-domain prefix for the challenge record.")
+    token_expiry: _LenientDatetime = Field(
+        default=None,
+        description="Timezone-aware UTC expiry of `token`, or `None` if absent/unparseable.",
+    )
 
     @classmethod
     def from_wire(cls, raw: dict[str, Any]) -> "DcvInfo":
@@ -136,7 +119,8 @@ class DcvInfo(BaseModel):
         earlier candidate falls through to the next — semantics
         ``AliasChoices`` cannot express): ``dcvMethod``/``method`` (upper-cased),
         ``txtToken``/``fileToken``/``token``/``dnsContents``, and
-        ``dnsHost``/``host``. Missing chains resolve to ``""``.
+        ``dnsHost``/``host``. Missing chains resolve to ``""``. ``tokenExpiry``
+        is passed through as-is (parsed leniently by the field itself).
 
         Args:
             raw: The raw API response dict from the DCV endpoint.
@@ -147,7 +131,7 @@ class DcvInfo(BaseModel):
         method = (raw.get("dcvMethod") or raw.get("method") or "").upper()
         token = raw.get("txtToken") or raw.get("fileToken") or raw.get("token") or raw.get("dnsContents") or ""
         host = raw.get("dnsHost") or raw.get("host") or ""
-        return cls(method=method, token=token, host=host)
+        return cls(method=method, token=token, host=host, token_expiry=raw.get("tokenExpiry"))
 
 
 class DcvVerifyResult(CertiNextModel):
@@ -540,8 +524,9 @@ class Domain(CertiNextModel):
         force the API to issue a new challenge token, even when the method is
         unchanged.  Use this when:
 
-        - The domain is ``VERIFIED`` but the challenge token (``tokenExpiry``)
-          has lapsed — :meth:`get_dcv` returns an empty token in this state.
+        - The domain is ``VERIFIED`` but the challenge token has lapsed —
+          check :attr:`DcvInfo.token_expiry` from :meth:`get_dcv`, or look for
+          an empty :attr:`DcvInfo.token` in that state.
         - You want to proactively revalidate a domain approaching DCV expiry
           (``validTill``) before it becomes ``EXPIRED``.
 

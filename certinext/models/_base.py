@@ -24,17 +24,26 @@ Implements the validation policy of ADR 0005 (lenient response models):
   back to the raw string (with a logged warning) on unknown values.
 - :func:`coerce_flag` normalizes boolean flags that arrive as the strings
   ``"1"``/``"0"`` (or other truthy/falsy wire shapes).
+- ``_LenientDatetime`` parses ISO 8601 wire timestamps into timezone-aware
+  ``datetime`` objects, falling back to ``None`` on anything unparseable
+  rather than raising. Use it for any wire field with a single consistent
+  ISO 8601 shape; leave a field as a raw ``str`` instead when the vendor is
+  known to send more than one date format for it (e.g.
+  ``LedgerRecord.transaction_date``, which mixes RFC 2822 and ISO 8601
+  depending on the response shape — coercing would silently drop the RFC
+  2822 form to ``None``).
 
 Models for each API area live in sibling modules (``models.catalog``,
 ``models.accounts``, ...) and are re-exported from the legacy module
 locations (``certinext.catalog``, ...) so import paths stay stable.
 """
 
+from datetime import datetime
 from enum import Enum
-from typing import Any, TypeVar
+from typing import Annotated, Any, TypeVar
 
 import structlog
-from pydantic import BaseModel, ConfigDict, PrivateAttr, model_validator
+from pydantic import BaseModel, BeforeValidator, ConfigDict, PrivateAttr, model_validator
 from pydantic.functional_validators import ModelWrapValidatorHandler
 
 log = structlog.get_logger()
@@ -165,3 +174,28 @@ def coerce_flag(value: Any) -> bool:
     if isinstance(value, str):
         return value.strip() not in ("", "0", "false", "False")
     return bool(value)
+
+
+def _lenient_datetime(value: Any) -> datetime | None:
+    """Parse a wire timestamp into a timezone-aware datetime, or ``None``.
+
+    Absent/null/empty values and unparseable strings yield ``None`` rather
+    than a ``ValidationError`` (ADR 0005).
+
+    Args:
+        value: The raw wire value (ISO 8601 string expected).
+
+    Returns:
+        The parsed datetime, or ``None``.
+    """
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        return None
+
+
+_LenientDatetime = Annotated[datetime | None, BeforeValidator(_lenient_datetime)]

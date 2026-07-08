@@ -255,6 +255,22 @@ class TestDomainAPIMethods:
         assert result.token == "9B2CA888948836F803ECEA19F0AAEE0B"
         assert result.host == ""
 
+    def test_get_dcv_parses_token_expiry(self, domain: Domain, mock_client: MagicMock) -> None:
+        """get_dcv() parses tokenExpiry into a timezone-aware UTC datetime."""
+        mock_client.get.return_value = {
+            "dcvMethod": "DNS-TXT",
+            "txtToken": "abc123",
+            "tokenExpiry": "2026-08-01T00:00:00Z",
+        }
+        result = domain.get_dcv()
+        assert result.token_expiry == datetime(2026, 8, 1, tzinfo=timezone.utc)
+
+    def test_get_dcv_token_expiry_none_when_missing(self, domain: Domain, mock_client: MagicMock) -> None:
+        """get_dcv() leaves token_expiry as None when tokenExpiry is absent."""
+        mock_client.get.return_value = dict(SAMPLE_DCV_PENDING_WITH_TOKEN)
+        result = domain.get_dcv()
+        assert result.token_expiry is None
+
     def test_get_dcv_verified_domain_returns_method_no_token(self, domain: Domain, mock_client: MagicMock) -> None:
         """VERIFIED domain: GET /dcv returns the method but no token (challenge consumed)."""
         mock_client.get.return_value = dict(SAMPLE_DCV_VERIFIED)

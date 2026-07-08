@@ -226,7 +226,9 @@ def get_dcv(
     domain_id: str = typer.Argument(..., metavar="ID", help="Domain ID"),
 ) -> None:
     """Get DCV status for a domain."""
-    _show_data(ctx, _session(ctx).domain.get(domain_id).get_dcv().model_dump())
+    # mode="json": DcvInfo.token_expiry is a datetime, which the shared
+    # _show_data() -> json.dumps() path can't serialize directly.
+    _show_data(ctx, _session(ctx).domain.get(domain_id).get_dcv().model_dump(mode="json"))
 
 
 @domains_app.command("verify-dcv")
