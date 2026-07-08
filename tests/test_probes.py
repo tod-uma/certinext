@@ -142,15 +142,16 @@ def _rows(body: Any) -> list[Any]:
 def test_probe_r01_search_exact_and_substring(
     probe_env: str, client: CertiNextClient, baseline_domains: list[Domain]
 ) -> None:
-    """R01: ``search`` matches exact FQDNs *and* substrings (fixed since ~2026-06).
+    """R01: ``search`` matches exact FQDNs *and* substrings (fixed both envs).
 
     History: originally ``search`` returned everything regardless of value;
     by 2026-06-05 exact-FQDN worked but substrings returned 0 rows; on
-    2026-07-02 substring matching was observed working in the sandbox
-    (probe run for GitLab issue #2). Server results are still capped at the
-    default page size (~50), so the term below is chosen to match a small,
-    predictable subset. A failure here means the behavior drifted again —
-    update code/README/skill/issue #2 together.
+    2026-07-02 substring matching was observed working in the sandbox only;
+    on 2026-07-08 production was confirmed fixed too (GitLab issue #2,
+    closed). Server results are still capped at the default page size (~50),
+    so the term below is chosen to match a small, predictable subset. A
+    failure here means the behavior regressed — re-open issue #2 and update
+    code/README/skill together.
     """
     named = sorted(d.name for d in baseline_domains if d.name and "." in d.name)
     if not named:
@@ -182,18 +183,13 @@ def test_probe_r01_search_exact_and_substring(
     err, body = _try_get(client, _DOMAINS, {"search": term})
     assert err is None, f"substring search errored: {err}"
     got = {str(r.get("domainName")) for r in _rows(body) if isinstance(r, dict) and r.get("domainName")}
-    if probe_env == "sandbox":
-        assert got == expected, (
-            f"substring search for {term!r} returned {sorted(got)[:5]}... ({len(got)} rows), "
-            f"expected the {len(expected)} matching domains — record drift on issue #2"
-        )
-    else:
-        # Environment split confirmed 2026-07-02 (issue #2): production still
-        # returns 0 rows for a substring while the sandbox matches correctly.
-        assert got == set(), (
-            f"prod substring search for {term!r} returned {len(got)} rows — the vendor fix "
-            "reached production; update get_list()/README/skill/issue #2 together"
-        )
+    # Fixed in both environments as of 2026-07-08 (issue #2, closed) — no
+    # more per-env split; both must match the expected substring set.
+    assert got == expected, (
+        f"substring search for {term!r} returned {sorted(got)[:5]}... ({len(got)} rows), "
+        f"expected the {len(expected)} matching domains in env {probe_env!r} — "
+        "regression, re-open issue #2"
+    )
 
 
 def test_probe_r02_combined_status_filters(client: CertiNextClient) -> None:
