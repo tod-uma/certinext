@@ -195,17 +195,17 @@ def run_json(
     return run
 
 
-def test_accounts_json(run_json, golden) -> None:
+def test_accounts_json(run_json: Callable[[str, list[str]], str], golden: Callable[[str, str], None]) -> None:
     """``accounts --json`` emits the account/groups/organizations bundle."""
     golden("json/accounts.json", run_json("accounts", ["accounts", "--json"]))
 
 
-def test_ledger_json(run_json, golden) -> None:
+def test_ledger_json(run_json: Callable[[str, list[str]], str], golden: Callable[[str, str], None]) -> None:
     """``ledger --json`` emits the raw ledger records."""
     golden("json/ledger.json", run_json("ledger", ["ledger", "--json"]))
 
 
-def test_list_certificates_json(run_json, golden) -> None:
+def test_list_certificates_json(run_json: Callable[[str, list[str]], str], golden: Callable[[str, str], None]) -> None:
     """``list-certificates --json`` emits the raw order records."""
     golden(
         "json/list-certificates.json",
@@ -213,12 +213,12 @@ def test_list_certificates_json(run_json, golden) -> None:
     )
 
 
-def test_pending_dcv_json(run_json, golden) -> None:
+def test_pending_dcv_json(run_json: Callable[[str, list[str]], str], golden: Callable[[str, str], None]) -> None:
     """``pending-dcv --json`` emits only the domains still needing DCV."""
     golden("json/pending-dcv.json", run_json("pending_dcv", ["pending-dcv", "--json"]))
 
 
-def test_domain_cert_count_json(run_json, golden) -> None:
+def test_domain_cert_count_json(run_json: Callable[[str, list[str]], str], golden: Callable[[str, str], None]) -> None:
     """``domain-cert-count --json`` emits the per-domain count rows."""
     golden(
         "json/domain-cert-count.json",
@@ -226,7 +226,7 @@ def test_domain_cert_count_json(run_json, golden) -> None:
     )
 
 
-def test_parent_dcv_status_json(run_json, golden) -> None:
+def test_parent_dcv_status_json(run_json: Callable[[str, list[str]], str], golden: Callable[[str, str], None]) -> None:
     """``parent-dcv-status --no-ns-check --json`` emits status/expiry rows.
 
     ``--no-ns-check`` keeps the test offline; the fixture expiry is the
@@ -242,12 +242,12 @@ def test_parent_dcv_status_json(run_json, golden) -> None:
     )
 
 
-def test_domains_list_json(run_json, golden) -> None:
+def test_domains_list_json(run_json: Callable[[str, list[str]], str], golden: Callable[[str, str], None]) -> None:
     """``domains --json list`` emits the raw domain payloads."""
     golden("json/domains-list.json", run_json("domains", ["domains", "--json", "list"]))
 
 
-def test_domains_get_json(run_json, golden) -> None:
+def test_domains_get_json(run_json: Callable[[str, list[str]], str], golden: Callable[[str, str], None]) -> None:
     """``domains --json get <id>`` emits the single-domain detail payload."""
     golden(
         "json/domains-get.json",
@@ -255,7 +255,7 @@ def test_domains_get_json(run_json, golden) -> None:
     )
 
 
-def test_domains_get_dcv_json(run_json, golden) -> None:
+def test_domains_get_dcv_json(run_json: Callable[[str, list[str]], str], golden: Callable[[str, str], None]) -> None:
     """``domains --json get-dcv <id>`` emits the DCV method/token payload."""
     golden(
         "json/domains-get-dcv.json",
@@ -266,7 +266,7 @@ def test_domains_get_dcv_json(run_json, golden) -> None:
 def test_healthcheck_json(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
-    golden,
+    golden: Callable[[str, str], None],
 ) -> None:
     """``healthcheck --json`` emits the probe-result dicts and exits 0 on PASS.
 

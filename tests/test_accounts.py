@@ -35,7 +35,7 @@ def _make_client() -> tuple[CertiNextClient, MagicMock]:
     client._auth = MagicMock()
     client._auth.get_token.return_value = "test-token"
     mock_session = MagicMock()
-    client._session = mock_session  # type: ignore[assignment]
+    client._session = mock_session
     return client, mock_session
 
 
@@ -55,35 +55,35 @@ def _ok_response(payload: object) -> MagicMock:
 class TestAccountInfo:
     """AccountInfo exposes expected properties."""
 
-    def test_account_number(self):
+    def test_account_number(self) -> None:
         """account_number reads accountNumber from the raw data dict."""
         info = AccountInfo.model_validate({"accountNumber": "12345"})
         assert info.account_number == "12345"
 
-    def test_account_name(self):
+    def test_account_name(self) -> None:
         """account_name reads accountName from the raw data dict."""
         info = AccountInfo.model_validate({"accountName": "University of Maine System"})
         assert info.account_name == "University of Maine System"
 
-    def test_account_type(self):
+    def test_account_type(self) -> None:
         """account_type reads accountType from the raw data dict."""
         info = AccountInfo.model_validate({"accountType": "ENTERPRISE"})
         assert info.account_type == "ENTERPRISE"
 
-    def test_missing_fields_return_none(self):
+    def test_missing_fields_return_none(self) -> None:
         """Missing fields return None, not KeyError."""
         info = AccountInfo.model_validate({})
         assert info.account_number is None
         assert info.account_name is None
         assert info.account_type is None
 
-    def test_as_dict_returns_raw_data(self):
+    def test_as_dict_returns_raw_data(self) -> None:
         """as_dict() returns the exact dict passed at construction."""
         data = {"accountNumber": "X", "extra": "field"}
         info = AccountInfo.model_validate(data)
         assert info.as_dict() is data
 
-    def test_repr_contains_key_fields(self):
+    def test_repr_contains_key_fields(self) -> None:
         """repr() includes account_number and account_name."""
         info = AccountInfo.model_validate({"accountNumber": "99", "accountName": "Test Org"})
         r = repr(info)
@@ -98,29 +98,29 @@ class TestAccountInfo:
 class TestGroup:
     """Group exposes expected properties."""
 
-    def test_group_number(self):
+    def test_group_number(self) -> None:
         """group_number reads groupNumber from the raw data dict."""
         group = Group.model_validate({"groupNumber": "grp-001", "groupName": "IT"})
         assert group.group_number == "grp-001"
 
-    def test_group_name(self):
+    def test_group_name(self) -> None:
         """group_name reads groupName from the raw data dict."""
         group = Group.model_validate({"groupNumber": "grp-001", "groupName": "IT"})
         assert group.group_name == "IT"
 
-    def test_missing_fields_return_none(self):
+    def test_missing_fields_return_none(self) -> None:
         """Missing fields return None."""
         group = Group.model_validate({})
         assert group.group_number is None
         assert group.group_name is None
 
-    def test_as_dict_returns_raw_data(self):
+    def test_as_dict_returns_raw_data(self) -> None:
         """as_dict() returns the exact dict passed at construction."""
         data = {"groupNumber": "g1"}
         group = Group.model_validate(data)
         assert group.as_dict() is data
 
-    def test_repr_contains_group_number(self):
+    def test_repr_contains_group_number(self) -> None:
         """repr() includes the group number."""
         group = Group.model_validate({"groupNumber": "grp-42"})
         assert "grp-42" in repr(group)
@@ -143,42 +143,42 @@ class TestOrganization:
         "isPreVettingOrg": "1",
     }
 
-    def test_organization_number(self):
+    def test_organization_number(self) -> None:
         """organization_number reads organizationNumber."""
         org = Organization.model_validate(self._ORG_DATA)
         assert org.organization_number == "ORG-001"
 
-    def test_organization_name(self):
+    def test_organization_name(self) -> None:
         """organization_name reads organizationName."""
         org = Organization.model_validate(self._ORG_DATA)
         assert org.organization_name == "University of Maine System"
 
-    def test_locality(self):
+    def test_locality(self) -> None:
         """locality reads organizationLocality."""
         org = Organization.model_validate(self._ORG_DATA)
         assert org.locality == "Bangor"
 
-    def test_country_code(self):
+    def test_country_code(self) -> None:
         """country_code reads organizationCountryCode."""
         org = Organization.model_validate(self._ORG_DATA)
         assert org.country_code == "US"
 
-    def test_postal_code(self):
+    def test_postal_code(self) -> None:
         """postal_code reads organizationPostalCode."""
         org = Organization.model_validate(self._ORG_DATA)
         assert org.postal_code == "04401"
 
-    def test_status_id(self):
+    def test_status_id(self) -> None:
         """status_id reads organizationStatusId."""
         org = Organization.model_validate(self._ORG_DATA)
         assert org.status_id == "1"
 
-    def test_is_pre_vetting_org(self):
+    def test_is_pre_vetting_org(self) -> None:
         """is_pre_vetting_org reads isPreVettingOrg."""
         org = Organization.model_validate(self._ORG_DATA)
         assert org.is_pre_vetting_org == "1"
 
-    def test_missing_fields_return_none(self):
+    def test_missing_fields_return_none(self) -> None:
         """Missing fields return None."""
         org = Organization.model_validate({})
         assert org.organization_number is None
@@ -189,12 +189,12 @@ class TestOrganization:
         assert org.status_id is None
         assert org.is_pre_vetting_org is None
 
-    def test_as_dict_returns_raw_data(self):
+    def test_as_dict_returns_raw_data(self) -> None:
         """as_dict() returns the raw dict passed at construction."""
         org = Organization.model_validate(self._ORG_DATA)
         assert org.as_dict() is self._ORG_DATA
 
-    def test_repr_contains_number_and_name(self):
+    def test_repr_contains_number_and_name(self) -> None:
         """repr() includes organization_number and organization_name."""
         org = Organization.model_validate(self._ORG_DATA)
         r = repr(org)
@@ -219,7 +219,7 @@ class TestOrganizationLazyDetail:
         "domains": ["example.edu"],
     }
 
-    def test_detail_property_triggers_single_fetch(self):
+    def test_detail_property_triggers_single_fetch(self) -> None:
         """Accessing a detail-only property GETs the detail endpoint exactly once."""
         client, mock_session = _make_client()
         mock_session.get.return_value = _ok_response(self._DETAIL_DATA)
@@ -232,21 +232,21 @@ class TestOrganizationLazyDetail:
         url = mock_session.get.call_args[0][0]
         assert url.endswith(f"{_ORGS_URL}/ORG-001")
 
-    def test_detail_loaded_suppresses_fetch(self):
+    def test_detail_loaded_suppresses_fetch(self) -> None:
         """detail_loaded=True never makes an additional API call."""
         client, mock_session = _make_client()
         org = Organization.from_payload(self._DETAIL_DATA, client=client, detail_loaded=True)
         assert org.validation_status == "Validated"
         assert mock_session.get.call_count == 0
 
-    def test_no_client_returns_none_without_fetch(self):
+    def test_no_client_returns_none_without_fetch(self) -> None:
         """Without a client, detail-only properties return None (no request)."""
         org = Organization.from_payload(dict(self._LIST_DATA))
         assert org.validation_status is None
         assert org.subscriber_agreement_signed is None
         assert org.org_representatives == []
 
-    def test_fetch_error_swallowed_once(self):
+    def test_fetch_error_swallowed_once(self) -> None:
         """An API error during the lazy fetch degrades to None and is not retried."""
         client, mock_session = _make_client()
         mock_session.get.side_effect = RuntimeError("boom")
@@ -255,7 +255,7 @@ class TestOrganizationLazyDetail:
         assert org.validation_for is None
         assert mock_session.get.call_count == 1
 
-    def test_as_dict_includes_merged_detail(self):
+    def test_as_dict_includes_merged_detail(self) -> None:
         """as_dict() triggers the detail fetch and includes merged detail fields."""
         client, mock_session = _make_client()
         mock_session.get.return_value = _ok_response(self._DETAIL_DATA)
@@ -272,7 +272,7 @@ class TestOrganizationLazyDetail:
 class TestAccountAccessorMe:
     """AccountAccessor.me() calls the auth/me endpoint."""
 
-    def test_calls_me_endpoint(self):
+    def test_calls_me_endpoint(self) -> None:
         """me() GETs /api/certinext/v2/auth/me."""
         client, mock_session = _make_client()
         mock_session.get.return_value = _ok_response(
@@ -283,7 +283,7 @@ class TestAccountAccessorMe:
         url = mock_session.get.call_args[0][0]
         assert url.endswith(_ME_URL)
 
-    def test_returns_account_info(self):
+    def test_returns_account_info(self) -> None:
         """me() returns an AccountInfo instance."""
         client, mock_session = _make_client()
         mock_session.get.return_value = _ok_response(
@@ -294,7 +294,7 @@ class TestAccountAccessorMe:
         assert isinstance(result, AccountInfo)
         assert result.account_number == "42"
 
-    def test_handles_empty_response(self):
+    def test_handles_empty_response(self) -> None:
         """me() returns AccountInfo with None properties when response is empty."""
         client, mock_session = _make_client()
         mock_session.get.return_value = _ok_response({})
@@ -310,7 +310,7 @@ class TestAccountAccessorMe:
 class TestAccountAccessorListGroups:
     """AccountAccessor.list_groups() returns Group objects."""
 
-    def test_calls_groups_endpoint(self):
+    def test_calls_groups_endpoint(self) -> None:
         """list_groups() GETs /api/certinext/v2/groups."""
         client, mock_session = _make_client()
         mock_session.get.return_value = _ok_response({"groups": []})
@@ -319,7 +319,7 @@ class TestAccountAccessorListGroups:
         url = mock_session.get.call_args[0][0]
         assert url.endswith(_GROUPS_URL)
 
-    def test_returns_groups_from_wrapped_response(self):
+    def test_returns_groups_from_wrapped_response(self) -> None:
         """list_groups() unwraps the 'groups' array from a dict response."""
         client, mock_session = _make_client()
         mock_session.get.return_value = _ok_response({
@@ -335,7 +335,7 @@ class TestAccountAccessorListGroups:
         assert groups[0].group_number == "g1"
         assert groups[1].group_name == "Finance"
 
-    def test_returns_groups_from_list_response(self):
+    def test_returns_groups_from_list_response(self) -> None:
         """list_groups() handles a bare list response."""
         client, mock_session = _make_client()
         mock_session.get.return_value = _ok_response(
@@ -346,7 +346,7 @@ class TestAccountAccessorListGroups:
         assert len(groups) == 1
         assert groups[0].group_number == "g1"
 
-    def test_returns_empty_list_when_no_groups(self):
+    def test_returns_empty_list_when_no_groups(self) -> None:
         """list_groups() returns [] when the groups array is empty."""
         client, mock_session = _make_client()
         mock_session.get.return_value = _ok_response({"groups": []})
@@ -375,7 +375,7 @@ class TestAccountAccessorListOrganizations:
         ]
     }
 
-    def test_calls_organizations_endpoint(self):
+    def test_calls_organizations_endpoint(self) -> None:
         """list_organizations() GETs /api/certinext/v2/organizations."""
         client, mock_session = _make_client()
         mock_session.get.return_value = _ok_response(self._ORG_PAYLOAD)
@@ -384,7 +384,7 @@ class TestAccountAccessorListOrganizations:
         url = mock_session.get.call_args[0][0]
         assert url.endswith(_ORGS_URL)
 
-    def test_returns_organizations_from_wrapped_response(self):
+    def test_returns_organizations_from_wrapped_response(self) -> None:
         """list_organizations() unwraps the 'organizations' array."""
         client, mock_session = _make_client()
         mock_session.get.return_value = _ok_response(self._ORG_PAYLOAD)
@@ -394,14 +394,14 @@ class TestAccountAccessorListOrganizations:
         assert isinstance(orgs[0], Organization)
         assert orgs[0].organization_number == "ORG-001"
 
-    def test_returns_empty_list_when_no_orgs(self):
+    def test_returns_empty_list_when_no_orgs(self) -> None:
         """list_organizations() returns [] when organizations array is empty."""
         client, mock_session = _make_client()
         mock_session.get.return_value = _ok_response({"organizations": []})
         accessor = AccountAccessor(client)
         assert accessor.list_organizations() == []
 
-    def test_returns_organizations_from_list_response(self):
+    def test_returns_organizations_from_list_response(self) -> None:
         """list_organizations() handles a bare list response."""
         client, mock_session = _make_client()
         orgs_data = self._ORG_PAYLOAD["organizations"]
@@ -418,7 +418,7 @@ class TestAccountAccessorListOrganizations:
 class TestAccountAccessorGetOrganization:
     """AccountAccessor.get_organization() fetches a single organization by ID."""
 
-    def test_calls_organization_by_id_endpoint(self):
+    def test_calls_organization_by_id_endpoint(self) -> None:
         """get_organization() GETs /organizations/{id}."""
         client, mock_session = _make_client()
         mock_session.get.return_value = _ok_response({"organizationNumber": "ORG-001"})
@@ -427,7 +427,7 @@ class TestAccountAccessorGetOrganization:
         url = mock_session.get.call_args[0][0]
         assert url.endswith(f"{_ORGS_URL}/ORG-001")
 
-    def test_returns_organization_instance(self):
+    def test_returns_organization_instance(self) -> None:
         """get_organization() returns an Organization."""
         client, mock_session = _make_client()
         mock_session.get.return_value = _ok_response({"organizationNumber": "ORG-001"})

@@ -22,6 +22,8 @@ diff nobody meant to make. Deliberate changes are fine; regenerate with::
     uv run pytest tests/test_cli_help_snapshots.py --update-goldens
 """
 
+from typing import Callable
+
 import pytest
 
 from certinext.cli import main as cli_main
@@ -85,7 +87,7 @@ def _pinned_console(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.mark.parametrize("name", _HELP_CASES)
 def test_help_snapshot(
-    name: str, capsys: pytest.CaptureFixture[str], golden
+    name: str, capsys: pytest.CaptureFixture[str], golden: Callable[[str, str], None]
 ) -> None:
     """``--help`` for every command exits 0 and matches its recorded snapshot."""
     argv = _HELP_CASES[name]

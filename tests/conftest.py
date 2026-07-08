@@ -17,7 +17,7 @@
 import json
 import os
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable, cast
 from unittest.mock import MagicMock
 
 import pytest
@@ -29,7 +29,7 @@ _FIXTURES_DIR = Path(__file__).parent / "fixtures"
 _GOLDENS_DIR = Path(__file__).parent / "goldens"
 
 
-def pytest_configure(config: pytest.Config) -> None:
+def pytest_configure(config: pytest.Config) -> None:  # noqa: ARG001
     """Pin typer's help-rendering width before any test module imports typer.
 
     typer reads ``TERMINAL_WIDTH`` into ``rich_utils.MAX_WIDTH`` at *import*
@@ -156,7 +156,7 @@ SAMPLE_DCV_VERIFIED = {"method": "dns-txt"}
 # PENDING domain with an active challenge: method + txtToken (hex token value).
 SAMPLE_DCV_PENDING_WITH_TOKEN = {"method": "dns-txt", "txtToken": "9B2CA888948836F803ECEA19F0AAEE0B"}
 # PENDING domain with no method set yet (freshly created, never had change_dcv_method called).
-SAMPLE_DCV_UNSET = {}
+SAMPLE_DCV_UNSET: dict[str, Any] = {}
 
 TOKEN_RESPONSE = {
     "access_token": "test-bearer-token-abc123",
@@ -184,18 +184,18 @@ def accessor(mock_client: MagicMock) -> DomainAccessor:
 
 
 @pytest.fixture
-def bad_domain_data() -> list[dict]:
+def bad_domain_data() -> list[dict[str, Any]]:
     """List of malformed/incomplete domain dicts loaded from the bad-data fixture file."""
-    return json.loads((_FIXTURES_DIR / "bad_domain_data.json").read_text())
+    return cast(list[dict[str, Any]], json.loads((_FIXTURES_DIR / "bad_domain_data.json").read_text()))
 
 
 @pytest.fixture
-def domains_list_data() -> list[dict]:
+def domains_list_data() -> list[dict[str, Any]]:
     """Raw list of 43 anonymized domain dicts loaded from the fixture file."""
-    return json.loads((_FIXTURES_DIR / "domains_list.json").read_text())
+    return cast(list[dict[str, Any]], json.loads((_FIXTURES_DIR / "domains_list.json").read_text()))
 
 
 @pytest.fixture
-def domains_list(mock_client: MagicMock, domains_list_data: list[dict]) -> list[Domain]:
+def domains_list(mock_client: MagicMock, domains_list_data: list[dict[str, Any]]) -> list[Domain]:
     """43 Domain objects built from the anonymized fixture data."""
     return [Domain.from_payload(mock_client, item) for item in domains_list_data]

@@ -9,9 +9,6 @@ dist/
 build/
 wheels/
 
-# uv
-uv.lock
-
 # Virtual environments
 .venv/
 venv/
