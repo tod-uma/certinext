@@ -30,18 +30,25 @@ _GOLDENS_DIR = Path(__file__).parent / "goldens"
 
 
 def pytest_configure(config: pytest.Config) -> None:  # noqa: ARG001
-    """Pin typer's help-rendering width before any test module imports typer.
+    """Pin typer's help-rendering width and terminal detection before import.
 
-    typer reads ``TERMINAL_WIDTH`` into ``rich_utils.MAX_WIDTH`` at *import*
-    time, so a fixture set too late cannot make ``--help`` output render at
-    the same width on every machine and in CI — this hook runs before test
-    collection imports ``certinext.cli``. The ``--help`` snapshot goldens are
-    recorded at this width. (Nothing imported by this conftest itself pulls
-    in typer; if that ever changes, this pin must move earlier.)
+    typer reads ``TERMINAL_WIDTH`` into ``rich_utils.MAX_WIDTH`` *and*
+    ``GITHUB_ACTIONS``/``FORCE_COLOR``/``PY_COLORS`` into
+    ``rich_utils.FORCE_TERMINAL`` at **import** time, so a per-test fixture
+    set too late cannot affect either — this hook runs before test
+    collection imports ``certinext.cli``. The GitHub Actions runner sets
+    ``GITHUB_ACTIONS=true`` unconditionally, which without this pin makes
+    typer force rich's bold/dim ANSI styling into captured ``--help`` output
+    even though ``NO_COLOR`` is set and stdout isn't a real terminal — the
+    ``--help`` snapshot goldens were recorded without it and CI-only would
+    fail every one of them. ``_TYPER_FORCE_DISABLE_TERMINAL`` is typer's own
+    documented override for this. (Nothing imported by this conftest itself
+    pulls in typer; if that ever changes, these pins must move earlier.)
 
     Args:
         config: The pytest configuration object (unused).
     """
+    os.environ["_TYPER_FORCE_DISABLE_TERMINAL"] = "1"
     os.environ["TERMINAL_WIDTH"] = "100"
     # Belt and braces: rich consoles created without an explicit width fall
     # back to terminal-size detection, which reads COLUMNS. Pin it so any
