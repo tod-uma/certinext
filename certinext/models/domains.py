@@ -21,13 +21,13 @@ Wire shapes are validated leniently per ADR 0005; see
 """
 
 from datetime import datetime, timedelta, timezone
-from typing import Annotated, Any, Literal, cast
+from typing import Any, Literal, cast
 
 import structlog
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, PrivateAttr, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 
 from ..client import CertiNextClient
-from ._base import CertiNextModel
+from ._base import CertiNextModel, _LenientDatetime
 
 log = structlog.get_logger()
 
@@ -71,31 +71,6 @@ def _has_ns_records(name: str) -> bool:
     except Exception:
         return False
 
-
-def _lenient_datetime(value: Any) -> datetime | None:
-    """Parse a wire timestamp into a timezone-aware datetime, or ``None``.
-
-    Mirrors the 0.3.x property behavior: absent/null/empty values and
-    unparseable strings yield ``None`` rather than a ``ValidationError``
-    (ADR 0005).
-
-    Args:
-        value: The raw wire value (ISO 8601 string expected).
-
-    Returns:
-        The parsed datetime, or ``None``.
-    """
-    if not value:
-        return None
-    if isinstance(value, datetime):
-        return value
-    try:
-        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-    except (ValueError, TypeError):
-        return None
-
-
-_LenientDatetime = Annotated[datetime | None, BeforeValidator(_lenient_datetime)]
 
 
 class DcvInfo(BaseModel):

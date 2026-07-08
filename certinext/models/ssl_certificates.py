@@ -25,7 +25,7 @@ from typing import Any, Literal
 from pydantic import Field, PrivateAttr, field_validator, model_validator
 
 from ..client import CertiNextClient
-from ._base import CertiNextModel, coerce_flag
+from ._base import CertiNextModel, _LenientDatetime, coerce_flag
 
 _SSL_BASE = "/api/certinext/v2/ssl-certificates"
 
@@ -188,15 +188,15 @@ class CertificateDownload(CertiNextModel):
         default=None,
         description="Certificate issuer distinguished name.",
     )
-    not_before: str | None = Field(
+    not_before: _LenientDatetime = Field(
         default=None,
         alias="notBefore",
-        description="Certificate validity start timestamp (ISO 8601).",
+        description="Certificate validity start, as a timezone-aware UTC datetime, or ``None``.",
     )
-    not_after: str | None = Field(
+    not_after: _LenientDatetime = Field(
         default=None,
         alias="notAfter",
-        description="Certificate validity end timestamp (ISO 8601).",
+        description="Certificate validity end, as a timezone-aware UTC datetime, or ``None``.",
     )
     certificate_pem: str | None = Field(
         default=None,
@@ -335,10 +335,10 @@ class SslOrder(CertiNextModel):
         alias="additionalDomains",
         description="Additional subject-alternative-name domains for this order.",
     )
-    created_at: str | None = Field(
+    created_at: _LenientDatetime = Field(
         default=None,
         alias="createdAt",
-        description="Order creation timestamp as an ISO 8601 string.",
+        description="Order creation timestamp as a timezone-aware UTC datetime, or ``None``.",
     )
     csr_submitted: bool = Field(
         default=False,
@@ -499,7 +499,7 @@ class SslOrder(CertiNextModel):
             "domain": _s(self.domain),
             "status": _s(self.status),
             "product_variant": _s(self.product_variant),
-            "created_at": _s(self.created_at),
+            "created_at": self.created_at.isoformat() if self.created_at else "",
         }
 
     def __repr__(self) -> str:

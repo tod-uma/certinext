@@ -175,6 +175,26 @@ Docstrings on every model class/field group (house rule: all classes and
 methods); README "Python library" examples updated for construction-by-
 validation where visible; CHANGELOG notes `as_dict()` compatibility.
 
+## Follow-up fix (2026-07-08)
+
+`CertificateDownload.not_before`/`.not_after` and `SslOrder.created_at`
+were left typed `str | None` when this phase migrated everything else —
+an inconsistency with `Domain.created_at`/`.verified_at`/`.dcv_expires`,
+which use the shared lenient-datetime pattern. Found via manual code
+review, not a probe/corpus finding. Confirmed via the sanitized corpus
+(`ssl-certificates-certificate.json` in both envs) that the wire format is
+consistently ISO 8601 — no format-polymorphism reason to keep them as
+strings, unlike `LedgerRecord.transaction_date` (which genuinely mixes RFC
+2822 and ISO 8601 on the wire and correctly stays `str`).
+
+Fixed: `_lenient_datetime`/`_LenientDatetime` moved from `models/domains.py`
+to `models/_base.py` as a shared helper (was private to one module with no
+technical reason to be); the three fields above now use it. Updated the two
+`to_row()` implementations that touched `created_at` to call `.isoformat()`
+explicitly instead of relying on generic `str()`, matching `Domain.to_row()`.
+Updated `tests/test_ssl_certificates.py` assertions from string equality to
+`datetime` equality. 770 unit tests, ruff, mypy --strict, pyright all green.
+
 ---
 > **AI-assistant disclaimer:** Drafted by Claude Code (Claude Fable 5,
 > `claude-fable-5`) from a conversation with Tod Detre. May contain
