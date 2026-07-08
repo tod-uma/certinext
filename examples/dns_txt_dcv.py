@@ -301,8 +301,23 @@ def process_domain(
 
     token: str = dcv.token
     if not token:
-        log.warning("%s: no DCV token in response, skipping correlation_id=%s", name, correlation_id)
-        return
+        if dcv_status == "VERIFIED":
+            # Challenge token (tokenExpiry) has lapsed while the domain is still
+            # verified (validTill not yet reached). Reinitiate DCV to get a fresh
+            # token — the old TXT record value is no longer valid.
+            log.info("%s: verified domain has no active challenge token - reinitiating DCV", name)
+            if dry_run:
+                log.info("[dry-run] %s: would call domain.reinitiate_dcv()", name)
+                return
+            dcv = domain.reinitiate_dcv()
+            token = dcv.token
+            if not token:
+                log.warning("%s: still no DCV token after reinitiation, skipping correlation_id=%s",
+                            name, correlation_id)
+                return
+        else:
+            log.warning("%s: no DCV token in response, skipping correlation_id=%s", name, correlation_id)
+            return
 
     # dcv.host is the subdomain label returned by the CertiNext API (e.g. "_emudhra-challenge").
     # When set, the challenge record goes at <host>.<domain>; otherwise at the apex.

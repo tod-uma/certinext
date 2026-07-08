@@ -1,5 +1,5 @@
 ---
-status: planned
+status: done
 depends-on: [phase-4]
 implements-adr: []
 ---
@@ -60,6 +60,48 @@ consumer is proven against it.
 ums-certinext-scripts README notes the new minimum certinext version;
 CHANGELOG entries in both repos; migration guide (phase 6) links here as
 the worked example.
+
+## Implementation record (2026-07-08)
+
+Executed in two places: ums-certinext-scripts branch
+`refactor/certinext-cli-support-migration` (commit `b88550d`), and this
+repo's child branch `refactor/phase-5-consumer-migration` (per-phase MR
+pattern).
+
+- **Steps 1–2 (ums migration + tests):** both scripts moved to the
+  two-step `resolve_connection()` → `build_session(conn, ...)` flow;
+  `add_connection_args` is declared locally in `dcv_update.py` (shared by
+  `top_domains.py`), keeping 0.3.x flag spellings/dests so cron
+  invocations are unaffected. Mocked tests patch both cli_support entry
+  points (so no test reads the developer's real config file) and new
+  contract tests pin the parser → `resolve_connection`/`build_session`
+  wiring. Bugs fixed by the port: `certinext-top-domains --sandbox` was
+  parsed but never applied (silently connected to prod); the SANDBOX MODE
+  warning missed profiles configured with `sandbox = true`.
+- **Step 3 (pin) — deviation:** the plan said raise the pin "once an rc
+  exists"; it was raised to `certinext>=1.0.0rc1,<2` in the same commit
+  as the migration instead, because the migrated code requires the 1.0
+  surface — pin and code must move atomically. Consequence: **the ums MR
+  must not merge (and its CI stays red) until `1.0.0rc1` is published**
+  to the GitLab registry. Verified locally with the refactor branch
+  installed editable: 124 unit tests, ruff, pyright green; sandbox
+  smokes exit 0 (`dcv-update --sandbox --dry-run` full and
+  domain-filtered, `certinext-top-domains --sandbox`).
+- **Step 4 (example) + R08 resolution:** the example's apex fallback is
+  **correct** — the Domains API returns no `host` (probe R08, corpus
+  2026-07-02) and production dcv-update has verified domains via apex
+  TXT records since 2026-05. The wrong side was the `DcvInfo` docstring
+  (claimed an implied `_emudhra-challenge.<domain>` placement) — fixed
+  here, closing phase 0's last open exit criterion. Also ported
+  dcv_update's reinitiate-DCV flow (VERIFIED domain with lapsed token
+  gets a fresh one) into the example; `--revalidate-expiring` was
+  deliberately not ported (operational policy, not template material).
+- **Step 5:** `dcv-inheritance-recon/README.md` breadcrumb written (that
+  directory lives in the non-git `nm-and-certinext` workspace).
+
+Residual for phase 6: publish `1.0.0rc1`, then re-run ums CI and merge
+its MR; the migration guide should link the ums commit as the worked
+example.
 
 ---
 > **AI-assistant disclaimer:** Drafted by Claude Code (Claude Fable 5,

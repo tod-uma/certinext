@@ -110,9 +110,16 @@ class DcvInfo(BaseModel):
         token:  Challenge value to publish. For DNS-TXT this is the TXT record
                 content (``txtToken``); for HTTP-URL it is the file token
                 (``fileToken``).
-        host:   Sub-domain prefix for the challenge record. The Domains API
-                does not return this field; the DNS-TXT challenge is implicitly
-                placed at ``_emudhra-challenge.<domain>``.
+        host:   Sub-domain prefix for the challenge record, or ``""`` when the
+                API returns none (the Domains API currently never returns it —
+                probe R08, corpus 2026-07-02). With no host the DNS-TXT
+                challenge goes at the domain apex: publishing the token as an
+                apex TXT record is what production DCV automation has verified
+                against since 2026-05. (Order-level DCV challenges are
+                different — see
+                :attr:`~certinext.models.ssl_certificates.DcvChallenge.host`,
+                which the API does populate with values like
+                ``_emudhra-challenge.<domain>``.)
     """
 
     model_config = ConfigDict(populate_by_name=True)
