@@ -24,6 +24,7 @@ import json
 
 import structlog
 import typer
+from rich.progress import Progress
 
 from certinext import healthcheck as hc
 from certinext.cli._app import app
@@ -38,6 +39,8 @@ from certinext.cli._shared import (
     VerboseOption,
     connect,
     data_console,
+    err_console,
+    progress_disabled,
 )
 from certinext.cli_support import setup_logging
 
@@ -73,7 +76,19 @@ def healthcheck(
     )
 
     log.info("Running CertiNext health check", scope="tier-1" if quick else "all")
-    results = hc.run(sess, quick=quick)
+    with Progress(console=err_console, disable=progress_disabled(verbose)) as progress:
+        if verbose >= 1:
+            # -v: one completed bar per probe, named, so each stays listed as
+            # it finishes, instead of collapsing into a single overall bar.
+            def _on_result(result: hc.ProbeResult) -> None:
+                progress.add_task(result.name, total=1, completed=1)
+        else:
+            task = progress.add_task("Running health checks", total=hc.probe_count(quick=quick))
+
+            def _on_result(result: hc.ProbeResult) -> None:
+                progress.advance(task)
+
+        results = hc.run(sess, quick=quick, on_result=_on_result)
 
     if output_json:
         print(json.dumps([r.to_dict() for r in results], indent=2))

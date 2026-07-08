@@ -23,6 +23,8 @@ values to the terminal, and their multi-line panels are noise in cron logs.
 Unhandled exceptions keep plain Python tracebacks, as in 0.3.x.
 """
 
+from importlib.metadata import version
+
 import typer
 
 app = typer.Typer(
@@ -39,3 +41,29 @@ setup_app = typer.Typer(
     pretty_exceptions_enable=False,
 )
 app.add_typer(setup_app)
+
+
+def _version_callback(show_version: bool) -> None:
+    """Print the installed ``certinext`` package version and exit.
+
+    Args:
+        show_version: The ``--version`` flag's value; a no-op when falsy so
+            this can be used as an eager Typer option callback.
+
+    Raises:
+        typer.Exit: Always, when ``show_version`` is truthy — stops Typer
+            from proceeding to subcommand parsing.
+    """
+    if show_version:
+        typer.echo(version("certinext"))
+        raise typer.Exit()
+
+
+@app.callback()
+def _main(
+    version_: bool = typer.Option(
+        False, "--version", callback=_version_callback, is_eager=True,
+        help="Show the installed certinext version and exit.",
+    ),
+) -> None:
+    pass

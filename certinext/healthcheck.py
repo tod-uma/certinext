@@ -397,7 +397,26 @@ def _feed_context(ctx: dict[str, Any], probe: Probe, payload: Any) -> None:
             ctx["issued_ssl_order"] = payload
 
 
-def run(session: CertiNextSession, *, quick: bool = False) -> list[ProbeResult]:
+def probe_count(*, quick: bool = False) -> int:
+    """Return how many probes :func:`run` will execute for a given scope.
+
+    Lets callers size a progress indicator before ``run`` starts.
+
+    Args:
+        quick: When ``True``, count Tier-1 probes only.
+
+    Returns:
+        The number of probes ``run(quick=quick)`` will report a result for.
+    """
+    return sum(1 for probe in REGISTRY if not quick or probe.tier == 1)
+
+
+def run(
+    session: CertiNextSession,
+    *,
+    quick: bool = False,
+    on_result: Callable[[ProbeResult], None] | None = None,
+) -> list[ProbeResult]:
     """Run the probe registry and return one result per probe.
 
     Tier-1 probes run first and feed the context that Tier-2 probes consume;
@@ -406,6 +425,8 @@ def run(session: CertiNextSession, *, quick: bool = False) -> list[ProbeResult]:
     Args:
         session: An authenticated :class:`~certinext.CertiNextSession`.
         quick: When ``True``, run Tier-1 probes only.
+        on_result: Optional callback invoked with each :class:`ProbeResult`
+            as it completes, e.g. to drive a progress bar.
 
     Returns:
         A list of :class:`ProbeResult`, in registry order.
@@ -421,6 +442,8 @@ def run(session: CertiNextSession, *, quick: bool = False) -> list[ProbeResult]:
         results.append(result)
         log.debug("probe complete", probe=probe.name, outcome=result.outcome,
                   http=result.http_status, ms=result.duration_ms)
+        if on_result is not None:
+            on_result(result)
     return results
 
 

@@ -47,6 +47,23 @@ _PIPE_WIDTH = 4000
 err_console = Console(stderr=True)
 
 
+def progress_disabled(verbose: int) -> bool:
+    """Whether a ``rich.progress.Progress`` bar should be suppressed.
+
+    True at ``-vvv`` and up, since the corresponding debug logs already
+    itemize each step a bar would represent, and whenever stderr isn't a
+    terminal, so redirected/cron output doesn't get a wall of refresh frames.
+
+    Args:
+        verbose: The command's ``-v`` count.
+
+    Returns:
+        ``True`` if a progress bar using :data:`err_console` should pass
+        ``disable=True``.
+    """
+    return verbose >= 3 or not err_console.is_terminal
+
+
 def data_console() -> Console:
     """Return a rich console for *data* output on stdout.
 

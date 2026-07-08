@@ -296,7 +296,7 @@ def test_healthcheck_json(
     ]
     sess = CertiNextSession(client_id="test", client_secret="secret")
     monkeypatch.setattr("certinext.cli.healthcheck.connect", lambda **kwargs: sess)
-    monkeypatch.setattr(hc, "run", lambda _sess, quick=False: results)
+    monkeypatch.setattr(hc, "run", lambda _sess, quick=False, on_result=None: results)
     with pytest.raises(SystemExit) as excinfo:
         cli_main(["healthcheck", "--json"])
     assert excinfo.value.code == 0

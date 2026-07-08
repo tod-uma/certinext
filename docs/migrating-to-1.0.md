@@ -149,6 +149,13 @@ both paths are documented as public for 1.0.
   CLI, with `-v` opting into the log output.
 - `--all-formats-out DIR` still requires `DIR` to already exist (unchanged
   from 0.3.x — not yet a QoL fix in 1.0).
+- `certinext --version` is new — prints the installed package version and
+  exits (reads from package metadata, so it reflects whatever's actually
+  installed, editable dev checkout included).
+- `healthcheck`, `parent-dcv-status`, and `issue-cert` now show a progress
+  bar (or a per-item bar with `-v` on `healthcheck`) on stderr for their
+  longer-running steps instead of sitting silent; `-vvv` hides the bars
+  since the existing debug logs already itemize each step.
 
 ## If something doesn't match this page
 

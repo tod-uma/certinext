@@ -21,13 +21,13 @@ inheritance. These are the domains that must be validated directly.
 """
 
 import json
-import sys
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional
 
 import structlog
 import typer
+from rich.progress import Progress
 
 from certinext.cli._app import app
 from certinext.cli._shared import (
@@ -41,6 +41,8 @@ from certinext.cli._shared import (
     VerboseOption,
     connect,
     data_console,
+    err_console,
+    progress_disabled,
     rows_table,
 )
 from certinext.cli_support import setup_logging
@@ -190,10 +192,22 @@ def parent_dcv_status(
     check_ns = not no_ns_check
     if check_ns:
         log.info("Checking DNS NS records to detect zone boundaries...")
-    parents = sorted(
-        (d for d in domains if d.dcv_covering_parent(all_names, check_ns=check_ns) is None),
-        key=lambda d: d.name or "",
-    )
+        with Progress(console=err_console, disable=progress_disabled(verbose)) as progress:
+            task = progress.add_task("Checking DNS NS records", total=len(domains))
+
+            def _needs_direct_dcv(d: Domain) -> bool:
+                progress.advance(task)
+                return d.dcv_covering_parent(all_names, check_ns=True) is None
+
+            parents = sorted(
+                (d for d in domains if _needs_direct_dcv(d)),
+                key=lambda d: d.name or "",
+            )
+    else:
+        parents = sorted(
+            (d for d in domains if d.dcv_covering_parent(all_names, check_ns=False) is None),
+            key=lambda d: d.name or "",
+        )
     log.info(
         "Found domains requiring direct DCV",
         count=len(parents),
@@ -204,16 +218,12 @@ def parent_dcv_status(
     # fetch for PENDING/EXPIRED/REJECTED domains to avoid unnecessary API calls.
     verified = [d for d in parents if d.dcv_status == "VERIFIED"]
     log.info("Fetching details for expiry dates", count=len(verified))
-    use_dots = verbose < 3 and sys.stderr.isatty() and len(verified) > 0
-    if use_dots:
-        print("  ", end="", file=sys.stderr, flush=True)
-    for i, d in enumerate(verified, 1):
-        log.debug("Fetching domain details", index=i, total=len(verified), domain=d.name)
-        d.refresh()
-        if use_dots:
-            print(".", end="", file=sys.stderr, flush=True)
-    if use_dots:
-        print(file=sys.stderr)
+    with Progress(console=err_console, disable=progress_disabled(verbose)) as progress:
+        task = progress.add_task("Fetching domain details", total=len(verified))
+        for d in verified:
+            log.debug("Fetching domain details", domain=d.name)
+            d.refresh()
+            progress.advance(task)
     log.info("Details fetched")
 
     if status is not _StatusFilter.all:

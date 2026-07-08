@@ -35,6 +35,7 @@ a pure function.
 
 import os
 import sys
+import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from enum import Enum
@@ -43,6 +44,7 @@ from typing import Any, NoReturn, Optional
 
 import structlog
 import typer
+from rich.progress import Progress
 
 from certinext._config import ConfigError, config_defaults, save_defaults
 from certinext._keyring import keyring_get, keyring_service
@@ -56,6 +58,8 @@ from certinext.cli._shared import (
     TokenUrlOption,
     VerboseOption,
     connect,
+    err_console,
+    progress_disabled,
 )
 from certinext.cli_support import fatal_api_error, prompt_stderr, setup_logging
 from certinext.csr import CsrInfo
@@ -1040,6 +1044,17 @@ def issue_cert(
                     )
                 dcv_logged = True
 
+        # "poll" only fires once the order reaches a generic waiting state
+        # (e.g. pending-approval) — agreement/CSR/DCV steps advance without
+        # it — so the bar tracks wall-clock time against the wait budget
+        # rather than counting ticks, and jumps forward once polling starts.
+        poll_start = time.monotonic()
+
+        def _on_poll(o: SslOrder) -> None:
+            log.debug("Polling order", order_id=o.order_id, status=o.status)
+            elapsed = min(int(time.monotonic() - poll_start), wait)
+            progress.update(poll_task, completed=elapsed)
+
         # OrderWorkflow drives the order through every pending state and polls
         # until issuance. Event hooks replace explicit polling logic here —
         # the workflow emits events; this function just logs them.
@@ -1048,9 +1063,7 @@ def issue_cert(
             .on("status_change", lambda old, new: log.debug(
                 "Order status change", order_id=order.order_id, old_status=old, new_status=new,
             ))
-            .on("poll", lambda o: log.debug(
-                "Polling order", order_id=o.order_id, status=o.status,
-            ))
+            .on("poll", _on_poll)
             .on("dcv_available", _on_dcv)
             .on("issued", lambda o: log.info("Order issued", order_id=o.order_id))
         )
@@ -1068,7 +1081,9 @@ def issue_cert(
         # polls until issued, and downloads the PEM with automatic 422 retry.
         # It raises CertiNextTimeoutError if wait seconds elapse without issuance.
         try:
-            pem = wf.run(csr=csr, wait=wait)
+            with Progress(console=err_console, disable=progress_disabled(verbose)) as progress:
+                poll_task = progress.add_task("Waiting for issuance", total=wait)
+                pem = wf.run(csr=csr, wait=wait)
         except CertiNextTimeoutError as exc:
             log.error(
                 "Timed out waiting for issuance",
