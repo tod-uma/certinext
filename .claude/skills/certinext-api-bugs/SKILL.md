@@ -19,10 +19,14 @@ value until ~2026-05; exact-FQDN fixed 2026-06-05.
 **`domainStatus` + `dcvStatus` filters together on `GET /api/certinext/v2/domains`**
 Originally returned HTTP 400 when both were used in one request (reported
 2026-05-20). Probe R02 confirmed the combination now works in **both**
-environments (2026-07-02, GitLab issue #6). `get_pending_dcv()` still fetches
-all + filters client-side; the switch to server-side filtering is planned for
-the 1.0 refactor (phase 1). Contested enum values remain (issue #6 / vendor
-#135290): `dcvStatus=EXPIRED` still returns 400 in both envs (probe R23).
+environments (2026-07-02, GitLab issue #6). Shipped in the 1.0 refactor
+(phase 1, 2026-07-06): `get_pending_dcv()` now sends `domainStatus=ACTIVE`
+server-side — it exactly matches the first conjunct of `Domain.needs_dcv`.
+`dcvStatus` stays client-side deliberately: "needs DCV" means *anything
+other than VERIFIED*, which the server can't express, and `dcvStatus=EXPIRED`
+still returns 400 (vendor #135290 open, probe R23) — an allow-list filter
+would also silently drop unknown future statuses. Revisit when issue #6
+settles the `DcvStatus` enum membership.
 
 ## Pagination
 
@@ -51,6 +55,6 @@ Use `--assignee @me` by default. Assign to someone else only if the issue involv
 
 ## When the vendor fixes these, update
 
-- `certinext/domains.py` — remove the `search` warning from the `get_list()` docstring; rewrite `get_pending_dcv()` to use server-side filtering instead of fetching all + client-side filter via `needs_dcv`
+- `certinext/domains.py` — remove the `search` warning from the `get_list()` docstring; once `dcvStatus=EXPIRED` (or the full enum) stops 400ing, move the DCV-status half of `get_pending_dcv()` server-side too
 - `ums-certinext-scripts/dcv_update.py` — remove the comment noting search is broken
 - `README.md` — update the "List all domains" and "List domains needing DCV" sections
