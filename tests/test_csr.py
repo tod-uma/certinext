@@ -16,6 +16,7 @@
 
 import importlib.util
 import warnings
+from typing import Any
 
 import pytest
 
@@ -29,7 +30,7 @@ if importlib.util.find_spec("cryptography") is None:
     )
 
 
-def _make_csr(cn: str = "foo", extra_attrs: list | None = None) -> str:
+def _make_csr(cn: str = "foo", extra_attrs: list[Any] | None = None) -> str:
     """Generate a real PEM-encoded CSR using the cryptography library.
 
     Args:
@@ -59,31 +60,31 @@ def _make_csr(cn: str = "foo", extra_attrs: list | None = None) -> str:
 class TestCsrInfo:
     """CsrInfo dataclass behaviour."""
 
-    def test_signer_place_combines_locality_and_state(self):
+    def test_signer_place_combines_locality_and_state(self) -> None:
         """signer_place joins locality and state with ', '."""
         info = CsrInfo(common_name="x", email=None, locality="Orono", state="Maine",
                        organization=None)
         assert info.signer_place == "Orono, Maine"
 
-    def test_signer_place_locality_only(self):
+    def test_signer_place_locality_only(self) -> None:
         """signer_place returns just locality when state is absent."""
         info = CsrInfo(common_name="x", email=None, locality="Orono", state=None,
                        organization=None)
         assert info.signer_place == "Orono"
 
-    def test_signer_place_state_only(self):
+    def test_signer_place_state_only(self) -> None:
         """signer_place returns just state when locality is absent."""
         info = CsrInfo(common_name="x", email=None, locality=None, state="Maine",
                        organization=None)
         assert info.signer_place == "Maine"
 
-    def test_signer_place_none_when_both_absent(self):
+    def test_signer_place_none_when_both_absent(self) -> None:
         """signer_place is None when both locality and state are absent."""
         info = CsrInfo(common_name="x", email=None, locality=None, state=None,
                        organization=None)
         assert info.signer_place is None
 
-    def test_sans_defaults_to_empty_list(self):
+    def test_sans_defaults_to_empty_list(self) -> None:
         """sans defaults to an empty list when not provided."""
         info = CsrInfo(common_name="x", email=None, locality=None, state=None,
                        organization=None)
@@ -102,12 +103,12 @@ class TestParseCsr:
         """Skip this class when cryptography is absent."""
         pytest.importorskip("cryptography")
 
-    def test_raises_on_invalid_pem(self):
+    def test_raises_on_invalid_pem(self) -> None:
         """parse_csr raises ValueError for non-CSR input."""
         with pytest.raises(ValueError, match="Failed to parse"):
             parse_csr("not a csr")
 
-    def test_raises_when_no_cn(self):
+    def test_raises_when_no_cn(self) -> None:
         """parse_csr raises ValueError when the CSR subject has no CN."""
         with pytest.raises((ValueError, Exception)):
             parse_csr(
@@ -115,37 +116,37 @@ class TestParseCsr:
                 "-----END CERTIFICATE REQUEST-----\n"
             )
 
-    def test_returns_csrinfo(self):
+    def test_returns_csrinfo(self) -> None:
         """parse_csr returns a CsrInfo instance."""
         info = parse_csr(_make_csr())
         assert isinstance(info, CsrInfo)
 
-    def test_extracts_common_name(self):
+    def test_extracts_common_name(self) -> None:
         """parse_csr populates common_name from the CN OID."""
         info = parse_csr(_make_csr(cn="test.maine.edu"))
         assert info.common_name == "test.maine.edu"
 
-    def test_sans_empty_when_no_san_extension(self):
+    def test_sans_empty_when_no_san_extension(self) -> None:
         """parse_csr returns an empty sans list when no SAN extension is present."""
         info = parse_csr(_make_csr())
         assert info.sans == []
 
-    def test_email_none_when_absent(self):
+    def test_email_none_when_absent(self) -> None:
         """parse_csr sets email to None when emailAddress is not in the subject."""
         info = parse_csr(_make_csr())
         assert info.email is None
 
-    def test_locality_none_when_absent(self):
+    def test_locality_none_when_absent(self) -> None:
         """parse_csr sets locality to None when L is not in the subject."""
         info = parse_csr(_make_csr())
         assert info.locality is None
 
-    def test_state_none_when_absent(self):
+    def test_state_none_when_absent(self) -> None:
         """parse_csr sets state to None when ST is not in the subject."""
         info = parse_csr(_make_csr())
         assert info.state is None
 
-    def test_extracts_email(self):
+    def test_extracts_email(self) -> None:
         """parse_csr extracts emailAddress from the subject."""
         from cryptography import x509
         from cryptography.x509.oid import NameOID
@@ -157,7 +158,7 @@ class TestParseCsr:
         info = parse_csr(pem)
         assert info.email == "admin@maine.edu"
 
-    def test_extracts_locality_and_state(self):
+    def test_extracts_locality_and_state(self) -> None:
         """parse_csr extracts L and ST and signer_place combines them."""
         from cryptography import x509
         from cryptography.x509.oid import NameOID

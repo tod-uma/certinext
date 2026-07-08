@@ -27,6 +27,7 @@ console, so they cannot trigger the crash.
 
 import ast
 import pathlib
+from typing import cast
 
 import certinext
 
@@ -53,9 +54,10 @@ def _docstring_node_ids(tree: ast.AST) -> set[int]:
                 body
                 and isinstance(body[0], ast.Expr)
                 and isinstance(getattr(body[0], "value", None), ast.Constant)
-                and isinstance(body[0].value.value, str)
             ):
-                ids.add(id(body[0].value))
+                const_node = cast(ast.Constant, body[0].value)
+                if isinstance(const_node.value, str):
+                    ids.add(id(const_node))
     return ids
 
 
