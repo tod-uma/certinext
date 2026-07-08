@@ -63,13 +63,18 @@ def _pinned_console(monkeypatch: pytest.MonkeyPatch) -> None:
     reads TERMINAL_WIDTH into a module constant at import time; both are
     pinned so the snapshot doesn't depend on who ran the tests where.
 
+    Terminal *forcing* (GITHUB_ACTIONS/FORCE_COLOR/PY_COLORS baked into
+    typer's ``rich_utils.FORCE_TERMINAL`` at import time) is handled in
+    :func:`tests.conftest.pytest_configure` instead, not here — by the time
+    this per-test fixture runs, typer has already imported and the module
+    constant is fixed; setting env vars this late cannot change it.
+
     Args:
         monkeypatch: The pytest monkeypatch fixture.
     """
     monkeypatch.setenv("COLUMNS", "100")
     monkeypatch.setenv("LINES", "50")
     monkeypatch.setenv("NO_COLOR", "1")
-    monkeypatch.delenv("FORCE_COLOR", raising=False)
     try:
         from typer import rich_utils
     except ImportError:
