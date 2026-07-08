@@ -161,7 +161,8 @@ class DomainAccessor:
 
         Server-side filters (``search``, ``domain_status``, ``dcv_status``) are
         passed to the API and reduce the data transferred. ``pattern`` is applied
-        client-side for cases that require regex matching.
+        client-side for cases that require regex matching (alternation,
+        anchoring, wildcards) that the substring-only ``search`` can't express.
 
         Args:
             offset: 0-based row offset. When given together with ``limit``,
@@ -177,12 +178,12 @@ class DomainAccessor:
                 gitlab.its.maine.edu, not the public GitHub mirror's issue
                 tracker). Omit ``offset``/``limit`` for a reliable full list.
             search: Full FQDN for exact match (``maine.edu``) or a substring
-                for LIKE matching (``maine``). Maps to the API ``search`` param.
-                **Warning:** the API ``search`` parameter is partially fixed
-                (re-tested 2026-06-05): exact FQDN matches now work correctly,
-                but substring searches (values without ``"."``) return 0 results
-                instead of matching domains. Use ``pattern`` for reliable
-                client-side filtering.
+                for LIKE matching (``maine``). Maps to the API ``search`` param
+                and is applied server-side (reduces data transferred). Confirmed
+                working for both exact and substring matches in **both**
+                sandbox and production as of 2026-07-08 (GitLab issue #2,
+                closed). It only does substring containment, not regex — use
+                ``pattern`` when you need anchoring, alternation, or wildcards.
             domain_status: Comma-separated status filter, e.g.
                 ``"ACTIVE,INACTIVE"``. Values: ACTIVE, INACTIVE, EXPIRED,
                 REVOKED.
@@ -190,8 +191,12 @@ class DomainAccessor:
                 ``"PENDING,REJECTED"``. Values: VERIFIED, PENDING, REJECTED,
                 EXPIRED.
             pattern: Optional regex applied client-side after the API response.
-                Uses ``re.fullmatch`` with ``re.IGNORECASE``. Use when the API
-                ``search`` substring is not precise enough.
+                Uses ``re.fullmatch`` with ``re.IGNORECASE``. Use for matching
+                ``search`` can't express: exact alternation of several names
+                (``"maine\\.edu|umaine\\.edu"``), wildcards
+                (``".*\\.maine\\.edu"``), or anchored exact match. For plain
+                substring filtering, prefer ``search`` — it's server-side and
+                reduces the data transferred.
 
         Returns:
             List of `Domain` objects.

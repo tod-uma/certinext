@@ -1253,13 +1253,18 @@ Filter by status server-side (reduces data transferred):
 domains = sess.domain.get_list(domain_status="ACTIVE", dcv_status="PENDING,REJECTED,EXPIRED")
 ```
 
-> **Note:** The API `search` parameter behaves differently per environment
-> (re-tested 2026-07-02, probe R01): exact FQDN matches work everywhere; the
-> **sandbox** now also matches substrings correctly, but **production** still
-> returns 0 results for substring searches — and results are capped at the
-> server's ~50-row default page. Use `pattern` (below) for reliable filtering.
+> **Note:** The API `search` parameter matches exact FQDNs and substrings
+> (LIKE) server-side, confirmed working in **both** sandbox and production
+> as of 2026-07-08 ([GitLab issue #2](https://gitlab.its.maine.edu/sysadmin/python-libs/certinext/-/issues/2),
+> closed). Results are still capped at the server's ~50-row default page
+> when passing `offset`/`limit` explicitly; the fetch-all path above pages
+> around that. `search` only does substring containment — for regex
+> features it can't express (alternation, anchoring, wildcards), use
+> `pattern` below.
 
-Filter by name with a regex (applied client-side after the API response):
+Filter by name with a regex (applied client-side after the API response) —
+use this when you need alternation, anchoring, or wildcards that the
+substring-only `search` can't express:
 
 ```python
 # Exact match
