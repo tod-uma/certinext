@@ -1483,8 +1483,8 @@ page = sess.orders.get_page(page=1, size=50, status="issued")
 | `order_status` | `str \| None` | Order lifecycle status (e.g. `complete`) |
 | `certificate_status` | `str \| None` | Certificate status (`issued`, `expired`, etc.) |
 | `common_name` | `str \| None` | Certificate common name (hostname or domain) |
-| `order_date` | `datetime \| None` | Order creation timestamp — **naive** (no UTC offset on the wire, unlike every other CertiNext timestamp); see [GitLab issue #20](https://gitlab.its.maine.edu/sysadmin/python-libs/certinext/-/issues/20) |
-| `certificate_expiry_date` | `datetime \| None` | Certificate expiry timestamp — **naive** for the same reason as `order_date` |
+| `order_date` | `datetime \| None` | Order creation timestamp, UTC-aware (no offset on the wire, unlike every other CertiNext timestamp, but the vendor confirmed UTC); see [GitLab issue #20](https://gitlab.its.maine.edu/sysadmin/python-libs/certinext/-/issues/20) |
+| `certificate_expiry_date` | `datetime \| None` | Certificate expiry timestamp, UTC-aware, for the same reason as `order_date` |
 
 ```python
 o.as_dict()   # raw API response dict

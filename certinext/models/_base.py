@@ -32,13 +32,18 @@ Implements the validation policy of ADR 0005 (lenient response models):
   ``LedgerRecord.transaction_date``, which mixes RFC 2822 and ISO 8601
   depending on the response shape — coercing would silently drop the RFC
   2822 form to ``None``).
+- ``_LenientDatetimeUTC`` is the same, but assumes UTC for wire values with
+  no offset marker. Use it only where the vendor has confirmed the
+  convention out-of-band despite the field itself being ambiguous (e.g.
+  ``OrderRecord.order_date``/``.certificate_expiry_date`` — GitLab issue
+  #20 / vendor ticket #136598).
 
 Models for each API area live in sibling modules (``models.catalog``,
 ``models.accounts``, ...) and are re-exported from the legacy module
 locations (``certinext.catalog``, ...) so import paths stay stable.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Annotated, Any, TypeVar
 
@@ -199,3 +204,28 @@ def _lenient_datetime(value: Any) -> datetime | None:
 
 
 _LenientDatetime = Annotated[datetime | None, BeforeValidator(_lenient_datetime)]
+
+
+def _lenient_datetime_utc(value: Any) -> datetime | None:
+    """Parse a wire timestamp, assuming UTC when it carries no offset.
+
+    Vendor confirmed (GitLab issue #20 / vendor ticket #136598) that
+    ``/reports/orders``'s ``orderDate``/``certificateExpiryDate`` are UTC
+    despite lacking a ``Z``/offset suffix, unlike every other CertiNext v2
+    timestamp. Delegates to :func:`_lenient_datetime` first, so if the
+    vendor later adds an explicit offset the parsed value's real offset
+    still wins over this UTC assumption.
+
+    Args:
+        value: The raw wire value (ISO 8601 string expected).
+
+    Returns:
+        The parsed datetime (UTC-aware), or ``None``.
+    """
+    parsed = _lenient_datetime(value)
+    if parsed is not None and parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+_LenientDatetimeUTC = Annotated[datetime | None, BeforeValidator(_lenient_datetime_utc)]
