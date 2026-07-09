@@ -128,7 +128,18 @@ jobs:
           echo "body<<EOF" >> $GITHUB_OUTPUT
           echo "$MSG" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
+      # action-gh-release has no auto-detection for pre-release tags (e.g.
+      # v1.0.0rc4) and defaults to a full release, so compute it ourselves.
+      - name: Determine prerelease status
+        id: prerelease
+        run: |
+          if [[ "${{ github.ref_name }}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "value=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=true" >> "$GITHUB_OUTPUT"
+          fi
       - uses: softprops/action-gh-release@v3
         with:
           body: ${{ steps.tag_message.outputs.body }}
           files: dist/*
+          prerelease: ${{ steps.prerelease.outputs.value }}
