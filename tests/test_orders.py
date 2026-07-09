@@ -14,7 +14,7 @@
 
 """Tests for certinext.orders (OrderRecord, OrderAccessor) and domain_cert_count.build_rows."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -175,24 +175,24 @@ class TestOrderRecordProperties:
         rec = OrderRecord.model_validate(dict(SAMPLE_ORDER_NO_CN))
         assert rec.common_name is None
 
-    def test_order_date_parses_naive_datetime(self) -> None:
-        """order_date parses orderDate to a *naive* datetime (no tzinfo, no Z on the wire).
+    def test_order_date_assumes_utc(self) -> None:
+        """order_date parses orderDate as UTC-aware despite no offset on the wire.
 
-        GitLab issue #20: unlike every other CertiNext v2 timestamp, the
-        orders report sends this with no UTC offset, so it can't be assumed
-        UTC-aware.
+        GitLab issue #20 / vendor ticket #136598: unlike every other
+        CertiNext v2 timestamp, the orders report sends this with no UTC
+        offset, but the vendor confirmed the convention is UTC.
         """
         rec = OrderRecord.model_validate({"orderDate": "2026-07-02 17:07:14"})
-        assert rec.order_date == datetime(2026, 7, 2, 17, 7, 14)
+        assert rec.order_date == datetime(2026, 7, 2, 17, 7, 14, tzinfo=timezone.utc)
         assert rec.order_date is not None
-        assert rec.order_date.tzinfo is None
+        assert rec.order_date.tzinfo is not None
 
-    def test_certificate_expiry_date_parses_naive_datetime(self) -> None:
-        """certificate_expiry_date parses certificateExpiryDate to a naive datetime (GitLab issue #20)."""
+    def test_certificate_expiry_date_assumes_utc(self) -> None:
+        """certificate_expiry_date parses certificateExpiryDate as UTC-aware (GitLab issue #20)."""
         rec = OrderRecord.model_validate({"certificateExpiryDate": "2026-08-01 17:09:36"})
-        assert rec.certificate_expiry_date == datetime(2026, 8, 1, 17, 9, 36)
+        assert rec.certificate_expiry_date == datetime(2026, 8, 1, 17, 9, 36, tzinfo=timezone.utc)
         assert rec.certificate_expiry_date is not None
-        assert rec.certificate_expiry_date.tzinfo is None
+        assert rec.certificate_expiry_date.tzinfo is not None
 
     def test_order_date_none_when_missing(self, order: OrderRecord) -> None:
         """order_date is None when orderDate is absent from the response."""
