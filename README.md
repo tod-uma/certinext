@@ -1808,7 +1808,7 @@ The CertiNext REST API is documented in two places:
 
 Replace `sandbox-us-api.certinext.io` with `us-api.certinext.io` for the production equivalents.
 
-The Swagger spec is the most authoritative source — it exposes fields not present in the Postman collection (e.g. `preVettingToken`, `csr` in the initial order body, `delegation`, `recipientEmails`, `tags`).
+The Swagger spec is the most authoritative source — it exposes fields not present in the Postman collection (e.g. `preVettingToken`, `csr` in the initial order body, `delegation`, `recipientEmails`, `tags`). CertiNext support confirmed this directly (2026-07-10, [GitLab issue #6](https://gitlab.its.maine.edu/sysadmin/python-libs/certinext/-/issues/6), vendor ticket #135290): the OpenAPI spec is generated straight from their source and always matches the running service, while the Postman collection is maintained by hand and can be wrong. Whenever the two disagree, trust the OpenAPI spec.
 
 ---
 
