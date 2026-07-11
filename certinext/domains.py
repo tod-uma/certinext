@@ -185,11 +185,9 @@ class DomainAccessor:
                 closed). It only does substring containment, not regex — use
                 ``pattern`` when you need anchoring, alternation, or wildcards.
             domain_status: Comma-separated status filter, e.g.
-                ``"ACTIVE,INACTIVE"``. Values: ACTIVE, INACTIVE, EXPIRED,
-                REVOKED.
+                ``"ACTIVE,INACTIVE"``. Values: ACTIVE, INACTIVE, EXPIRED.
             dcv_status: Comma-separated DCV status filter, e.g.
-                ``"PENDING,REJECTED"``. Values: VERIFIED, PENDING, REJECTED,
-                EXPIRED.
+                ``"PENDING,REJECTED"``. Values: VERIFIED, PENDING, REJECTED.
             pattern: Optional regex applied client-side after the API response.
                 Uses ``re.fullmatch`` with ``re.IGNORECASE``. Use for matching
                 ``search`` can't express: exact alternation of several names

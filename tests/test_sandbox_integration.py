@@ -214,7 +214,7 @@ class TestDomains:
 
     def test_domain_status_values_are_known(self, sandbox_session: certinext.CertiNextSession) -> None:
         """Every domain's status is one of the documented values."""
-        valid = {"ACTIVE", "INACTIVE", "EXPIRED", "REVOKED"}
+        valid = {"ACTIVE", "INACTIVE", "EXPIRED"}
         for d in sandbox_session.domain.get_list():
             assert d.status in valid, f"unexpected status {d.status!r} on {d.name}"
 

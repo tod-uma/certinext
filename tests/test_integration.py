@@ -105,13 +105,13 @@ class TestSandboxDomains:
 
     def test_domain_status_values_are_known(self, sandbox_domains: list[Domain]) -> None:
         """Every domain's status is one of the documented valid values."""
-        valid = {"ACTIVE", "INACTIVE", "EXPIRED", "REVOKED"}
+        valid = {"ACTIVE", "INACTIVE", "EXPIRED"}
         for d in sandbox_domains:
             assert d.status in valid, f"unexpected status {d.status!r} on {d.name}"
 
     def test_domain_dcv_status_values_are_known(self, sandbox_domains: list[Domain]) -> None:
         """Every domain's dcv_status is one of the documented valid values."""
-        valid = {"VERIFIED", "PENDING", "REJECTED", "EXPIRED"}
+        valid = {"VERIFIED", "PENDING", "REJECTED"}
         for d in sandbox_domains:
             assert d.dcv_status in valid, f"unexpected dcv_status {d.dcv_status!r} on {d.name}"
 

@@ -592,8 +592,9 @@ class TestDomainAccessorGetPendingDcv:
 
         The dcvStatus half stays client-side deliberately: needs_dcv means
         anything other than VERIFIED, which the server cannot express —
-        dcvStatus=EXPIRED still 400s (vendor #135290) and unknown future
-        statuses would be silently dropped by an allow-list filter.
+        EXPIRED is not a valid dcvStatus value (vendor-confirmed, GitLab
+        #135290) and unknown future statuses would be silently dropped by
+        an allow-list filter.
         """
         mock_client.get.return_value = []
         accessor.get_pending_dcv()

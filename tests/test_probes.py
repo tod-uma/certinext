@@ -507,22 +507,25 @@ def test_probe_r22_exception_hierarchy_invariant() -> None:
     assert not issubclass(CertiNextAPIError, httpx.HTTPError)
 
 
-def test_probe_r23_contested_enum_values(probe_env: str, client: CertiNextClient) -> None:
-    """R23: ``dcvStatus=EXPIRED`` rejected (400); ``domainStatus=DEACTIVATED`` contested.
+def test_probe_r23_invalid_enum_values_rejected(probe_env: str, client: CertiNextClient) -> None:
+    """R23: ``dcvStatus=EXPIRED`` and ``domainStatus=DEACTIVATED`` are both rejected (400).
 
-    Vendor #135290 / GitLab issue #6. Hold ``DcvStatus``/``DomainStatus``
-    edits until the vendor answers; this probe records each env's behavior.
+    Vendor #135290 / GitLab issue #6, resolved 2026-07-10: neither value is
+    valid per the OpenAPI spec at ``/v3/api-docs/certinext-v2`` (canonical
+    over the Postman collection, which the vendor was correcting). The 400s
+    are expected, correct behavior, not a bug.
     """
     err, _ = _try_get(client, _DOMAINS, {"dcvStatus": "EXPIRED"})
     print(f"R23: {probe_env} dcvStatus=EXPIRED -> {'HTTP ' + str(err) if err else 'accepted'}")
     assert err == 400, (
-        f"dcvStatus=EXPIRED now returns {'HTTP ' + str(err) if err else 'success'}, believed 400 — "
+        f"dcvStatus=EXPIRED now returns {'HTTP ' + str(err) if err else 'success'}, expected 400 — "
         "record on issue #6 / vendor #135290"
     )
     err, _ = _try_get(client, _DOMAINS, {"domainStatus": "DEACTIVATED"})
     print(f"R23: {probe_env} domainStatus=DEACTIVATED -> {'HTTP ' + str(err) if err else 'accepted'}")
-    assert err in (None, 400), (
-        f"domainStatus=DEACTIVATED returned unexpected HTTP {err} (neither accepted nor 400)"
+    assert err == 400, (
+        f"domainStatus=DEACTIVATED now returns {'HTTP ' + str(err) if err else 'success'}, expected 400 — "
+        "record on issue #6 / vendor #135290"
     )
 
 
