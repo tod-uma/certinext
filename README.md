@@ -1309,9 +1309,11 @@ client-side.
 > is accepted in both environments (2026-07-02, GitLab issue #6), so the
 > `domainStatus=ACTIVE` half moved server-side in 1.0. The `dcvStatus` half
 > stays client-side deliberately: "needs DCV" means *anything other than
-> `VERIFIED`*, and the server cannot express that — `dcvStatus=EXPIRED` still
-> returns 400 (vendor #135290), and an allow-list filter would silently drop
-> unknown future statuses. Revisit when issue #6 settles the enum membership.
+> `VERIFIED`*, and the server cannot express that as a single filter value —
+> an allow-list filter would also silently drop unknown future statuses.
+> (`dcvStatus=EXPIRED` returning 400 is expected, permanent behavior —
+> `EXPIRED` isn't a valid `dcvStatus` value, vendor-confirmed on #135290 /
+> issue #6, closed 2026-07-10 — not something to revisit.)
 
 ```python
 pending = sess.domain.get_pending_dcv()

@@ -33,11 +33,15 @@ log = structlog.get_logger()
 
 _BASE = "/api/certinext/v2/domains"
 
-DomainStatus = Literal["ACTIVE", "INACTIVE", "EXPIRED", "REVOKED"]
-"""Valid values returned by :attr:`Domain.status`."""
+DomainStatus = Literal["ACTIVE", "INACTIVE", "EXPIRED"]
+"""Valid values returned by :attr:`Domain.status` (per the OpenAPI spec at
+``/v3/api-docs/certinext-v2``, vendor-confirmed canonical over the Postman
+collection - GitLab issue #6)."""
 
-DcvStatus = Literal["VERIFIED", "PENDING", "REJECTED", "EXPIRED"]
-"""Valid values returned by :attr:`Domain.dcv_status`."""
+DcvStatus = Literal["VERIFIED", "PENDING", "REJECTED"]
+"""Valid values returned by :attr:`Domain.dcv_status` (per the OpenAPI spec at
+``/v3/api-docs/certinext-v2``, vendor-confirmed canonical over the Postman
+collection - GitLab issue #6)."""
 
 DcvMethod = Literal["DNS-TXT", "HTTP-URL"]
 """Valid DCV method strings accepted by :meth:`Domain.change_dcv_method`."""
@@ -246,12 +250,12 @@ class Domain(CertiNextModel):
     )
     status: str | None = Field(
         default=None,
-        description="Domain status. One of ``ACTIVE``, ``INACTIVE``, ``EXPIRED``, ``REVOKED``.",
+        description="Domain status. One of ``ACTIVE``, ``INACTIVE``, ``EXPIRED``.",
     )
     dcv_status: str | None = Field(
         default=None,
         alias="dcvStatus",
-        description="DCV status. One of ``VERIFIED``, ``PENDING``, ``REJECTED``, ``EXPIRED``.",
+        description="DCV status. One of ``VERIFIED``, ``PENDING``, ``REJECTED``.",
     )
     created_at: _LenientDatetime = Field(
         default=None,
