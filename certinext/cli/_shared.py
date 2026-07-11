@@ -163,6 +163,15 @@ VerboseOption = Annotated[int, typer.Option(
     ),
 )]
 
+# Names of command groups (like "domains") whose connection/output options
+# sit on a group-level callback rather than each leaf command. certinext.cli
+# main() consults this to know which subcommand tokens accept those options
+# anywhere on the command line, not just immediately after the group name.
+# Every module that gives its typer group a shared options callback (instead
+# of declaring the options on each leaf command directly) should add its
+# name here right after registering the group on ``app``.
+ENTITY_GROUP_NAMES: set[str] = set()
+
 
 def connect(
     *,

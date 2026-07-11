@@ -31,6 +31,7 @@ import typer
 
 from certinext.cli._app import app
 from certinext.cli._shared import (
+    ENTITY_GROUP_NAMES,
     AccountNumberOption,
     BaseUrlOption,
     ClientSecretOption,
@@ -56,6 +57,7 @@ domains_app = typer.Typer(
     pretty_exceptions_enable=False,
 )
 app.add_typer(domains_app)
+ENTITY_GROUP_NAMES.add("domains")
 
 
 @dataclass
