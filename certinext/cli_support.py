@@ -41,6 +41,7 @@ import getpass
 import logging
 import os
 import sys
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, NoReturn
 
@@ -258,27 +259,54 @@ def resolve_connection(
     )
 
 
-def _reorder_log_keys(_logger: Any, _method: str, event_dict: structlog.typing.EventDict) -> structlog.typing.EventDict:
-    """Reorder event dict keys for consistent JSON output regardless of log source.
+def _reorder_log_keys_processor(extra_priority_keys: Sequence[str]) -> structlog.typing.Processor:
+    """Build a processor that reorders event dict keys for consistent JSON output.
 
     Puts fixed fields first so every line reads: timestamp → level → event → logger
-    (foreign only) → remaining fields.
+    (foreign only) → any extra priority keys → remaining fields.
 
     Args:
-        _logger: Unused — required by the structlog processor protocol.
-        _method: Unused — required by the structlog processor protocol.
-        event_dict: The current log event dictionary to reorder.
+        extra_priority_keys: Caller-specific keys (e.g. ``correlation_id``, ``pid``)
+            ordered right after the built-in priority keys.
 
     Returns:
-        A new dict with priority keys first, remaining keys appended in original order.
+        A structlog processor performing the reordering.
     """
-    priority = ["timestamp", "level", "logger", "event"]
-    reordered: dict[str, Any] = {k: event_dict[k] for k in priority if k in event_dict}
-    reordered.update({k: v for k, v in event_dict.items() if k not in priority})
-    return reordered
+    priority = ["timestamp", "level", "logger", "event", *extra_priority_keys]
+
+    def _reorder(_logger: Any, _method: str, event_dict: structlog.typing.EventDict) -> structlog.typing.EventDict:
+        reordered: dict[str, Any] = {k: event_dict[k] for k in priority if k in event_dict}
+        reordered.update({k: v for k, v in event_dict.items() if k not in priority})
+        return reordered
+
+    return _reorder
 
 
-def setup_logging(verbose: int) -> None:
+def _drop_keys_processor(keys: Sequence[str]) -> structlog.typing.Processor:
+    """Build a processor that removes the given keys from every event dict.
+
+    Args:
+        keys: Event dict keys to remove when present.
+
+    Returns:
+        A structlog processor performing the removal.
+    """
+
+    def _drop(_logger: Any, _method: str, event_dict: structlog.typing.EventDict) -> structlog.typing.EventDict:
+        for key in keys:
+            event_dict.pop(key, None)
+        return event_dict
+
+    return _drop
+
+
+def setup_logging(
+    verbose: int,
+    *,
+    extra_priority_keys: Sequence[str] = (),
+    console_quiet_keys: Sequence[str] = (),
+    quiet_loggers: Sequence[str] = (),
+) -> None:
     """Route all output — structlog and third-party stdlib — through a shared renderer.
 
     Uses structlog.stdlib.ProcessorFormatter as the single stdlib handler formatter so
@@ -291,6 +319,16 @@ def setup_logging(verbose: int) -> None:
 
     Args:
         verbose: Verbosity count from -v flags (0=INFO, 3+=DEBUG, 4+=third-party DEBUG).
+        extra_priority_keys: Additional event dict keys (e.g. run-level
+            ``correlation_id``/``pid`` contextvars) placed right after the built-in
+            keys in JSON output, so cron log lines keep a stable field order.
+        console_quiet_keys: Event dict keys suppressed from *interactive* (TTY)
+            output at verbosity 0. Use for run-context fields that repeat
+            unchanged on every line; ``-v`` and above shows them, and JSON
+            (non-TTY) output always carries them.
+        quiet_loggers: Additional stdlib logger names capped at WARNING below
+            ``-vvvv``, alongside the built-in httpx/httpcore/keyring set (e.g.
+            ``filelock``, ``nm.wire``).
     """
     level = logging.DEBUG if verbose >= 3 else logging.INFO
     interactive = sys.stderr.isatty()
@@ -313,14 +351,16 @@ def setup_logging(verbose: int) -> None:
         final_processors: list[Any] = [
             structlog.stdlib.ProcessorFormatter.remove_processors_meta,
             structlog.processors.format_exc_info,
-            renderer,
         ]
+        if console_quiet_keys and verbose < 1:
+            final_processors.append(_drop_keys_processor(console_quiet_keys))
+        final_processors.append(renderer)
     else:
         renderer = structlog.processors.JSONRenderer()
         final_processors = [
             structlog.stdlib.ProcessorFormatter.remove_processors_meta,
             structlog.processors.format_exc_info,
-            _reorder_log_keys,
+            _reorder_log_keys_processor(extra_priority_keys),
             renderer,
         ]
 
@@ -343,11 +383,8 @@ def setup_logging(verbose: int) -> None:
     if verbose < 4:
         # httpx logs one INFO line per request; keep it quiet unless -vvvv
         # (urllib3, its predecessor here, only logged at DEBUG).
-        logging.getLogger("httpx").setLevel(logging.WARNING)
-        logging.getLogger("httpcore").setLevel(logging.WARNING)
-        logging.getLogger("keyring").setLevel(logging.WARNING)
-        logging.getLogger("jaraco").setLevel(logging.WARNING)
-        logging.getLogger("win32ctypes").setLevel(logging.WARNING)
+        for name in ("httpx", "httpcore", "keyring", "jaraco", "win32ctypes", *quiet_loggers):
+            logging.getLogger(name).setLevel(logging.WARNING)
 
 
 def build_session(

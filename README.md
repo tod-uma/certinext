@@ -1234,6 +1234,47 @@ always take precedence over the `sandbox` flag.
 
 The session obtains and caches an OAuth 2.0 bearer token automatically, refreshing it before it expires.
 
+### Building your own CLI on certinext
+
+Two public modules exist so external scripts get the same connection
+resolution, credential handling, and log formatting as the bundled CLI —
+without copying any of it:
+
+- **`certinext.cli_support`** — framework-agnostic: `resolve_connection()`,
+  `build_session()`, `setup_logging()`, `prompt_stderr()`,
+  `require_credential()`, `fatal_api_error()`. Depends on no argument-parsing
+  library.
+- **`certinext.cli_options`** — typer-specific: `Annotated` option aliases
+  (`ProfileOption`, `SandboxOption`, `BaseUrlOption`, `TokenUrlOption`,
+  `AccountNumberOption`, `ClientSecretOption`, `ScopeOption`, `JsonOption`,
+  `VerboseOption`) carrying the exact flag spellings and help text of the
+  bundled `certinext` CLI, plus `connect()` which chains
+  `resolve_connection()` + `build_session()`.
+
+```python
+import typer
+from certinext.cli_options import ProfileOption, SandboxOption, VerboseOption, connect
+from certinext.cli_support import setup_logging
+
+app = typer.Typer()
+
+@app.command()
+def my_command(
+    profile: ProfileOption = None,
+    sandbox: SandboxOption = False,
+    verbose: VerboseOption = 0,
+) -> None:
+    setup_logging(verbose)
+    sess = connect(profile=profile, sandbox=sandbox)
+    ...
+```
+
+`setup_logging()` accepts optional hooks for scripts with extra run context —
+`extra_priority_keys=` (field order of e.g. `correlation_id`/`pid` in JSON
+output), `console_quiet_keys=` (fields hidden from interactive output at
+verbosity 0), and `quiet_loggers=` (additional third-party loggers capped at
+WARNING below `-vvvv`).
+
 ### Working with domains
 
 #### List all domains
@@ -1823,6 +1864,8 @@ certinext/
     cli_support.py                # public CLI-support layer: resolve_connection, build_session,
                                   #   setup_logging, prompt_stderr, require_credential, fatal_api_error
                                   #   (replaces the pre-1.0 private certinext._cli)
+    cli_options.py                # public typer option aliases (ProfileOption, SandboxOption, ...)
+                                  #   and connect(); the typer-specific companion to cli_support
     cli/                          # the consolidated `certinext` typer application (ADR 0004)
         __init__.py                #   main() entry point, exit-code handling
         _app.py                    #   the shared typer app object
