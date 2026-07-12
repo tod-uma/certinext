@@ -12,12 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Shared typer option types and console plumbing for the ``certinext`` CLI.
+"""Console plumbing and re-exported shared options for the ``certinext`` CLI.
 
-Each connection flag is declared once here as an ``Annotated`` alias so every
-subcommand exposes the same spelling and help text as the 0.3.x scripts
-(ADR 0004 flag-compatibility rule). Command bodies stay thin: declare the
-shared options, call :func:`connect`, render.
+The typer option aliases and :func:`connect` live in the public
+:mod:`certinext.cli_options` module (so downstream scripts share the exact
+flag spellings, per ADR 0004); this module re-exports them for the bundled
+CLI's internal use and adds the rendering plumbing that stays private.
+Command bodies stay thin: declare the shared options, call :func:`connect`,
+render.
 
 Stream discipline (unchanged from 0.3.x, and load-bearing): stdout carries
 data — tables, JSON, PEM; stderr carries everything else — logs, progress,
@@ -26,15 +28,41 @@ JSON/PEM; diagnostics go through structlog or :data:`err_console`.
 """
 
 import sys
-from typing import Annotated, Any, Optional
+from typing import Any
 
-import typer
 from rich.console import Console
 from rich.table import Table
 
-import certinext
-from certinext.cli_support import build_session, resolve_connection
-from certinext.session import CertiNextSession
+from certinext.cli_options import (
+    AccountNumberOption as AccountNumberOption,
+)
+from certinext.cli_options import (
+    BaseUrlOption as BaseUrlOption,
+)
+from certinext.cli_options import (
+    ClientSecretOption as ClientSecretOption,
+)
+from certinext.cli_options import (
+    JsonOption as JsonOption,
+)
+from certinext.cli_options import (
+    ProfileOption as ProfileOption,
+)
+from certinext.cli_options import (
+    SandboxOption as SandboxOption,
+)
+from certinext.cli_options import (
+    ScopeOption as ScopeOption,
+)
+from certinext.cli_options import (
+    TokenUrlOption as TokenUrlOption,
+)
+from certinext.cli_options import (
+    VerboseOption as VerboseOption,
+)
+from certinext.cli_options import (
+    connect as connect,
+)
 
 # When stdout is piped, rich caps the console at 80 columns and would wrap or
 # crop wide data tables. Data output must never be width-mangled, so piped
@@ -119,50 +147,6 @@ def pairs_table(data: dict[str, Any]) -> Table:
     return table
 
 
-# --- Shared connection options (one definition, every subcommand) ---------
-
-ProfileOption = Annotated[Optional[str], typer.Option(
-    "--profile", metavar="NAME",
-    help="Credential profile for keyring lookup (env: CERTINEXT_PROFILE; default: use the default profile)",
-)]
-SandboxOption = Annotated[bool, typer.Option(
-    "--sandbox",
-    help="Connect to the CertiNext sandbox API; implies --profile sandbox unless --profile is set",
-)]
-BaseUrlOption = Annotated[Optional[str], typer.Option(
-    "--base-url", metavar="URL",
-    help=f"CertiNext base URL (default: {certinext.BASE_URL}, or the profile/sandbox endpoint)",
-)]
-TokenUrlOption = Annotated[Optional[str], typer.Option(
-    "--token-url", metavar="URL",
-    help="OAuth2 token endpoint URL (default: derived from the base URL)",
-)]
-AccountNumberOption = Annotated[Optional[str], typer.Option(
-    "--account-number", "--client-id", metavar="ACCT",
-    help="CertiNext account number / OAuth2 client_id (env: CERTINEXT_CLIENT_ID)",
-)]
-ClientSecretOption = Annotated[Optional[str], typer.Option(
-    "--client-secret", metavar="SECRET",
-    help="OAuth2 client secret (env: CERTINEXT_CLIENT_SECRET)",
-)]
-ScopeOption = Annotated[str, typer.Option(
-    "--scope", metavar="SCOPE", help="OAuth2 scope (optional)",
-)]
-
-# --- Shared output/verbosity options ---------------------------------------
-
-JsonOption = Annotated[bool, typer.Option(
-    "--json", help="Write output as JSON instead of human-readable text",
-)]
-VerboseOption = Annotated[int, typer.Option(
-    "--verbose", "-v", count=True,
-    help=(
-        "Increase verbosity: -v shows progress, "
-        "-vvv enables debug logging, "
-        "-vvvv also enables third-party debug logging (httpx)"
-    ),
-)]
-
 # Names of command groups (like "domains") whose connection/output options
 # sit on a group-level callback rather than each leaf command. certinext.cli
 # main() consults this to know which subcommand tokens accept those options
@@ -171,48 +155,3 @@ VerboseOption = Annotated[int, typer.Option(
 # of declaring the options on each leaf command directly) should add its
 # name here right after registering the group on ``app``.
 ENTITY_GROUP_NAMES: set[str] = set()
-
-
-def connect(
-    *,
-    profile: str | None = None,
-    sandbox: bool = False,
-    base_url: str | None = None,
-    token_url: str | None = None,
-    account_number: str | None = None,
-    client_secret: str | None = None,
-    scope: str = "",
-    prompt: bool = True,
-) -> CertiNextSession:
-    """Resolve the endpoint and credentials, and return an authenticated session.
-
-    Chains :func:`certinext.cli_support.resolve_connection` and
-    :func:`certinext.cli_support.build_session` — the one-liner every
-    subcommand calls after collecting the shared connection options.
-
-    Args:
-        profile: ``--profile`` value, or None.
-        sandbox: ``--sandbox`` flag.
-        base_url: ``--base-url`` value, or None.
-        token_url: ``--token-url`` value, or None.
-        account_number: ``--account-number`` value, or None.
-        client_secret: ``--client-secret`` value, or None.
-        scope: ``--scope`` value (commands without the flag pass the default).
-        prompt: Forwarded to :func:`~certinext.cli_support.build_session`;
-            when False, missing credentials raise
-            :exc:`~certinext.cli_support.CredentialsNotFoundError` instead of
-            prompting.
-
-    Returns:
-        An authenticated :class:`~certinext.session.CertiNextSession`.
-    """
-    conn = resolve_connection(
-        profile=profile, sandbox=sandbox, base_url=base_url, token_url=token_url,
-    )
-    return build_session(
-        conn,
-        account_number=account_number,
-        client_secret=client_secret,
-        scope=scope,
-        prompt=prompt,
-    )
