@@ -1420,7 +1420,7 @@ repr(domain)
 
 | Field | Type | Description |
 |---|---|---|
-| `method` | `str` | DCV method in upper case: `DNS-TXT` or `HTTP-URL` |
+| `method` | `str` | DCV method in upper case, normally `DNS-TXT` or `HTTP-URL`. Methods the library doesn't recognise (the vendor spec added undocumented `dns-cname` / `dns-persist` enums on 2026-07-13) are returned as-is with a warning logged rather than raising. |
 | `token` | `str` | Challenge value to publish (TXT record content for DNS-TXT, file token for HTTP-URL) |
 | `host` | `str` | Sub-domain prefix for the challenge record (e.g. `_emudhra-challenge`). Empty string if not returned by the API. |
 | `token_expiry` | `datetime \| None` | Timezone-aware UTC expiry of `token`, or `None` if absent/unparseable. Check this (or an empty `token`) before calling `domain.reinitiate_dcv()`. |
@@ -1444,7 +1444,8 @@ print(dcv.host)                    # sub-domain prefix for the challenge record
 print(dcv.token_expiry)            # UTC datetime, or None
 
 result = domain.verify()           # trigger verification; returns a DcvVerifyResult summary
-domain.change_dcv_method("DNS-TXT")   # accepted values: "DNS-TXT", "HTTP-URL"
+domain.change_dcv_method("DNS-TXT")   # accepted values: "DNS-TXT", "HTTP-URL" (write ops reject
+                                      # methods the library can't represent yet, e.g. dns-persist)
 domain.reinitiate_dcv()            # force a fresh challenge token (e.g. after tokenExpiry lapses)
 attempt = domain.last_dcv_attempt()   # returns raw API response dict
 history = domain.dcv_attempt_history() # returns raw API response dict or list

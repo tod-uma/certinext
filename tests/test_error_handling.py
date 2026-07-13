@@ -18,6 +18,7 @@ from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
 import pytest
+from structlog.testing import capture_logs
 
 from certinext.auth import OAuth2ClientCredentials
 from certinext.client import CertiNextClient
@@ -405,7 +406,7 @@ class TestClientHTTPErrors:
 # ---------------------------------------------------------------------------
 
 class TestDcvMethodValidation:
-    """get_dcv() rejects unknown DCV methods; change_dcv_method() validates input."""
+    """get_dcv() warns on unknown DCV methods; change_dcv_method() validates input."""
 
     def _domain_with_id(self, client: MagicMock) -> Domain:
         return Domain.from_payload(client, {"domainId": "abc", "domainName": "test.example.edu"})
@@ -428,19 +429,23 @@ class TestDcvMethodValidation:
         assert info.method == "HTTP-URL"
         assert info.token == "tok"
 
-    def test_get_dcv_rejects_email(self, mock_client: MagicMock) -> None:
-        """get_dcv() raises ValueError for EMAIL, which is not supported by the Domains API."""
+    def test_get_dcv_warns_on_email(self, mock_client: MagicMock) -> None:
+        """get_dcv() warns (not raises) for EMAIL, which the Domains API does not support."""
         mock_client.get.return_value = {"dcvMethod": "EMAIL"}
         d = self._domain_with_id(mock_client)
-        with pytest.raises(ValueError, match="EMAIL"):
-            d.get_dcv()
+        with capture_logs() as logs:
+            info = d.get_dcv()
+        assert info.method == "EMAIL"
+        assert any(e["log_level"] == "warning" for e in logs)
 
-    def test_get_dcv_rejects_http(self, mock_client: MagicMock) -> None:
-        """get_dcv() raises ValueError for HTTP, which is not a valid Domains API method."""
+    def test_get_dcv_warns_on_http(self, mock_client: MagicMock) -> None:
+        """get_dcv() warns (not raises) for HTTP, which is not a valid Domains API method."""
         mock_client.get.return_value = {"dcvMethod": "HTTP"}
         d = self._domain_with_id(mock_client)
-        with pytest.raises(ValueError, match="HTTP"):
-            d.get_dcv()
+        with capture_logs() as logs:
+            info = d.get_dcv()
+        assert info.method == "HTTP"
+        assert any(e["log_level"] == "warning" for e in logs)
 
     def test_get_dcv_normalizes_lowercase_to_uppercase(self, mock_client: MagicMock) -> None:
         """get_dcv() normalizes method values to upper case before checking."""
@@ -449,19 +454,24 @@ class TestDcvMethodValidation:
         info = d.get_dcv()
         assert info.method == "DNS-TXT"
 
-    def test_get_dcv_raises_on_unknown_method(self, mock_client: MagicMock) -> None:
-        """get_dcv() raises ValueError when the API returns an unrecognised DCV method."""
+    def test_get_dcv_warns_on_unknown_method(self, mock_client: MagicMock) -> None:
+        """get_dcv() warns and returns the value when the API reports an unrecognised method."""
         mock_client.get.return_value = {"dcvMethod": "DNS", "dnsContents": "tok"}
         d = self._domain_with_id(mock_client)
-        with pytest.raises(ValueError, match="DNS"):
-            d.get_dcv()
+        with capture_logs() as logs:
+            info = d.get_dcv()
+        assert info.method == "DNS"
+        assert info.token == "tok"
+        assert any(e["log_level"] == "warning" for e in logs)
 
-    def test_get_dcv_raises_on_cname_method(self, mock_client: MagicMock) -> None:
-        """get_dcv() raises ValueError for any unrecognised method string."""
+    def test_get_dcv_warns_on_cname_method(self, mock_client: MagicMock) -> None:
+        """get_dcv() warns (not raises) for any unrecognised method string."""
         mock_client.get.return_value = {"dcvMethod": "CNAME"}
         d = self._domain_with_id(mock_client)
-        with pytest.raises(ValueError):
-            d.get_dcv()
+        with capture_logs() as logs:
+            info = d.get_dcv()
+        assert info.method == "CNAME"
+        assert any(e["log_level"] == "warning" for e in logs)
 
     def test_get_dcv_empty_response_returns_empty_method(self, mock_client: MagicMock) -> None:
         """get_dcv() returns an empty method string when the API omits dcvMethod."""
