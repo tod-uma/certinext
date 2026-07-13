@@ -19,6 +19,7 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
+from structlog.testing import capture_logs
 
 from certinext.domains import DcvInfo, Domain, DomainAccessor
 from tests.conftest import (
@@ -300,6 +301,35 @@ class TestDomainAPIMethods:
         assert result.method == ""
         assert result.token == ""
         assert result.host == ""
+
+    @pytest.mark.parametrize("wire_method", ["dns-cname", "dns-persist"])
+    def test_get_dcv_unknown_method_warns_instead_of_raising(
+        self, domain: Domain, mock_client: MagicMock, wire_method: str
+    ) -> None:
+        """get_dcv() returns unknown methods (spec enums 2026-07-13) as-is with a warning."""
+        mock_client.get.return_value = {"dcvMethod": wire_method, "txtToken": "abc123"}
+        with capture_logs() as logs:
+            result = domain.get_dcv()
+        assert result.method == wire_method.upper()
+        assert result.token == "abc123"
+        warnings = [e for e in logs if e["log_level"] == "warning"]
+        assert len(warnings) == 1
+        assert warnings[0]["method"] == wire_method.upper()
+
+    def test_change_dcv_method_rejects_unknown_method(self, domain: Domain, mock_client: MagicMock) -> None:
+        """change_dcv_method() still rejects methods outside VALID_DCV_METHODS (write-strict)."""
+        with pytest.raises(ValueError, match="Invalid DCV method"):
+            domain.change_dcv_method("DNS-PERSIST")  # type: ignore[arg-type]
+        mock_client.patch.assert_not_called()
+
+    def test_reinitiate_dcv_rejects_unsupported_current_method(
+        self, domain: Domain, mock_client: MagicMock
+    ) -> None:
+        """reinitiate_dcv() refuses when the domain's current method is one we can't write."""
+        mock_client.get.return_value = {"dcvMethod": "dns-cname", "txtToken": "abc123"}
+        with capture_logs(), pytest.raises(ValueError, match="Cannot reinitiate"):
+            domain.reinitiate_dcv()
+        mock_client.patch.assert_not_called()
 
     def test_reinitiate_dcv_calls_change_then_get(self, domain: Domain, mock_client: MagicMock) -> None:
         """reinitiate_dcv() calls change_dcv_method then get_dcv and returns fresh DcvInfo."""

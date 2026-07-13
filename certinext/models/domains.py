@@ -47,6 +47,16 @@ DcvMethod = Literal["DNS-TXT", "HTTP-URL"]
 """Valid DCV method strings accepted by :meth:`Domain.change_dcv_method`."""
 
 VALID_DCV_METHODS: frozenset[str] = frozenset({"DNS-TXT", "HTTP-URL"})
+"""DCV methods this library fully supports for write operations
+(:meth:`Domain.change_dcv_method`, :meth:`Domain.reinitiate_dcv`).
+
+The API may report methods outside this set: the vendor added ``dns-cname``
+and ``dns-persist`` to every DCV enum in the OpenAPI spec (observed
+2026-07-13) without documenting their semantics or response fields.
+:meth:`Domain.get_dcv` returns such methods as-is with a warning rather than
+raising, so read paths keep working on domains the vendor (or the portal)
+has switched; write paths stay restricted to this set until the new methods
+are documented well enough to support."""
 
 
 def _has_ns_records(name: str) -> bool:
@@ -465,21 +475,29 @@ class Domain(CertiNextModel):
     def get_dcv(self) -> DcvInfo:
         """Return the current Domain Control Validation configuration from the API.
 
+        A method outside ``VALID_DCV_METHODS`` (e.g. the undocumented
+        ``dns-cname`` / ``dns-persist`` the vendor added to the spec enums on
+        2026-07-13) is returned as-is with a warning logged, so read paths
+        keep working on domains switched to a method this library does not
+        yet support writing. Write operations
+        (:meth:`change_dcv_method`, :meth:`reinitiate_dcv`) still reject
+        such methods.
+
         Returns:
             :class:`DcvInfo` with normalised ``method``, ``token``, and ``host``.
 
         Raises:
-            ValueError: If the API reports a DCV method outside
-                ``VALID_DCV_METHODS``.
             CertiNextAPIError: On a non-2xx API response. Provides ``.status_code`` and ``.body``.
         """
         result: dict[str, Any] | list[Any] = self._require_client().get(f"{_BASE}/{self.id}/dcv")
         raw: dict[str, Any] = result if isinstance(result, dict) else {}
         info = DcvInfo.from_wire(raw)
         if info.method and info.method not in VALID_DCV_METHODS:
-            raise ValueError(
-                f"Unexpected DCV method {info.method!r} from API; "
-                f"expected one of {sorted(VALID_DCV_METHODS)}"
+            log.warning(
+                "unrecognized DCV method from API",
+                domain=self.name,
+                method=info.method,
+                supported_methods=sorted(VALID_DCV_METHODS),
             )
         return info
 
