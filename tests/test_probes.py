@@ -281,7 +281,11 @@ def test_probe_r05_chain_order_misordered(probe_env: str, client: CertiNextClien
     if len(raw) < 2:
         pytest.skip("chain has fewer than 2 certificates — order unobservable")
     ordered = order_certificate_chain(raw, leaf_pem=dl.certificate_pem)
-    assert ordered != raw, (
+    # order_certificate_chain() anchors the result on the leaf, so `ordered`
+    # always has one more element than `raw` (which is chain-only). Comparing
+    # the full lists made every raw chain trivially "fail" this check
+    # regardless of its actual order — compare the chain-only slice instead.
+    assert ordered[1:] != raw, (
         "raw chainPem is now correctly ordered — vendor fix? Update order_certificate_chain "
         "default, README, and GitLab issues #4/#5 together (vendor #134123)"
     )
