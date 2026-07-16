@@ -56,10 +56,8 @@ The short version, for an agent wiring up certinext without reading the
 whole README:
 
 ```bash
-# No 1.0.0 stable release exists yet — --prerelease=allow is required or
-# these commands silently install the pre-rewrite 0.2.1 instead.
-uv tool install --prerelease=allow "certinext[csr,keyring]"   # CLI
-uv add certinext --prerelease=allow                            # or, as a library dependency
+uv tool install "certinext[csr,keyring]"   # CLI
+uv add certinext                            # or, as a library dependency
 ```
 
 ```python
@@ -93,18 +91,11 @@ Instructions below default to [uv](https://docs.astral.sh/uv/)
 ([Install uv](#install-uv) if you don't have it yet).
 You don't need Python installed first — uv downloads and manages Python for you.
 
-> [!IMPORTANT]
-> **No `1.0.0` stable release exists yet** — every published version is a
-> pre-release (`1.0.0rcN`). The command below installs whatever the latest
-> *stable* release is instead, which today is the pre-rewrite `0.2.1` (no
-> `certinext` command, no subcommands — a completely different CLI). Until
-> `1.0.0` ships, add `--prerelease=allow` as shown just below the command.
-
 To install the `certinext` CLI (issuing certificates, listing
 domains, etc.):
 
 ```bash
-uv tool install --prerelease=allow "certinext[csr,keyring]"
+uv tool install "certinext[csr,keyring]"
 ```
 
 That's the whole install — the command now works from any terminal. (If a
@@ -144,20 +135,18 @@ command needs Python, uv downloads a suitable version automatically.
 <summary>All uv install variants (library use, pre-releases, UMS GitLab registry, development)</summary>
 
 **Library in your project** — if you want `import certinext` in your own
-code, add it as a dependency of your uv-managed project. `--prerelease=allow`
-is required until `1.0.0` stable ships (see the note above):
+code, add it as a dependency of your uv-managed project:
 
 ```bash
-uv add certinext --prerelease=allow
+uv add certinext
 ```
 
 Add extras only if your code uses them: `certinext[csr]` (CSR parsing),
 `certinext[keyring]` (OS keychain credential lookup), `certinext[dns]`
 (DNS lookups).
 
-**Pre-releases in general** — `--prerelease=allow` also keeps working after
-`1.0.0` stable ships, for whenever you want the latest alpha/beta/rc ahead of
-the next stable release:
+**Pre-releases** — to get the latest alpha/beta/rc ahead of the next stable
+release, add `--prerelease=allow`:
 
 ```bash
 uv tool install --prerelease=allow "certinext[csr,keyring]"   # CLI tools
@@ -165,11 +154,10 @@ uv add certinext --prerelease=allow                           # library
 ```
 
 **From the UMS GitLab package registry** — releases are also published to
-the UMS GitLab package registry. `--prerelease=allow` is required until
-`1.0.0` stable ships (see the note above):
+the UMS GitLab package registry:
 
 ```bash
-uv tool install --prerelease=allow certinext \
+uv tool install certinext \
   --extra-index-url https://gitlab.its.maine.edu/api/v4/groups/2236/-/packages/pypi/simple
 ```
 
@@ -191,31 +179,26 @@ uv pip install -e ".[dev]"
 <summary>Using pip or pipx instead of uv</summary>
 
 All of the above with pip or pipx (both require Python 3.10+ already
-installed). **Until `1.0.0` stable ships, use the `--pre`/`--pip-args=--pre`
-form** (see the note above) — the plain command installs the pre-rewrite
-`0.2.1` instead.
+installed).
 
 **CLI tools** — with [pipx](https://pipx.pypa.io/) (isolated install, like
 `uv tool`):
 
 ```bash
-pipx install --pip-args=--pre "certinext[csr,keyring]"   # pre-release (current)
-pipx install "certinext[csr,keyring]"                    # once 1.0.0 stable ships
+pipx install "certinext[csr,keyring]"
 ```
 
 Or with plain pip (installs into the active Python environment, not
 isolated):
 
 ```bash
-pip install --pre "certinext[csr,keyring]"               # pre-release (current)
-pip install "certinext[csr,keyring]"                     # once 1.0.0 stable ships
+pip install "certinext[csr,keyring]"
 ```
 
 **Library in your project**:
 
 ```bash
-pip install --pre certinext        # pre-release (current)
-pip install certinext              # once 1.0.0 stable ships
+pip install certinext
 ```
 
 **Optional extras** — add any of `csr`, `keyring`, or `dns` after the fact,
@@ -225,11 +208,18 @@ e.g. the `keyring` extra needed by `certinext setup keyring`:
 pip install "certinext[keyring]"
 ```
 
-**From the UMS GitLab package registry** — `--pre` is required until `1.0.0`
-stable ships (see the note above):
+**Pre-releases** — to get the latest alpha/beta/rc ahead of the next stable
+release, add `--pre`/`--pip-args=--pre`:
 
 ```bash
-pip install --pre certinext \
+pipx install --pip-args=--pre "certinext[csr,keyring]"
+pip install --pre certinext
+```
+
+**From the UMS GitLab package registry**:
+
+```bash
+pip install certinext \
   --extra-index-url https://gitlab.its.maine.edu/api/v4/groups/2236/-/packages/pypi/simple
 ```
 
@@ -519,7 +509,7 @@ The complete copy-paste path from nothing to an issued certificate
 from):
 
 ```bash
-uv tool install --prerelease=allow "certinext[csr,keyring]"   # see note in Installation
+uv tool install "certinext[csr,keyring]"
 certinext setup keyring      # store API credentials in the OS keychain (once)
 certinext setup defaults     # store requestor/cert defaults (once, optional)
 certinext issue-cert example.com.csr --cert-out cert.pem --fullchain-out fullchain.pem
