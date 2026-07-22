@@ -98,7 +98,7 @@ wheels = [
 
 [[package]]
 name = "certinext"
-version = "1.0.0"
+version = "1.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },
@@ -147,7 +147,7 @@ requires-dist = [
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "rich", specifier = ">=13" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.4" },
-    { name = "structlog" },
+    { name = "structlog", specifier = ">=23.2" },
     { name = "tomli", marker = "python_full_version < '3.11'", specifier = ">=2.0" },
     { name = "tomlkit", specifier = ">=0.13" },
     { name = "typer", specifier = ">=0.12" },
