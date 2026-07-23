@@ -165,16 +165,32 @@ class TestSandboxOrders:
         assert isinstance(page, list)
 
     def test_orders_status_filter_issued(self, sandbox_session: certinext.CertiNextSession) -> None:
-        """get_list(status='issued') returns only records with certificate_status 'issued'."""
+        """get_list(status='issued') returns only records in an issued order_status.
+
+        The vendor's ``status`` query param filters on ORDER status (see
+        ``/api/certinext/v2/reports/orders`` in the spec), a field
+        independent of ``certificate_status`` -- neither field literally
+        equals the filter value "issued": the API sends human-readable
+        display strings (ADR 0005), confirmed against real sandbox data as
+        order_status in {"Order Accepted", "Order Fulfilled"} (with
+        certificate_status "Certificate Generated"/"Certificate Downloaded"
+        respectively). Comparing certificate_status against "issued"
+        verbatim was the pre-1.1.0 bug this replaces.
+        """
         orders = sandbox_session.orders.get_list(status="issued")
         for o in orders:
-            assert o.certificate_status == "issued"
+            assert o.order_status in {"Order Accepted", "Order Fulfilled"}
 
     def test_orders_status_filter_expired(self, sandbox_session: certinext.CertiNextSession) -> None:
-        """get_list(status='expired') returns only records with certificate_status 'expired'."""
+        """get_list(status='expired') returns a list without raising.
+
+        Sandbox currently has no expired orders, so there's no live payload
+        to confirm real order_status/certificate_status display strings
+        against (see test_orders_status_filter_issued for why comparing
+        either field literally to "expired" would be wrong regardless).
+        """
         orders = sandbox_session.orders.get_list(status="expired")
-        for o in orders:
-            assert o.certificate_status == "expired"
+        assert isinstance(orders, list)
 
     def test_order_record_properties_accessible(self, sandbox_orders: list[OrderRecord]) -> None:
         """Accessing all OrderRecord properties on live data does not raise."""
