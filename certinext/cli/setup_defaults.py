@@ -48,6 +48,7 @@ from certinext.cli._shared import (
     AccountNumberOption,
     BaseUrlOption,
     ClientSecretOption,
+    LogFormatOption,
     ProfileOption,
     SandboxOption,
     TokenUrlOption,
@@ -55,6 +56,7 @@ from certinext.cli._shared import (
 )
 from certinext.cli_support import (
     CredentialsNotFoundError,
+    LogFormat,
     build_session,
     resolve_connection,
     setup_logging,
@@ -525,6 +527,7 @@ def _pick_org(
 @setup_app.command("defaults")
 def setup_defaults(
     verbose: VerboseOption = 0,
+    log_format: LogFormatOption = LogFormat.LOGFMT,
     profile: ProfileOption = None,
     sandbox: SandboxOption = False,
     base_url: BaseUrlOption = None,
@@ -533,7 +536,7 @@ def setup_defaults(
     client_secret: ClientSecretOption = None,
 ) -> None:
     """Interactively store issue-cert defaults in the config file."""
-    setup_logging(verbose)
+    setup_logging(verbose, log_format=log_format)
     # The raw flags (before resolution folds profile config in) decide what
     # persists — only values explicit on *this* run should be stored.
     cli_sandbox = bool(sandbox)

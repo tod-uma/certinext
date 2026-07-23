@@ -33,6 +33,7 @@ from certinext.cli._shared import (
     BaseUrlOption,
     ClientSecretOption,
     JsonOption,
+    LogFormatOption,
     ProfileOption,
     SandboxOption,
     TokenUrlOption,
@@ -42,7 +43,7 @@ from certinext.cli._shared import (
     err_console,
     progress_disabled,
 )
-from certinext.cli_support import setup_logging
+from certinext.cli_support import LogFormat, setup_logging
 
 log = structlog.get_logger()
 
@@ -59,6 +60,7 @@ def healthcheck(
     ),
     output_json: JsonOption = False,
     verbose: VerboseOption = 0,
+    log_format: LogFormatOption = LogFormat.LOGFMT,
     profile: ProfileOption = None,
     sandbox: SandboxOption = False,
     base_url: BaseUrlOption = None,
@@ -69,7 +71,7 @@ def healthcheck(
     """Probe every read-only CertiNext endpoint the library exposes and report
     what works for the given credentials. Read-only and safe against production.
     """
-    setup_logging(verbose)
+    setup_logging(verbose, log_format=log_format)
     sess = connect(
         profile=profile, sandbox=sandbox, base_url=base_url, token_url=token_url,
         account_number=account_number, client_secret=client_secret,

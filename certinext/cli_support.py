@@ -43,6 +43,7 @@ import os
 import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
+from enum import Enum
 from typing import Any, NoReturn
 
 import structlog
@@ -300,9 +301,32 @@ def _drop_keys_processor(keys: Sequence[str]) -> structlog.typing.Processor:
     return _drop
 
 
+class LogFormat(str, Enum):
+    """Non-interactive (cron/redirected) structlog output format.
+
+    Interactive (TTY) output always uses :class:`structlog.dev.ConsoleRenderer`
+    regardless of this setting — it only selects the machine-readable format
+    used once stderr is redirected.
+    """
+
+    LOGFMT = "logfmt"
+    """``key=value`` pairs (via :class:`structlog.processors.LogfmtRenderer`).
+
+    The default: syslog forwarders and Splunk auto-extract ``key=value`` pairs
+    out of the box (``kv_mode=auto``), even with a syslog header in front of
+    the payload. JSON does not get that treatment unless the sourcetype is
+    explicitly configured for it, because the *whole* event, header included,
+    has to be valid JSON for auto-extraction to fire.
+    """
+
+    JSON = "json"
+    """One JSON object per line, via :class:`structlog.processors.JSONRenderer`."""
+
+
 def setup_logging(
     verbose: int,
     *,
+    log_format: LogFormat = LogFormat.LOGFMT,
     extra_priority_keys: Sequence[str] = (),
     console_quiet_keys: Sequence[str] = (),
     quiet_loggers: Sequence[str] = (),
@@ -314,18 +338,20 @@ def setup_logging(
     pass through the same renderer.
 
     TTY (interactive): ConsoleRenderer with local HH:MM:SS timestamps.
-    Non-TTY (cron/redirect): JSONRenderer with full ISO UTC timestamps, consistent
-    key order (timestamp → level → logger → event → ...).
+    Non-TTY (cron/redirect): ``log_format`` (default logfmt) with full ISO UTC
+    timestamps, consistent key order (timestamp → level → logger → event → ...).
 
     Args:
         verbose: Verbosity count from -v flags (0=INFO, 3+=DEBUG, 4+=third-party DEBUG).
+        log_format: Non-interactive output format — see :class:`LogFormat`.
+            Ignored when stderr is a TTY.
         extra_priority_keys: Additional event dict keys (e.g. run-level
             ``correlation_id``/``pid`` contextvars) placed right after the built-in
-            keys in JSON output, so cron log lines keep a stable field order.
+            keys in non-interactive output, so cron log lines keep a stable field order.
         console_quiet_keys: Event dict keys suppressed from *interactive* (TTY)
             output at verbosity 0. Use for run-context fields that repeat
-            unchanged on every line; ``-v`` and above shows them, and JSON
-            (non-TTY) output always carries them.
+            unchanged on every line; ``-v`` and above shows them, and
+            non-interactive output always carries them.
         quiet_loggers: Additional stdlib logger names capped at WARNING below
             ``-vvvv``, alongside the built-in httpx/httpcore/keyring set (e.g.
             ``filelock``, ``nm.wire``).
@@ -356,7 +382,11 @@ def setup_logging(
             final_processors.append(_drop_keys_processor(console_quiet_keys))
         final_processors.append(renderer)
     else:
-        renderer = structlog.processors.JSONRenderer()
+        renderer = (
+            structlog.processors.JSONRenderer()
+            if LogFormat(log_format) is LogFormat.JSON
+            else structlog.processors.LogfmtRenderer()
+        )
         final_processors = [
             structlog.stdlib.ProcessorFormatter.remove_processors_meta,
             structlog.processors.format_exc_info,

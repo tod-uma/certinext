@@ -36,6 +36,7 @@ from certinext.cli._shared import (
     BaseUrlOption,
     ClientSecretOption,
     JsonOption,
+    LogFormatOption,
     ProfileOption,
     SandboxOption,
     ScopeOption,
@@ -46,7 +47,7 @@ from certinext.cli._shared import (
     pairs_table,
     rows_table,
 )
-from certinext.cli_support import prompt_stderr, setup_logging
+from certinext.cli_support import LogFormat, prompt_stderr, setup_logging
 from certinext.domains import Domain
 from certinext.session import CertiNextSession
 
@@ -78,6 +79,7 @@ def domains_main(
     ctx: typer.Context,
     output_json: JsonOption = False,
     verbose: VerboseOption = 0,
+    log_format: LogFormatOption = LogFormat.LOGFMT,
     profile: ProfileOption = None,
     sandbox: SandboxOption = False,
     base_url: BaseUrlOption = None,
@@ -87,7 +89,7 @@ def domains_main(
     scope: ScopeOption = "",
 ) -> None:
     """Manage CertiNext domains."""
-    setup_logging(verbose)
+    setup_logging(verbose, log_format=log_format)
     ctx.obj = _State(
         output_json=output_json,
         connect_kwargs=dict(

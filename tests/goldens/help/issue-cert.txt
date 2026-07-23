@@ -87,6 +87,12 @@
 │                                                        -vvv enables debug logging, -vvvv also    │
 │                                                        enables third-party debug logging (httpx) │
 │                                                        [default: 0]                              │
+│ --log-format                          [logfmt|json]    Non-interactive (redirected/cron) log     │
+│                                                        line format: 'logfmt' (key=value,         │
+│                                                        default) or 'json'. Ignored when attached │
+│                                                        to a terminal, which always uses          │
+│                                                        human-readable output.                    │
+│                                                        [default: logfmt]                         │
 │ --profile                             NAME             Credential profile for keyring lookup     │
 │                                                        (env: CERTINEXT_PROFILE; default: use the │
 │                                                        default profile)                          │

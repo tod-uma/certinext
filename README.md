@@ -1237,8 +1237,8 @@ without copying any of it:
 - **`certinext.cli_options`** — typer-specific: `Annotated` option aliases
   (`ProfileOption`, `SandboxOption`, `BaseUrlOption`, `TokenUrlOption`,
   `AccountNumberOption`, `ClientSecretOption`, `ScopeOption`, `JsonOption`,
-  `VerboseOption`) carrying the exact flag spellings and help text of the
-  bundled `certinext` CLI, plus `connect()` which chains
+  `VerboseOption`, `LogFormatOption`) carrying the exact flag spellings and
+  help text of the bundled `certinext` CLI, plus `connect()` which chains
   `resolve_connection()` + `build_session()`.
 
 ```python
@@ -1259,11 +1259,18 @@ def my_command(
     ...
 ```
 
-`setup_logging()` accepts optional hooks for scripts with extra run context —
-`extra_priority_keys=` (field order of e.g. `correlation_id`/`pid` in JSON
-output), `console_quiet_keys=` (fields hidden from interactive output at
-verbosity 0), and `quiet_loggers=` (additional third-party loggers capped at
-WARNING below `-vvvv`).
+Non-interactive (redirected/cron) output defaults to logfmt (`key=value`)
+lines — Splunk and other log aggregators auto-extract those with no
+per-sourcetype configuration, unlike JSON, which only gets that treatment if
+the *entire* line is valid JSON. Pass `log_format=LogFormat.JSON` (or
+`--log-format json` via `LogFormatOption`) to opt back into one JSON object
+per line.
+
+`setup_logging()` also accepts optional hooks for scripts with extra run
+context — `extra_priority_keys=` (field order of e.g. `correlation_id`/`pid`
+in non-interactive output), `console_quiet_keys=` (fields hidden from
+interactive output at verbosity 0), and `quiet_loggers=` (additional
+third-party loggers capped at WARNING below `-vvvv`).
 
 ### Working with domains
 

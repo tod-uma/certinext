@@ -26,6 +26,7 @@ from certinext.cli._shared import (
     BaseUrlOption,
     ClientSecretOption,
     JsonOption,
+    LogFormatOption,
     ProfileOption,
     SandboxOption,
     TokenUrlOption,
@@ -34,7 +35,7 @@ from certinext.cli._shared import (
     data_console,
     rows_table,
 )
-from certinext.cli_support import setup_logging
+from certinext.cli_support import LogFormat, setup_logging
 from certinext.domain_cert_count import build_rows
 
 
@@ -57,6 +58,7 @@ def domain_cert_count(
     ),
     output_json: JsonOption = False,
     verbose: VerboseOption = 0,
+    log_format: LogFormatOption = LogFormat.LOGFMT,
     profile: ProfileOption = None,
     sandbox: SandboxOption = False,
     base_url: BaseUrlOption = None,
@@ -65,7 +67,7 @@ def domain_cert_count(
     client_secret: ClientSecretOption = None,
 ) -> None:
     """Show all registered domains and their certificate counts."""
-    setup_logging(verbose)
+    setup_logging(verbose, log_format=log_format)
     sess = connect(
         profile=profile, sandbox=sandbox, base_url=base_url, token_url=token_url,
         account_number=account_number, client_secret=client_secret,
