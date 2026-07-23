@@ -27,3 +27,4 @@ a terminal state. Numbering is sequential and never reused.
 | [IDEA-006](IDEA-006-response-caching.md) | Optional response caching layer | Proposed | #12 | 2026-07-02 |
 | [IDEA-007](IDEA-007-users-roles-accessor.md) | Users/roles/permissions accessor (`UsersAccessor`) | Proposed | #22 | 2026-07-22 |
 | [IDEA-008](IDEA-008-root-level-cli-option-set.md) | Root-level (shared) CLI option set instead of per-command repetition | Proposed | #23 | 2026-07-22 |
+| [IDEA-009](IDEA-009-syslog-aware-logging.md) | Syslog/journald-aware logging mode (drop redundant timestamp/pid) | Proposed | #24 | 2026-07-23 |

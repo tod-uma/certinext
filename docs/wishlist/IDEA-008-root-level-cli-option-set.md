@@ -2,7 +2,7 @@
 
 - **Status:** Proposed (coordinating issue: #23)
 - **Created:** 2026-07-22
-- **Updated:** 2026-07-22
+- **Updated:** 2026-07-23
 
 ## Context
 
@@ -75,9 +75,14 @@ mechanical part.
 
 ## Next steps
 
-None yet — revisit the next time a new shared option needs adding, or if the
+Revisit the next time a new shared option needs adding, or if the
 per-command duplication causes a real miss (an option wired into some
 commands but not others).
+
+[IDEA-009](IDEA-009-syslog-aware-logging.md) (syslog/journald-aware logging
+mode, 2026-07-23) is the second concrete option waiting on this: it needs a
+bidirectional override flag, and doing that as another 10-file mechanical
+edit is exactly the cost this idea exists to avoid.
 
 ## References
 
