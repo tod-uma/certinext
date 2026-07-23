@@ -61,7 +61,9 @@ class OrderAccessor:
         Args:
             page: 1-based page number.
             size: Number of records per page; maximum 100.
-            status: Optional certificate status filter passed to the API.
+            status: Optional order status filter passed to the API (e.g.
+                ``"issued"``, ``"expired"`` — see :meth:`get_list` for the
+                distinction from :attr:`OrderRecord.certificate_status`).
 
         Returns:
             ``(rows, total_pages)`` — ``total_pages`` is taken from the
@@ -102,8 +104,10 @@ class OrderAccessor:
         Args:
             page: 1-based page number (default: 1).
             size: Number of records per page; maximum 100 (default: 100).
-            status: Optional certificate status filter (e.g. ``"issued"``,
-                ``"expired"``). Passed directly to the API ``status`` param.
+            status: Optional order status filter (e.g. ``"issued"``,
+                ``"expired"``). Passed directly to the API ``status`` param
+                — see :meth:`get_list` for why this does not guarantee
+                anything about the returned records' ``certificate_status``.
 
         Returns:
             List of `OrderRecord` objects for this page.
@@ -129,8 +133,21 @@ class OrderAccessor:
         rule remains only as a fallback for bare-array responses.
 
         Args:
-            status: Optional certificate status filter (e.g. ``"issued"``,
-                ``"expired"``). Passed to the API ``status`` param each page.
+            status: Optional order status filter (e.g. ``"issued"``,
+                ``"expired"``; the vendor's documented enum also includes
+                the pending-* / revoked / cancelled / rejected order
+                states). Passed to the API ``status`` param each page.
+
+                This filters on ORDER status, a field independent of the
+                returned records' :attr:`OrderRecord.certificate_status` —
+                do not assume ``status="issued"`` implies
+                ``certificate_status == "issued"`` on the results (the
+                vendor sends human display strings for certificate_status,
+                e.g. ``"Certificate Downloaded"`` once a customer downloads
+                an already-issued cert; see :attr:`OrderRecord.order_status`
+                for a more reliable programmatic check, and
+                :class:`~certinext.models.orders.CertificateStatus` for
+                more detail).
             page_size: Records per page; maximum 100 (default: 100).
 
         Returns:
@@ -162,7 +179,7 @@ class OrderAccessor:
 
         The orders report API has no server-side domain filter, so this
         fetches all pages for the given ``status`` and filters client-side.
-        Call with ``status=None`` to search across all certificate statuses.
+        Call with ``status=None`` to search across all order statuses.
 
         This method does not run automatically — callers must invoke it
         explicitly. The ``certinext-issue-cert`` CLI calls it before creating
@@ -170,8 +187,9 @@ class OrderAccessor:
 
         Args:
             domain: Primary domain name to match against order CNs.
-            status: Certificate status to filter by (default: ``"issued"``).
-                Pass ``None`` to include all statuses.
+            status: Order status to filter by (default: ``"issued"`` — see
+                :meth:`get_list` for what this does and doesn't guarantee
+                about the results). Pass ``None`` to include all statuses.
             page_size: Records per page; maximum 100 (default: 100).
 
         Returns:
