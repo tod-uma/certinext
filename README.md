@@ -962,6 +962,7 @@ csr_file                    PEM-encoded CSR file (positional; omit to read from 
 --order-id ID               Resume polling an existing order instead of creating a new one
 --save-defaults             Store the effective requestor/certificate values as config defaults
 -v, --verbose               Increase verbosity (-vvv for debug logging)
+--log-format FORMAT         Non-interactive log format: logfmt (default) or json
 ```
 
 Requestor and certificate values can also come from stored defaults — see
@@ -1054,6 +1055,7 @@ lookups and list only account-level parents.
 --json                  Output raw JSON instead of tabular format
 --no-ns-check           Skip DNS NS lookups; list account-level parents only
 -v, --verbose           Increase verbosity (-v shows progress, -vvv enables debug logging)
+--log-format FORMAT     Non-interactive log format: logfmt (default) or json
 ```
 
 #### Examples
@@ -1133,6 +1135,7 @@ instead of letting the failure surface as a confusing crash downstream. As of
 --strict                Also exit non-zero on an unexpectedly empty baseline list (EMPTY)
 --json                  Write the full results (with raw error bodies) as JSON
 -v, --verbose           Increase verbosity (-v progress, -vvv per-probe debug)
+--log-format FORMAT     Non-interactive log format: logfmt (default) or json
 ```
 
 #### Examples
