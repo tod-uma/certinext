@@ -17,7 +17,8 @@
 The ``extra_priority_keys`` / ``console_quiet_keys`` / ``quiet_loggers``
 parameters exist so downstream scripts (ums-certinext-scripts dcv-update) can
 use the shared logging setup instead of forking it. These tests pin the hook
-behavior and the backward-compatible defaults.
+behavior and the backward-compatible defaults, plus the ``log_format`` switch
+between the default logfmt non-interactive output and the opt-in JSON one.
 """
 
 import logging
@@ -28,6 +29,7 @@ import pytest
 import structlog
 
 from certinext.cli_support import (
+    LogFormat,
     _drop_keys_processor,
     _reorder_log_keys_processor,
     setup_logging,
@@ -131,7 +133,24 @@ def test_console_quiet_keys_shown_at_verbosity_one(monkeypatch: pytest.MonkeyPat
     assert "abc-123" in line
 
 
-def test_json_output_carries_quiet_keys_in_priority_order(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_logfmt_is_the_non_interactive_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Non-TTY output defaults to logfmt (key=value), not JSON.
+
+    Splunk and other log aggregators auto-extract key=value pairs with no
+    per-sourcetype configuration; JSON only gets that treatment if the whole
+    event (including any syslog header) is valid JSON, which cron/syslog
+    output never is.
+    """
+    monkeypatch.setattr(sys.stderr, "isatty", lambda: False)
+
+    setup_logging(0)
+    line = _render_foreign_record()
+    assert "level=warning" in line
+    assert 'event="hello from somelib"' in line
+    assert not line.startswith("{")
+
+
+def test_logfmt_output_carries_quiet_keys_in_priority_order(monkeypatch: pytest.MonkeyPatch) -> None:
     """Non-TTY (cron) output always carries the keys, ordered by extra_priority_keys."""
     monkeypatch.setattr(sys.stderr, "isatty", lambda: False)
     structlog.contextvars.bind_contextvars(correlation_id="abc-123", pid=99)
@@ -142,9 +161,36 @@ def test_json_output_carries_quiet_keys_in_priority_order(monkeypatch: pytest.Mo
         console_quiet_keys=["correlation_id", "pid"],
     )
     line = _render_foreign_record()
+    assert "correlation_id=abc-123" in line
+    assert line.index("correlation_id=") < line.index("pid=")
+    assert line.index("event=") < line.index("correlation_id=")
+
+
+def test_json_log_format_opts_back_into_json_output(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Explicit log_format=LogFormat.JSON restores the pre-1.1 JSON rendering."""
+    monkeypatch.setattr(sys.stderr, "isatty", lambda: False)
+    structlog.contextvars.bind_contextvars(correlation_id="abc-123", pid=99)
+
+    setup_logging(
+        0,
+        log_format=LogFormat.JSON,
+        extra_priority_keys=["correlation_id", "pid"],
+        console_quiet_keys=["correlation_id", "pid"],
+    )
+    line = _render_foreign_record()
     assert '"correlation_id": "abc-123"' in line
     assert line.index('"correlation_id"') < line.index('"pid"')
     assert line.index('"event"') < line.index('"correlation_id"')
+
+
+def test_interactive_output_ignores_log_format(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A TTY always renders human-readable console output, regardless of log_format."""
+    monkeypatch.setattr(sys.stderr, "isatty", lambda: True)
+
+    setup_logging(0, log_format=LogFormat.JSON)
+    line = _render_foreign_record()
+    assert not line.startswith("{")
+    assert "hello from somelib" in line
 
 
 def test_quiet_loggers_capped_below_vvvv() -> None:

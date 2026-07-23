@@ -46,6 +46,9 @@ from certinext.cli_options import (
     JsonOption as JsonOption,
 )
 from certinext.cli_options import (
+    LogFormatOption as LogFormatOption,
+)
+from certinext.cli_options import (
     ProfileOption as ProfileOption,
 )
 from certinext.cli_options import (

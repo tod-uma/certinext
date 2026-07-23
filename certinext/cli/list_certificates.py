@@ -25,6 +25,7 @@ from certinext.cli._shared import (
     BaseUrlOption,
     ClientSecretOption,
     JsonOption,
+    LogFormatOption,
     ProfileOption,
     SandboxOption,
     TokenUrlOption,
@@ -33,7 +34,7 @@ from certinext.cli._shared import (
     data_console,
     rows_table,
 )
-from certinext.cli_support import setup_logging
+from certinext.cli_support import LogFormat, setup_logging
 
 
 @app.command()
@@ -47,6 +48,7 @@ def list_certificates(
     ),
     output_json: JsonOption = False,
     verbose: VerboseOption = 0,
+    log_format: LogFormatOption = LogFormat.LOGFMT,
     profile: ProfileOption = None,
     sandbox: SandboxOption = False,
     base_url: BaseUrlOption = None,
@@ -55,7 +57,7 @@ def list_certificates(
     client_secret: ClientSecretOption = None,
 ) -> None:
     """List SSL/TLS certificate orders from the CertiNext orders report."""
-    setup_logging(verbose)
+    setup_logging(verbose, log_format=log_format)
     sess = connect(
         profile=profile, sandbox=sandbox, base_url=base_url, token_url=token_url,
         account_number=account_number, client_secret=client_secret,

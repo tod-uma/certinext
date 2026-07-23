@@ -57,7 +57,7 @@ __all__ = ["app", "main"]
 # anywhere (``certinext domains get maine.edu --sandbox``) too.
 _VALUE_OPTS = {
     "--profile", "--base-url", "--token-url",
-    "--account-number", "--client-id", "--client-secret", "--scope",
+    "--account-number", "--client-id", "--client-secret", "--scope", "--log-format",
 }
 _FLAG_OPTS = {"--json", "--verbose", "--sandbox"}
 

@@ -42,7 +42,7 @@ from typing import Annotated, Optional
 import typer
 
 import certinext
-from certinext.cli_support import build_session, resolve_connection
+from certinext.cli_support import LogFormat, build_session, resolve_connection
 from certinext.session import CertiNextSession
 
 # --- Shared connection options (one definition, every command) --------------
@@ -86,6 +86,14 @@ VerboseOption = Annotated[int, typer.Option(
         "Increase verbosity: -v shows progress, "
         "-vvv enables debug logging, "
         "-vvvv also enables third-party debug logging (httpx)"
+    ),
+)]
+LogFormatOption = Annotated[LogFormat, typer.Option(
+    "--log-format",
+    help=(
+        "Non-interactive (redirected/cron) log line format: 'logfmt' (key=value, "
+        "default) or 'json'. Ignored when attached to a terminal, which always "
+        "uses human-readable output."
     ),
 )]
 

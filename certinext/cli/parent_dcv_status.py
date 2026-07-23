@@ -35,6 +35,7 @@ from certinext.cli._shared import (
     BaseUrlOption,
     ClientSecretOption,
     JsonOption,
+    LogFormatOption,
     ProfileOption,
     SandboxOption,
     TokenUrlOption,
@@ -45,7 +46,7 @@ from certinext.cli._shared import (
     progress_disabled,
     rows_table,
 )
-from certinext.cli_support import setup_logging
+from certinext.cli_support import LogFormat, setup_logging
 from certinext.domains import Domain
 
 log = structlog.get_logger()
@@ -161,6 +162,7 @@ def parent_dcv_status(
         ),
     ),
     verbose: VerboseOption = 0,
+    log_format: LogFormatOption = LogFormat.LOGFMT,
     profile: ProfileOption = None,
     sandbox: SandboxOption = False,
     base_url: BaseUrlOption = None,
@@ -173,7 +175,7 @@ def parent_dcv_status(
     Includes account-level parents (no registered ancestor) and, by default,
     zone-boundary subdomains whose NS records block DCV inheritance from a parent.
     """
-    setup_logging(verbose)
+    setup_logging(verbose, log_format=log_format)
     sess = connect(
         profile=profile, sandbox=sandbox, base_url=base_url, token_url=token_url,
         account_number=account_number, client_secret=client_secret,

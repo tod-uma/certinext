@@ -53,6 +53,7 @@ from certinext.cli._shared import (
     AccountNumberOption,
     BaseUrlOption,
     ClientSecretOption,
+    LogFormatOption,
     ProfileOption,
     SandboxOption,
     TokenUrlOption,
@@ -61,7 +62,7 @@ from certinext.cli._shared import (
     err_console,
     progress_disabled,
 )
-from certinext.cli_support import fatal_api_error, prompt_stderr, setup_logging
+from certinext.cli_support import LogFormat, fatal_api_error, prompt_stderr, setup_logging
 from certinext.csr import CsrInfo
 from certinext.exceptions import CertiNextAPIError, CertiNextTimeoutError
 from certinext.session import CertiNextSession
@@ -882,6 +883,7 @@ def issue_cert(
         ),
     ),
     verbose: VerboseOption = 0,
+    log_format: LogFormatOption = LogFormat.LOGFMT,
     profile: ProfileOption = None,
     sandbox: SandboxOption = False,
     base_url: BaseUrlOption = None,
@@ -909,7 +911,7 @@ def issue_cert(
             print(f"Error: {exc}", file=sys.stderr)
             raise SystemExit(2) from exc
 
-        setup_logging(verbose)
+        setup_logging(verbose, log_format=log_format)
         for warning in cfg_warnings:
             log.warning("Ignored config entry", detail=warning)
 
