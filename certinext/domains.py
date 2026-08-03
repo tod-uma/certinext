@@ -84,38 +84,36 @@ def _extract_domain_rows(result: dict[str, Any] | list[Any]) -> list[Any]:
 
 def filter_needs_dcv(
     domains: list[Domain],
-    all_domain_names: set[str],
+    all_domains: list[Domain],
     *,
-    check_ns: bool = True,
+    check_ns: bool = False,
 ) -> list[Domain]:
     """Return domains that genuinely need direct DCV validation.
 
-    Removes any domain whose DCV would be covered by a registered ancestor
-    in *all_domain_names* via CertiNext's propagation rules.  When
-    *check_ns* is ``True`` (the default), a DNS NS lookup is performed for
-    each domain to detect zone boundaries — domains with their own NS records
-    form a separate DNS zone and cannot inherit DCV, so they are always
-    included in the result even when an ancestor exists.
+    Removes any domain whose DCV would be covered by a same-organization,
+    registered ancestor in *all_domains* via CertiNext's propagation rules.
+    See :meth:`Domain.dcv_covering_parent` for how coverage — and the
+    optional NS zone-boundary check — is determined.
 
     Typical usage::
 
-        all_names = {d.name for d in all_domains if d.name}
-        to_validate = filter_needs_dcv(pending_domains, all_names)
+        to_validate = filter_needs_dcv(pending_domains, all_domains)
 
     Args:
         domains: Domains to evaluate (typically only the pending-DCV subset).
-        all_domain_names: Full set of registered domain names in the account,
-            used to identify covering ancestors.
-        check_ns: When ``True``, query DNS for NS records to detect zone
-            boundaries. Set to ``False`` to skip DNS lookups (tests, no DNS
-            access). Default is ``True``.
+        all_domains: Full list of registered domains in the account, used to
+            identify covering ancestors.
+        check_ns: When ``True``, query DNS for NS records and treat a zone
+            boundary as blocking inheritance regardless of a same-org
+            ancestor. Default is ``False`` — see
+            :meth:`Domain.dcv_covering_parent` for why.
 
     Returns:
         Filtered list containing only domains that require direct DCV.
     """
     return [
         d for d in domains
-        if d.dcv_covering_parent(all_domain_names, check_ns=check_ns) is None
+        if d.dcv_covering_parent(all_domains, check_ns=check_ns) is None
     ]
 
 
@@ -372,23 +370,34 @@ class DomainAccessor:
         self,
         name: str,
         organization_id: str | None = None,
+        dcv_method: str | None = None,
+        mode: str | None = None,
     ) -> Domain:
-        """Create a new domain and return it as a :class:`Domain` object.
+        """Create a new domain, or renew an existing independently-verified one.
 
         Args:
-            name: The fully-qualified domain name to register (e.g. ``"example.com"``).
+            name: The fully-qualified domain name (e.g. ``"example.com"``).
             organization_id: Organization to associate this domain with. Required
                 unless your account only has a single organization.
+            dcv_method: DCV method to use (e.g. ``"dns-txt"``). Required by the API.
+            mode: ``"create"`` (the API default) adds a new domain and rejects an
+                existing same-org domain with 409. ``"renew"`` renews an existing,
+                independently-verified (ADN) domain that is expired or within its
+                renewal window — inherited domains cannot be renewed this way.
 
         Returns:
-            The newly created :class:`Domain`.
+            The created or renewed :class:`Domain`.
 
         Raises:
             CertiNextAPIError: On a non-2xx API response. Provides ``.status_code`` and ``.body``.
         """
-        body: dict[str, Any] = {"name": name}
+        body: dict[str, Any] = {"domainName": name}
         if organization_id is not None:
             body["organizationId"] = organization_id
+        if dcv_method is not None:
+            body["dcvMethod"] = dcv_method
+        if mode is not None:
+            body["mode"] = mode
         return Domain.from_payload(self._client, self._client.post(_BASE, json=body))
 
     def deactivate(self, domain_id: str) -> Domain:

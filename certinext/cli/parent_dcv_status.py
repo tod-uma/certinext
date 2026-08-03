@@ -185,8 +185,6 @@ def parent_dcv_status(
     domains = sess.domain.get_list(pattern=pattern)
     log.info("Fetched domains", count=len(domains))
 
-    all_names = {d.name for d in domains if d.name}
-
     # Find every domain that needs direct DCV: no registered ancestor, OR
     # a registered ancestor exists but NS records block DCV inheritance.
     # check_ns=True (default) catches zone-boundary subdomains; --no-ns-check
@@ -199,7 +197,7 @@ def parent_dcv_status(
 
             def _needs_direct_dcv(d: Domain) -> bool:
                 progress.advance(task)
-                return d.dcv_covering_parent(all_names, check_ns=True) is None
+                return d.dcv_covering_parent(domains, check_ns=True) is None
 
             parents = sorted(
                 (d for d in domains if _needs_direct_dcv(d)),
@@ -207,7 +205,7 @@ def parent_dcv_status(
             )
     else:
         parents = sorted(
-            (d for d in domains if d.dcv_covering_parent(all_names, check_ns=False) is None),
+            (d for d in domains if d.dcv_covering_parent(domains, check_ns=False) is None),
             key=lambda d: d.name or "",
         )
     log.info(

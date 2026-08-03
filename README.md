@@ -1377,7 +1377,19 @@ When a name is passed (contains a `.`), the library lists all domains and finds 
 #### Create a domain
 
 ```python
-domain = sess.domain.create("newdomain.example.com")
+domain = sess.domain.create("newdomain.example.com", dcv_method="dns-txt")
+```
+
+#### Renew an existing domain
+
+`mode="renew"` renews an existing, independently-verified (ADN) domain that
+is `EXPIRED` or within its renewal window. It does **not** work for domains
+that are inherited from a verified parent — the API rejects those.
+
+```python
+domain = sess.domain.create(
+    "maine.edu", organization_id="...", dcv_method="dns-txt", mode="renew"
+)
 ```
 
 <details>
@@ -1389,7 +1401,7 @@ domain = sess.domain.create("newdomain.example.com")
 |---|---|---|
 | `id` | `str \| None` | Domain ID |
 | `name` | `str \| None` | Domain name (FQDN). Settable, but only updates the local object — does not persist to the API. |
-| `status` | `str \| None` | `ACTIVE` or `INACTIVE` |
+| `status` | `str \| None` | `ACTIVE`, `INACTIVE`, or `EXPIRED` |
 | `dcv_status` | `str \| None` | `VERIFIED`, `PENDING`, `REJECTED`, `EXPIRED`, etc. |
 | `organization_id` | `str \| None` | Organization ID |
 | `organization_name` | `str \| None` | Organization display name |
@@ -1454,11 +1466,12 @@ history = domain.dcv_attempt_history() # returns raw API response dict or list
 if domain.dcv_expires_soon(days=30):
     print(f"{domain.name} needs re-validation soon")
 
-# Does a registered ancestor already cover this domain's DCV?
-# (used by `certinext parent-dcv-status`; requires certinext[dns] for the
-# NS zone-boundary check — see that command's section above)
-all_names = {d.name for d in sess.domain.get_list()}
-parent = domain.dcv_covering_parent(all_names)
+# Does a same-org registered ancestor already cover this domain's DCV?
+# (used by `certinext parent-dcv-status`; pass check_ns=True for the
+# optional NS zone-boundary check, which requires certinext[dns] — see
+# that command's section above for when it's still useful)
+all_domains = sess.domain.get_list()
+parent = domain.dcv_covering_parent(all_domains)
 
 # Get the raw API response dict, or a flat dict[str, str] for tabular display
 raw = domain.as_dict()

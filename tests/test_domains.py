@@ -21,7 +21,7 @@ from unittest.mock import MagicMock
 import pytest
 from structlog.testing import capture_logs
 
-from certinext.domains import DcvInfo, Domain, DomainAccessor
+from certinext.domains import DcvInfo, Domain, DomainAccessor, filter_needs_dcv
 from tests.conftest import (
     FAR_FUTURE_VALID_TILL,
     PAST_VALID_TILL,
@@ -224,6 +224,86 @@ class TestDomainNeedsDcv:
         """Domain with no status field has needs_dcv False (None != 'ACTIVE')."""
         d = Domain.from_payload(mock_client, {})
         assert d.needs_dcv is False
+
+
+class TestDomainDcvCoveringParent:
+    """Domain.dcv_covering_parent() finds the closest same-org registered ancestor."""
+
+    def _domain(self, client: MagicMock, name: str, org_id: str = "org-1") -> Domain:
+        return Domain.from_payload(client, {"domainName": name, "organizationId": org_id})
+
+    def test_no_ancestor_returns_none(self, mock_client: MagicMock) -> None:
+        """A domain with no registered ancestor returns None."""
+        d = self._domain(mock_client, "sub.example.com")
+        assert d.dcv_covering_parent([d]) is None
+
+    def test_direct_parent_returns_parent(self, mock_client: MagicMock) -> None:
+        """A domain whose immediate parent is registered (same org) returns that parent's name."""
+        parent = self._domain(mock_client, "example.com")
+        child = self._domain(mock_client, "sub.example.com")
+        assert child.dcv_covering_parent([parent, child]) == "example.com"
+
+    def test_returns_closest_ancestor(self, mock_client: MagicMock) -> None:
+        """When both a grandparent and parent are registered, the closer parent wins."""
+        grandparent = self._domain(mock_client, "example.com")
+        parent = self._domain(mock_client, "sub.example.com")
+        child = self._domain(mock_client, "leaf.sub.example.com")
+        assert child.dcv_covering_parent([grandparent, parent, child]) == "sub.example.com"
+
+    def test_falls_back_to_grandparent_when_parent_not_registered(self, mock_client: MagicMock) -> None:
+        """When only the grandparent is registered, it is returned."""
+        grandparent = self._domain(mock_client, "example.com")
+        child = self._domain(mock_client, "leaf.sub.example.com")
+        assert child.dcv_covering_parent([grandparent, child]) == "example.com"
+
+    def test_ancestor_in_different_org_does_not_cover(self, mock_client: MagicMock) -> None:
+        """A same-named ancestor registered under a different organization does not cover this domain."""
+        parent = self._domain(mock_client, "example.com", org_id="org-2")
+        child = self._domain(mock_client, "sub.example.com", org_id="org-1")
+        assert child.dcv_covering_parent([parent, child]) is None
+
+    def test_check_ns_true_blocks_inheritance_when_ns_records_found(
+        self, mock_client: MagicMock, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """check_ns=True treats a domain with its own NS records as not inheriting, even with a covering ancestor."""
+        monkeypatch.setattr("certinext.models.domains._has_ns_records", lambda name: True)
+        parent = self._domain(mock_client, "example.com")
+        child = self._domain(mock_client, "sub.example.com")
+        assert child.dcv_covering_parent([parent, child], check_ns=True) is None
+
+    def test_check_ns_false_is_the_default_and_ignores_ns_records(
+        self, mock_client: MagicMock, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """check_ns defaults to False, so NS records don't block a same-org covering ancestor."""
+        monkeypatch.setattr("certinext.models.domains._has_ns_records", lambda name: True)
+        parent = self._domain(mock_client, "example.com")
+        child = self._domain(mock_client, "sub.example.com")
+        assert child.dcv_covering_parent([parent, child]) == "example.com"
+        assert child.dcv_covering_parent([parent, child], check_ns=False) == "example.com"
+
+
+class TestFilterNeedsDcv:
+    """filter_needs_dcv() excludes domains covered by a same-org registered ancestor."""
+
+    def _domain(self, client: MagicMock, name: str, org_id: str = "org-1") -> Domain:
+        return Domain.from_payload(client, {"domainName": name, "organizationId": org_id})
+
+    def test_excludes_domain_with_covering_ancestor(self, mock_client: MagicMock) -> None:
+        """A pending domain covered by a registered ancestor is excluded."""
+        parent = self._domain(mock_client, "example.com")
+        child = self._domain(mock_client, "sub.example.com")
+        assert filter_needs_dcv([child], [parent, child]) == []
+
+    def test_includes_domain_without_covering_ancestor(self, mock_client: MagicMock) -> None:
+        """A pending domain with no registered ancestor is included."""
+        root = self._domain(mock_client, "example.com")
+        assert filter_needs_dcv([root], [root]) == [root]
+
+    def test_includes_domain_covered_only_in_different_org(self, mock_client: MagicMock) -> None:
+        """A pending domain whose only same-named ancestor is in a different org is included."""
+        parent = self._domain(mock_client, "example.com", org_id="org-2")
+        child = self._domain(mock_client, "sub.example.com", org_id="org-1")
+        assert filter_needs_dcv([child], [parent, child]) == [child]
 
 
 class TestDomainAPIMethods:
@@ -675,13 +755,13 @@ class TestDomainAccessorGet:
 class TestDomainAccessorCreate:
     """DomainAccessor.create() posts a new domain and returns it."""
 
-    def test_create_posts_name(self, accessor: DomainAccessor, mock_client: MagicMock) -> None:
-        """create() POSTs the name to the domains endpoint."""
+    def test_create_posts_domain_name(self, accessor: DomainAccessor, mock_client: MagicMock) -> None:
+        """create() POSTs domainName (the current API's field name) to the domains endpoint."""
         mock_client.post.return_value = dict(SAMPLE_DOMAIN_DATA)
         accessor.create("newdomain.example.edu")
         mock_client.post.assert_called_once_with(
             "/api/certinext/v2/domains",
-            json={"name": "newdomain.example.edu"},
+            json={"domainName": "newdomain.example.edu"},
         )
 
     def test_create_returns_domain(self, accessor: DomainAccessor, mock_client: MagicMock) -> None:
@@ -695,14 +775,42 @@ class TestDomainAccessorCreate:
         mock_client.post.return_value = dict(SAMPLE_DOMAIN_DATA)
         accessor.create("newdomain.example.edu", organization_id="org-123")
         _, kwargs = mock_client.post.call_args
-        assert kwargs["json"] == {"name": "newdomain.example.edu", "organizationId": "org-123"}
+        assert kwargs["json"] == {"domainName": "newdomain.example.edu", "organizationId": "org-123"}
 
     def test_create_without_organization_id_omits_field(self, accessor: DomainAccessor, mock_client: MagicMock) -> None:
         """create() omits organizationId from the body when not given."""
         mock_client.post.return_value = dict(SAMPLE_DOMAIN_DATA)
         accessor.create("newdomain.example.edu")
         _, kwargs = mock_client.post.call_args
-        assert kwargs["json"] == {"name": "newdomain.example.edu"}
+        assert kwargs["json"] == {"domainName": "newdomain.example.edu"}
+
+    def test_create_with_dcv_method(self, accessor: DomainAccessor, mock_client: MagicMock) -> None:
+        """create() includes dcvMethod in the POST body when dcv_method is given."""
+        mock_client.post.return_value = dict(SAMPLE_DOMAIN_DATA)
+        accessor.create("newdomain.example.edu", dcv_method="dns-txt")
+        _, kwargs = mock_client.post.call_args
+        assert kwargs["json"] == {"domainName": "newdomain.example.edu", "dcvMethod": "dns-txt"}
+
+    def test_create_with_mode_renew(self, accessor: DomainAccessor, mock_client: MagicMock) -> None:
+        """create() includes mode in the POST body when mode is given, for renewing an ADN domain."""
+        mock_client.post.return_value = dict(SAMPLE_DOMAIN_DATA)
+        accessor.create(
+            "maine.edu", organization_id="org-123", dcv_method="dns-txt", mode="renew"
+        )
+        _, kwargs = mock_client.post.call_args
+        assert kwargs["json"] == {
+            "domainName": "maine.edu",
+            "organizationId": "org-123",
+            "dcvMethod": "dns-txt",
+            "mode": "renew",
+        }
+
+    def test_create_without_mode_omits_field(self, accessor: DomainAccessor, mock_client: MagicMock) -> None:
+        """create() omits mode from the body when not given (API defaults to 'create')."""
+        mock_client.post.return_value = dict(SAMPLE_DOMAIN_DATA)
+        accessor.create("newdomain.example.edu")
+        _, kwargs = mock_client.post.call_args
+        assert "mode" not in kwargs["json"]
 
 
 class TestDomainAccessorDeactivate:

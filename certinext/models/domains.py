@@ -20,6 +20,7 @@ Wire shapes are validated leniently per ADR 0005; see
 :meth:`Domain.from_payload`) so its verb methods keep working.
 """
 
+from collections.abc import Iterable
 from datetime import datetime, timedelta, timezone
 from typing import Any, Literal, cast
 
@@ -84,7 +85,6 @@ def _has_ns_records(name: str) -> bool:
         return False
     except Exception:
         return False
-
 
 
 class DcvInfo(BaseModel):
@@ -373,61 +373,61 @@ class Domain(CertiNextModel):
 
     def dcv_covering_parent(
         self,
-        all_domain_names: set[str],
+        all_domains: Iterable["Domain"],
         *,
-        check_ns: bool = True,
+        check_ns: bool = False,
     ) -> str | None:
         """Return the closest registered ancestor that covers this domain's DCV, or None.
 
         CertiNext propagates DCV verification down the domain tree: once a
         parent is verified, its subdomains inherit that status automatically.
-        This method finds the closest ancestor in *all_domain_names* that
-        provides that coverage.
+        Inheritance (and prevetting) is org-scoped, so only ancestors
+        registered under the same organization as *self* are considered —
+        a same-named domain under a different organization does not cover
+        this one.
 
-        However, propagation stops at DNS zone boundaries.  A subdomain that
-        has its own NS records forms a separate DNS zone and **will not**
-        inherit DCV from its parent — it must be validated directly.  When
-        *check_ns* is ``True`` an NS DNS lookup is performed; if NS records
-        are found ``None`` is returned even when a parent exists in
-        *all_domain_names*.  Requires ``dnspython``
-        (``pip install certinext[dns]``); falls back gracefully when not
-        installed.
-
-        .. note::
-
-            Zone-boundary behaviour confirmed by members of the InCommon
-            cert-users mailing list (2026-06-01):
-
-            - **Cory Gekoski, University of Maryland** — identified the
-              pattern: subdomains with MX records pointing to their own DNS
-              servers failed to inherit DCV while those sharing the parent's
-              DNS succeeded, suggesting a zone-delegation root cause.
-            - **Blake Bourgeois, Louisiana State University** — confirmed the
-              definitive indicator: every subdomain that did not inherit DCV
-              had its own NS records (a distinct DNS subzone), regardless of
-              MX configuration.
+        Whether a subdomain with its own NS records (a DNS zone boundary)
+        still inherits depends on CertiNext's per-domain "Auto-Inheritance"
+        toggle (visible in the portal; not exposed via the API as of
+        2026-08-03) — NS delegation alone no longer reliably predicts it.
+        UMS's uad.maine.edu is NS-delegated yet has inherited DCV from
+        maine.edu since at least 2026-07-13 (confirmed via the portal:
+        "auto-verified from its parent domain"), with Auto-Inheritance
+        enabled. That contradicts the hard NS-boundary rule this method used
+        to apply by default — a rule that *was* independently confirmed by
+        two other institutions on the InCommon cert-users mailing list
+        (2026-06-01) and may still hold for accounts where Auto-Inheritance
+        is disabled or unavailable. ``check_ns`` therefore now defaults to
+        ``False``; pass ``True`` if your account enforces the hard boundary.
+        Requires ``dnspython`` (``pip install certinext[dns]``); falls back
+        gracefully when not installed.
 
         Args:
-            all_domain_names: Set of all registered domain names (typically
-                the full account list). Used to identify covering ancestors.
-            check_ns: When ``True`` (the default), query DNS for NS records
-                to detect zone boundaries. Set to ``False`` to skip DNS
-                lookups (useful in tests or environments without DNS access).
+            all_domains: All registered domains (typically the full account
+                list). Used to identify covering ancestors.
+            check_ns: When ``True``, query DNS for NS records and treat a
+                zone boundary as blocking inheritance regardless of a
+                same-org ancestor. Default is ``False``.
 
         Returns:
-            The covering ancestor domain name, or ``None`` if no ancestor is
-            registered or this domain is a DNS zone boundary.
+            The covering ancestor domain name, or ``None`` if no same-org
+            ancestor is registered, or (when ``check_ns`` is ``True``) this
+            domain is its own DNS zone.
         """
         if check_ns and _has_ns_records(self.name or ""):
             log.debug(
-                "has NS records (DNS zone boundary) - DCV will not propagate from parent",
+                "has NS records (DNS zone boundary) - treating as not inherited",
                 domain=self.name,
             )
             return None
+        same_org_names = {
+            d.name for d in all_domains
+            if d.name and d.organization_id == self.organization_id
+        }
         labels = (self.name or "").split(".")
         for i in range(1, len(labels) - 1):
             parent = ".".join(labels[i:])
-            if parent in all_domain_names:
+            if parent in same_org_names:
                 return parent
         return None
 
