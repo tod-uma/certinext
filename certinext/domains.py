@@ -372,23 +372,34 @@ class DomainAccessor:
         self,
         name: str,
         organization_id: str | None = None,
+        dcv_method: str | None = None,
+        mode: str | None = None,
     ) -> Domain:
-        """Create a new domain and return it as a :class:`Domain` object.
+        """Create a new domain, or renew an existing independently-verified one.
 
         Args:
-            name: The fully-qualified domain name to register (e.g. ``"example.com"``).
+            name: The fully-qualified domain name (e.g. ``"example.com"``).
             organization_id: Organization to associate this domain with. Required
                 unless your account only has a single organization.
+            dcv_method: DCV method to use (e.g. ``"dns-txt"``). Required by the API.
+            mode: ``"create"`` (the API default) adds a new domain and rejects an
+                existing same-org domain with 409. ``"renew"`` renews an existing,
+                independently-verified (ADN) domain that is expired or within its
+                renewal window — inherited domains cannot be renewed this way.
 
         Returns:
-            The newly created :class:`Domain`.
+            The created or renewed :class:`Domain`.
 
         Raises:
             CertiNextAPIError: On a non-2xx API response. Provides ``.status_code`` and ``.body``.
         """
-        body: dict[str, Any] = {"name": name}
+        body: dict[str, Any] = {"domainName": name}
         if organization_id is not None:
             body["organizationId"] = organization_id
+        if dcv_method is not None:
+            body["dcvMethod"] = dcv_method
+        if mode is not None:
+            body["mode"] = mode
         return Domain.from_payload(self._client, self._client.post(_BASE, json=body))
 
     def deactivate(self, domain_id: str) -> Domain:

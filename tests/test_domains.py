@@ -675,13 +675,13 @@ class TestDomainAccessorGet:
 class TestDomainAccessorCreate:
     """DomainAccessor.create() posts a new domain and returns it."""
 
-    def test_create_posts_name(self, accessor: DomainAccessor, mock_client: MagicMock) -> None:
-        """create() POSTs the name to the domains endpoint."""
+    def test_create_posts_domain_name(self, accessor: DomainAccessor, mock_client: MagicMock) -> None:
+        """create() POSTs domainName (the current API's field name) to the domains endpoint."""
         mock_client.post.return_value = dict(SAMPLE_DOMAIN_DATA)
         accessor.create("newdomain.example.edu")
         mock_client.post.assert_called_once_with(
             "/api/certinext/v2/domains",
-            json={"name": "newdomain.example.edu"},
+            json={"domainName": "newdomain.example.edu"},
         )
 
     def test_create_returns_domain(self, accessor: DomainAccessor, mock_client: MagicMock) -> None:
@@ -695,14 +695,42 @@ class TestDomainAccessorCreate:
         mock_client.post.return_value = dict(SAMPLE_DOMAIN_DATA)
         accessor.create("newdomain.example.edu", organization_id="org-123")
         _, kwargs = mock_client.post.call_args
-        assert kwargs["json"] == {"name": "newdomain.example.edu", "organizationId": "org-123"}
+        assert kwargs["json"] == {"domainName": "newdomain.example.edu", "organizationId": "org-123"}
 
     def test_create_without_organization_id_omits_field(self, accessor: DomainAccessor, mock_client: MagicMock) -> None:
         """create() omits organizationId from the body when not given."""
         mock_client.post.return_value = dict(SAMPLE_DOMAIN_DATA)
         accessor.create("newdomain.example.edu")
         _, kwargs = mock_client.post.call_args
-        assert kwargs["json"] == {"name": "newdomain.example.edu"}
+        assert kwargs["json"] == {"domainName": "newdomain.example.edu"}
+
+    def test_create_with_dcv_method(self, accessor: DomainAccessor, mock_client: MagicMock) -> None:
+        """create() includes dcvMethod in the POST body when dcv_method is given."""
+        mock_client.post.return_value = dict(SAMPLE_DOMAIN_DATA)
+        accessor.create("newdomain.example.edu", dcv_method="dns-txt")
+        _, kwargs = mock_client.post.call_args
+        assert kwargs["json"] == {"domainName": "newdomain.example.edu", "dcvMethod": "dns-txt"}
+
+    def test_create_with_mode_renew(self, accessor: DomainAccessor, mock_client: MagicMock) -> None:
+        """create() includes mode in the POST body when mode is given, for renewing an ADN domain."""
+        mock_client.post.return_value = dict(SAMPLE_DOMAIN_DATA)
+        accessor.create(
+            "maine.edu", organization_id="org-123", dcv_method="dns-txt", mode="renew"
+        )
+        _, kwargs = mock_client.post.call_args
+        assert kwargs["json"] == {
+            "domainName": "maine.edu",
+            "organizationId": "org-123",
+            "dcvMethod": "dns-txt",
+            "mode": "renew",
+        }
+
+    def test_create_without_mode_omits_field(self, accessor: DomainAccessor, mock_client: MagicMock) -> None:
+        """create() omits mode from the body when not given (API defaults to 'create')."""
+        mock_client.post.return_value = dict(SAMPLE_DOMAIN_DATA)
+        accessor.create("newdomain.example.edu")
+        _, kwargs = mock_client.post.call_args
+        assert "mode" not in kwargs["json"]
 
 
 class TestDomainAccessorDeactivate:

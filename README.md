@@ -1377,7 +1377,19 @@ When a name is passed (contains a `.`), the library lists all domains and finds 
 #### Create a domain
 
 ```python
-domain = sess.domain.create("newdomain.example.com")
+domain = sess.domain.create("newdomain.example.com", dcv_method="dns-txt")
+```
+
+#### Renew an existing domain
+
+`mode="renew"` renews an existing, independently-verified (ADN) domain that
+is `EXPIRED` or within its renewal window. It does **not** work for domains
+that are inherited from a verified parent — the API rejects those.
+
+```python
+domain = sess.domain.create(
+    "maine.edu", organization_id="...", dcv_method="dns-txt", mode="renew"
+)
 ```
 
 <details>
@@ -1389,7 +1401,7 @@ domain = sess.domain.create("newdomain.example.com")
 |---|---|---|
 | `id` | `str \| None` | Domain ID |
 | `name` | `str \| None` | Domain name (FQDN). Settable, but only updates the local object — does not persist to the API. |
-| `status` | `str \| None` | `ACTIVE` or `INACTIVE` |
+| `status` | `str \| None` | `ACTIVE`, `INACTIVE`, or `EXPIRED` |
 | `dcv_status` | `str \| None` | `VERIFIED`, `PENDING`, `REJECTED`, `EXPIRED`, etc. |
 | `organization_id` | `str \| None` | Organization ID |
 | `organization_name` | `str \| None` | Organization display name |
