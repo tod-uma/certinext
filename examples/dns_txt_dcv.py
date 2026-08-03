@@ -550,9 +550,8 @@ def main() -> None:
         )
 
         if not args.include_subdomains:
-            all_names = {d.name for d in domains if d.name}
             before = len(pending)
-            pending = filter_needs_dcv(pending, all_names)
+            pending = filter_needs_dcv(pending, domains)
             skipped = before - len(pending)
             if skipped:
                 log.info("Skipped %d subdomain(s) covered by parent domain(s)", skipped)

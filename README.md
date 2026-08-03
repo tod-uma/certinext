@@ -1466,11 +1466,12 @@ history = domain.dcv_attempt_history() # returns raw API response dict or list
 if domain.dcv_expires_soon(days=30):
     print(f"{domain.name} needs re-validation soon")
 
-# Does a registered ancestor already cover this domain's DCV?
-# (used by `certinext parent-dcv-status`; requires certinext[dns] for the
-# NS zone-boundary check — see that command's section above)
-all_names = {d.name for d in sess.domain.get_list()}
-parent = domain.dcv_covering_parent(all_names)
+# Does a same-org registered ancestor already cover this domain's DCV?
+# (used by `certinext parent-dcv-status`; pass check_ns=True for the
+# optional NS zone-boundary check, which requires certinext[dns] — see
+# that command's section above for when it's still useful)
+all_domains = sess.domain.get_list()
+parent = domain.dcv_covering_parent(all_domains)
 
 # Get the raw API response dict, or a flat dict[str, str] for tabular display
 raw = domain.as_dict()
