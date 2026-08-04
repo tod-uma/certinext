@@ -144,6 +144,7 @@ def test_logfmt_is_the_non_interactive_default(monkeypatch: pytest.MonkeyPatch) 
     output never is.
     """
     monkeypatch.setattr(sys.stderr, "isatty", lambda: False)
+    _clear_systemd_env(monkeypatch)
 
     setup_logging(0)
     line = _render_foreign_record()
@@ -155,6 +156,7 @@ def test_logfmt_is_the_non_interactive_default(monkeypatch: pytest.MonkeyPatch) 
 def test_logfmt_output_carries_quiet_keys_in_priority_order(monkeypatch: pytest.MonkeyPatch) -> None:
     """Non-TTY (cron) output always carries the keys, ordered by extra_priority_keys."""
     monkeypatch.setattr(sys.stderr, "isatty", lambda: False)
+    _clear_systemd_env(monkeypatch)
     structlog.contextvars.bind_contextvars(correlation_id="abc-123", pid=99)
 
     setup_logging(
@@ -171,6 +173,7 @@ def test_logfmt_output_carries_quiet_keys_in_priority_order(monkeypatch: pytest.
 def test_json_log_format_opts_back_into_json_output(monkeypatch: pytest.MonkeyPatch) -> None:
     """Explicit log_format=LogFormat.JSON restores the pre-1.1 JSON rendering."""
     monkeypatch.setattr(sys.stderr, "isatty", lambda: False)
+    _clear_systemd_env(monkeypatch)
     structlog.contextvars.bind_contextvars(correlation_id="abc-123", pid=99)
 
     setup_logging(
@@ -289,6 +292,7 @@ def test_debug_log_path_captures_debug_events_at_verbosity_zero(
     traceback is never lost.
     """
     monkeypatch.setattr(sys.stderr, "isatty", lambda: False)
+    _clear_systemd_env(monkeypatch)
     debug_log_path = tmp_path / "debug.jsonl"
     structlog.contextvars.bind_contextvars(correlation_id="abc-123")
 
@@ -316,6 +320,7 @@ def test_debug_log_path_unset_keeps_debug_events_out_of_every_handler(
 ) -> None:
     """Without debug_log_path, DEBUG events are dropped at verbose=0 exactly as before Phase 3."""
     monkeypatch.setattr(sys.stderr, "isatty", lambda: False)
+    _clear_systemd_env(monkeypatch)
 
     setup_logging(0)
     logger = structlog.get_logger()
