@@ -46,15 +46,15 @@ from certinext.cli import (  # noqa: F401
     setup_keyring,
 )
 from certinext.cli._app import app
-from certinext.cli._shared import ENTITY_GROUP_NAMES
 
 __all__ = ["app", "main"]
 
-# Group-level options declared by a group's shared options callback (e.g.
-# domains_main in certinext.cli.domains). Click only accepts a group's own
-# options between the group name and the next subcommand
-# (``certinext domains --sandbox get maine.edu``); users expect to type them
-# anywhere (``certinext domains get maine.edu --sandbox``) too.
+# Every shared option now lives on the single root callback (ADR 0009), not
+# on a per-group callback — so Click would otherwise only accept them before
+# the *first* subcommand token (``certinext --sandbox domains get
+# maine.edu``). Users expect to type them anywhere (``certinext domains get
+# maine.edu --sandbox``) too, so recognized tokens are hoisted to the very
+# front of argv regardless of how deep the subcommand chain is.
 _VALUE_OPTS = {
     "--profile", "--base-url", "--token-url",
     "--account-number", "--client-id", "--client-secret", "--scope", "--log-format",
@@ -74,62 +74,22 @@ def _is_count_flag(token: str) -> bool:
     return len(token) >= 2 and token[0] == "-" and set(token[1:]) == {"v"}
 
 
-def _find_group_index(args: list[str]) -> int | None:
-    """Find the position of the entity group name, skipping options and their values.
-
-    Args:
-        args: Raw CLI arguments.
-
-    Returns:
-        The index of the first token in :data:`~certinext.cli._shared.ENTITY_GROUP_NAMES`,
-        or None if the first non-option token isn't one (e.g. ``setup``,
-        whose subcommands declare their options at the leaf level instead).
-    """
-    i = 0
-    while i < len(args):
-        token = args[i]
-        if token in ENTITY_GROUP_NAMES:
-            return i
-        name = token.split("=", 1)[0]
-        if name in _VALUE_OPTS:
-            i += 1 if "=" in token else 2
-            continue
-        if token in _FLAG_OPTS or _is_count_flag(token):
-            i += 1
-            continue
-        if token.startswith("-"):
-            i += 1
-            continue
-        return None
-    return None
-
-
-def _hoist_group_options(args: list[str]) -> list[str]:
-    """Reorder argv so group-level options work anywhere on the command line.
+def _hoist_shared_options(args: list[str]) -> list[str]:
+    """Reorder argv so root-level shared options work anywhere on the command line.
 
     Args:
         args: Raw CLI arguments (``sys.argv[1:]`` or an explicit override).
 
     Returns:
-        A reordered copy of ``args`` with recognized options moved to
-        immediately follow the entity group name; unchanged if no known
-        group name is present.
+        A reordered copy of ``args`` with recognized shared options moved to
+        the front, ahead of the subcommand chain; relative order of every
+        other token is preserved.
     """
-    group_idx = _find_group_index(args)
-    if group_idx is None:
-        return args
-
     kept: list[str] = []
     hoisted: list[str] = []
-    group_pos = 0
     i = 0
     while i < len(args):
         token = args[i]
-        if i == group_idx:
-            kept.append(token)
-            group_pos = len(kept) - 1
-            i += 1
-            continue
         name = token.split("=", 1)[0]
         if name in _VALUE_OPTS:
             if "=" in token:
@@ -149,8 +109,7 @@ def _hoist_group_options(args: list[str]) -> list[str]:
         kept.append(token)
         i += 1
 
-    insert_at = group_pos + 1
-    return kept[:insert_at] + hoisted + kept[insert_at:]
+    return hoisted + kept
 
 
 def main(args: list[str] | None = None) -> int:
@@ -169,7 +128,7 @@ def main(args: list[str] | None = None) -> int:
         The exit code for the process (console-script wrappers call
         ``sys.exit(main())``).
     """
-    resolved_args = _hoist_group_options(sys.argv[1:] if args is None else args)
+    resolved_args = _hoist_shared_options(sys.argv[1:] if args is None else args)
     try:
         result = app(args=resolved_args, standalone_mode=False, prog_name="certinext")
     except Abort:

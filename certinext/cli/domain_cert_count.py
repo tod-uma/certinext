@@ -21,21 +21,7 @@ from typing import Optional
 import typer
 
 from certinext.cli._app import app
-from certinext.cli._shared import (
-    AccountNumberOption,
-    BaseUrlOption,
-    ClientSecretOption,
-    JsonOption,
-    LogFormatOption,
-    ProfileOption,
-    SandboxOption,
-    TokenUrlOption,
-    VerboseOption,
-    connect,
-    data_console,
-    rows_table,
-)
-from certinext.cli_support import LogFormat, setup_logging
+from certinext.cli._shared import data_console, rows_table, session
 from certinext.domain_cert_count import build_rows
 
 
@@ -48,6 +34,7 @@ class _CertStatus(str, Enum):
 
 @app.command()
 def domain_cert_count(
+    ctx: typer.Context,
     status: Optional[_CertStatus] = typer.Option(
         None, "--status", metavar="STATUS",
         help="Filter certificates by status: 'issued' (active) or 'expired'",
@@ -56,28 +43,15 @@ def domain_cert_count(
         False, "--condense",
         help="Show only top-level domains; subdomain counts roll up into their apex",
     ),
-    output_json: JsonOption = False,
-    verbose: VerboseOption = 0,
-    log_format: LogFormatOption = LogFormat.LOGFMT,
-    profile: ProfileOption = None,
-    sandbox: SandboxOption = False,
-    base_url: BaseUrlOption = None,
-    token_url: TokenUrlOption = None,
-    account_number: AccountNumberOption = None,
-    client_secret: ClientSecretOption = None,
 ) -> None:
     """Show all registered domains and their certificate counts."""
-    setup_logging(verbose, log_format=log_format)
-    sess = connect(
-        profile=profile, sandbox=sandbox, base_url=base_url, token_url=token_url,
-        account_number=account_number, client_secret=client_secret,
-    )
+    sess = session(ctx)
 
     domains = sess.domain.get_list()
     orders = sess.orders.get_list(status=status.value if status else None)
     rows = build_rows(domains, orders, condense=condense)
 
-    if output_json:
+    if ctx.obj.output_json:
         print(json.dumps(rows, indent=2))
         return
 

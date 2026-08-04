@@ -32,7 +32,6 @@ import typer
 
 from certinext._keyring import no_keyring_help
 from certinext.cli._app import setup_app
-from certinext.cli._shared import ProfileOption, SandboxOption
 
 
 def _service_name(profile: str | None) -> str:
@@ -66,16 +65,15 @@ def _prompt_with_default(prompt: str, default: str | None, secret: bool = False)
 
 
 @setup_app.command("keyring")
-def setup_keyring(
-    profile: ProfileOption = None,
-    sandbox: SandboxOption = False,
-) -> None:
+def setup_keyring(ctx: typer.Context) -> None:
     """Interactively store CertiNext credentials in the OS keychain.
 
     Run once before using scripts or tools that connect to the CertiNext API.
     Switch profiles by setting CERTINEXT_PROFILE (or passing --profile) when
     running the consuming command.
     """
+    profile = ctx.obj.profile
+    sandbox = ctx.obj.sandbox
     try:
         import keyring
         from keyring.errors import NoKeyringError

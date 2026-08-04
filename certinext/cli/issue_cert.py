@@ -49,20 +49,8 @@ from rich.progress import Progress
 from certinext._config import ConfigError, config_defaults, save_defaults
 from certinext._keyring import keyring_get, keyring_service
 from certinext.cli._app import app
-from certinext.cli._shared import (
-    AccountNumberOption,
-    BaseUrlOption,
-    ClientSecretOption,
-    LogFormatOption,
-    ProfileOption,
-    SandboxOption,
-    TokenUrlOption,
-    VerboseOption,
-    connect,
-    err_console,
-    progress_disabled,
-)
-from certinext.cli_support import LogFormat, fatal_api_error, prompt_stderr, setup_logging
+from certinext.cli._shared import err_console, progress_disabled, session
+from certinext.cli_support import fatal_api_error, prompt_stderr
 from certinext.csr import CsrInfo
 from certinext.exceptions import CertiNextAPIError, CertiNextTimeoutError
 from certinext.session import CertiNextSession
@@ -882,19 +870,13 @@ def issue_cert(
             "prompts before creating a new one. Set this flag in automated pipelines."
         ),
     ),
-    verbose: VerboseOption = 0,
-    log_format: LogFormatOption = LogFormat.LOGFMT,
-    profile: ProfileOption = None,
-    sandbox: SandboxOption = False,
-    base_url: BaseUrlOption = None,
-    token_url: TokenUrlOption = None,
-    account_number: AccountNumberOption = None,
-    client_secret: ClientSecretOption = None,
 ) -> None:
     """Submit a CSR to CertiNext and download the issued certificate.
 
     Domain and SANs are extracted from the CSR automatically.
     """
+    opts = ctx.obj
+    profile, sandbox = opts.profile, opts.sandbox
     # `order` is declared here so the except-SystemExit handler can reference
     # it even if the error occurs partway through order creation.
     order: SslOrder | None = None
@@ -911,7 +893,6 @@ def issue_cert(
             print(f"Error: {exc}", file=sys.stderr)
             raise SystemExit(2) from exc
 
-        setup_logging(verbose, log_format=log_format)
         for warning in cfg_warnings:
             log.warning("Ignored config entry", detail=warning)
 
@@ -948,10 +929,7 @@ def issue_cert(
         if save_defaults_flag:
             _maybe_save_defaults(values, conn_profile)
 
-        sess = connect(
-            profile=profile, sandbox=sandbox, base_url=base_url, token_url=token_url,
-            account_number=account_number, client_secret=client_secret,
-        )
+        sess = session(ctx)
 
         # Resolve the prevetting token: flag, then keyring, then environment.
         resolved_token = prevetting_token
@@ -1083,7 +1061,7 @@ def issue_cert(
         # polls until issued, and downloads the PEM with automatic 422 retry.
         # It raises CertiNextTimeoutError if wait seconds elapse without issuance.
         try:
-            with Progress(console=err_console, disable=progress_disabled(verbose)) as progress:
+            with Progress(console=err_console, disable=progress_disabled(opts.verbose)) as progress:
                 poll_task = progress.add_task("Waiting for issuance", total=wait)
                 pem = wf.run(csr=csr, wait=wait)
         except CertiNextTimeoutError as exc:

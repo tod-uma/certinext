@@ -169,10 +169,11 @@ def run_json(
 ) -> Callable[[str, list[str]], str]:
     """Run a subcommand against the canned API and return its stdout.
 
-    The returned callable patches ``connect`` in the named command module to
-    hand back a real :class:`CertiNextSession` whose HTTP ``get`` is the
-    canned router, invokes :func:`certinext.cli.main`, asserts exit code 0,
-    and returns captured stdout.
+    The returned callable patches ``session`` (ADR 0009's shared session
+    helper) in the named command module to hand back a real
+    :class:`CertiNextSession` whose HTTP ``get`` is the canned router,
+    invokes :func:`certinext.cli.main`, asserts exit code 0, and returns
+    captured stdout.
 
     Returns:
         A ``run(module, argv) -> stdout`` callable.
@@ -182,7 +183,7 @@ def run_json(
         """Invoke ``certinext {argv}`` with the fake API behind ``module``.
 
         Args:
-            module: Module name under ``certinext.cli`` whose ``connect`` to patch.
+            module: Module name under ``certinext.cli`` whose ``session`` to patch.
             argv: Full CLI argument list.
 
         Returns:
@@ -190,7 +191,7 @@ def run_json(
         """
         sess = CertiNextSession(client_id="test", client_secret="secret")
         monkeypatch.setattr(sess._client, "get", _FakeApi(_ROUTES).get)
-        monkeypatch.setattr(f"certinext.cli.{module}.connect", lambda **kwargs: sess)
+        monkeypatch.setattr(f"certinext.cli.{module}.session", lambda ctx, **kwargs: sess)
         assert cli_main(argv) == 0
         return capsys.readouterr().out
 
@@ -295,7 +296,7 @@ def test_healthcheck_json(
         ),
     ]
     sess = CertiNextSession(client_id="test", client_secret="secret")
-    monkeypatch.setattr("certinext.cli.healthcheck.connect", lambda **kwargs: sess)
+    monkeypatch.setattr("certinext.cli.healthcheck.session", lambda ctx, **kwargs: sess)
     monkeypatch.setattr(hc, "run", lambda _sess, quick=False, on_result=None: results)
     with pytest.raises(SystemExit) as excinfo:
         cli_main(["healthcheck", "--json"])

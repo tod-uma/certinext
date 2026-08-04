@@ -18,8 +18,12 @@ The typer option aliases and :func:`connect` live in the public
 :mod:`certinext.cli_options` module (so downstream scripts share the exact
 flag spellings, per ADR 0004); this module re-exports them for the bundled
 CLI's internal use and adds the rendering plumbing that stays private.
-Command bodies stay thin: declare the shared options, call :func:`connect`,
-render.
+
+Per ADR 0009, the shared options themselves are declared once on the root
+``app`` callback (:mod:`certinext.cli._app`), which resolves them into a
+:class:`GlobalOptions` on ``ctx.obj``. Command bodies stay thin: accept
+``ctx: typer.Context``, call :func:`session` for an authenticated session
+(or read ``ctx.obj`` fields directly, e.g. ``ctx.obj.output_json``), render.
 
 Stream discipline (unchanged from 0.3.x, and load-bearing): stdout carries
 data — tables, JSON, PEM; stderr carries everything else — logs, progress,
@@ -28,8 +32,10 @@ JSON/PEM; diagnostics go through structlog or :data:`err_console`.
 """
 
 import sys
+from dataclasses import dataclass
 from typing import Any
 
+import typer
 from rich.console import Console
 from rich.table import Table
 
@@ -66,6 +72,8 @@ from certinext.cli_options import (
 from certinext.cli_options import (
     connect as connect,
 )
+from certinext.cli_support import LogFormat
+from certinext.session import CertiNextSession
 
 # When stdout is piped, rich caps the console at 80 columns and would wrap or
 # crop wide data tables. Data output must never be width-mangled, so piped
@@ -76,6 +84,64 @@ _PIPE_WIDTH = 4000
 # Diagnostics/progress console (stderr). Rich drops styling automatically
 # when stderr is not a TTY.
 err_console = Console(stderr=True)
+
+
+@dataclass
+class GlobalOptions:
+    """Shared CLI options, resolved once by the root callback (ADR 0009).
+
+    Every command reads these from ``ctx.obj`` instead of redeclaring the
+    same ``Annotated`` parameters; commands needing a session call
+    :func:`session` rather than :func:`connect` directly.
+
+    Attributes:
+        profile: ``--profile`` value, or None.
+        sandbox: ``--sandbox`` flag.
+        base_url: ``--base-url`` value, or None.
+        token_url: ``--token-url`` value, or None.
+        account_number: ``--account-number`` value, or None.
+        client_secret: ``--client-secret`` value, or None.
+        scope: ``--scope`` value.
+        output_json: ``--json`` flag.
+        verbose: ``-v`` count.
+        log_format: ``--log-format`` value.
+    """
+
+    profile: str | None
+    sandbox: bool
+    base_url: str | None
+    token_url: str | None
+    account_number: str | None
+    client_secret: str | None
+    scope: str
+    output_json: bool
+    verbose: int
+    log_format: LogFormat
+
+
+def session(ctx: typer.Context, *, prompt: bool = True) -> CertiNextSession:
+    """Build an authenticated session from the root callback's stashed options.
+
+    Session-building stays lazy — call this from inside a command body, not
+    a group callback — so a usage error in the command line never triggers a
+    credential prompt.
+
+    Args:
+        ctx: The typer context; ``ctx.obj`` holds a :class:`GlobalOptions`
+            (set by the root callback in :mod:`certinext.cli._app`).
+        prompt: Forwarded to :func:`connect`; False raises
+            :exc:`~certinext.cli_support.CredentialsNotFoundError` instead of
+            prompting when credentials are missing.
+
+    Returns:
+        An authenticated :class:`~certinext.session.CertiNextSession`.
+    """
+    opts: GlobalOptions = ctx.obj
+    return connect(
+        profile=opts.profile, sandbox=opts.sandbox, base_url=opts.base_url,
+        token_url=opts.token_url, account_number=opts.account_number,
+        client_secret=opts.client_secret, scope=opts.scope, prompt=prompt,
+    )
 
 
 def progress_disabled(verbose: int) -> bool:
@@ -148,13 +214,3 @@ def pairs_table(data: dict[str, Any]) -> Table:
     for key, value in data.items():
         table.add_row(str(key), "" if value is None else str(value))
     return table
-
-
-# Names of command groups (like "domains") whose connection/output options
-# sit on a group-level callback rather than each leaf command. certinext.cli
-# main() consults this to know which subcommand tokens accept those options
-# anywhere on the command line, not just immediately after the group name.
-# Every module that gives its typer group a shared options callback (instead
-# of declaring the options on each leaf command directly) should add its
-# name here right after registering the group on ``app``.
-ENTITY_GROUP_NAMES: set[str] = set()

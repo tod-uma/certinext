@@ -12,12 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tests for the ``domains --profile``/``--sandbox``/``--json``/``-v`` hoisting.
+"""Tests for the ``--profile``/``--sandbox``/``--json``/``-v`` argv hoisting.
 
-These options sit on ``domains_app``'s group callback, so Click only accepts
-them between ``domains`` and the leaf subcommand by default. ``certinext.cli
-main()`` rewrites argv before Click sees it so the options work anywhere;
-see :func:`certinext.cli._hoist_group_options`.
+Per ADR 0009, these options live on the root ``app`` callback, so Click only
+accepts them before the first subcommand token by default. ``certinext.cli
+main()`` rewrites argv before Click sees it so the options work anywhere; see
+:func:`certinext.cli._hoist_shared_options`.
 """
 
 import pytest
@@ -49,56 +49,58 @@ class _FakeSession:
 @pytest.mark.parametrize(("args", "expected"), [
     pytest.param(
         ["domains", "get", "maine.edu", "--sandbox"],
-        ["domains", "--sandbox", "get", "maine.edu"],
+        ["--sandbox", "domains", "get", "maine.edu"],
         id="sandbox-after-leaf-subcommand",
     ),
     pytest.param(
-        ["domains", "--sandbox", "get", "maine.edu"],
-        ["domains", "--sandbox", "get", "maine.edu"],
-        id="already-in-group-position-unchanged",
+        ["--sandbox", "domains", "get", "maine.edu"],
+        ["--sandbox", "domains", "get", "maine.edu"],
+        id="already-hoisted-unchanged",
     ),
     pytest.param(
         ["domains", "list", "--offset", "5", "--json", "-vvv"],
-        ["domains", "--json", "-vvv", "list", "--offset", "5"],
+        ["--json", "-vvv", "domains", "list", "--offset", "5"],
         id="json-and-combined-verbosity-hoisted",
     ),
     pytest.param(
         ["domains", "list", "--profile=dev"],
-        ["domains", "--profile=dev", "list"],
+        ["--profile=dev", "domains", "list"],
         id="equals-form-hoisted",
     ),
     pytest.param(
         ["domains", "deactivate", "id123", "--yes", "--sandbox"],
-        ["domains", "--sandbox", "deactivate", "id123", "--yes"],
+        ["--sandbox", "domains", "deactivate", "id123", "--yes"],
         id="leaf-only-yes-flag-left-in-place",
     ),
     pytest.param(
         ["setup", "keyring", "--profile", "x"],
-        ["setup", "keyring", "--profile", "x"],
-        id="setup-group-left-untouched",
+        ["--profile", "x", "setup", "keyring"],
+        id="nested-group-hoisted-past-both-levels",
     ),
     pytest.param(
-        ["bogus", "get", "x", "--profile", "y"], ["bogus", "get", "x", "--profile", "y"],
-        id="unknown-group-left-untouched",
+        ["accounts", "--json"],
+        ["--json", "accounts"],
+        id="leaf-command-option-hoisted",
     ),
-    pytest.param(["--help"], ["--help"], id="no-group-name-left-untouched"),
+    pytest.param(["--help"], ["--help"], id="help-flag-left-in-place"),
+    pytest.param([], [], id="empty-args-left-in-place"),
 ])
-def test_hoist_group_options(args: list[str], expected: list[str]) -> None:
-    """Group-level options are moved to sit right after the entity group name."""
-    assert certinext.cli._hoist_group_options(list(args)) == expected
+def test_hoist_shared_options(args: list[str], expected: list[str]) -> None:
+    """Shared root-level options are moved to the very front of argv."""
+    assert certinext.cli._hoist_shared_options(list(args)) == expected
 
 
-def test_sandbox_after_subcommand_reaches_connect(
+def test_sandbox_after_subcommand_reaches_session(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """--sandbox typed after 'get' still resolves to connect()'s sandbox kwarg."""
+    """--sandbox typed after 'get' still resolves to the root GlobalOptions."""
     seen: dict[str, object] = {}
 
-    def fake_connect(**kwargs: object) -> _FakeSession:
-        seen.update(kwargs)
+    def fake_session(ctx: object, **_kwargs: object) -> _FakeSession:
+        seen["sandbox"] = ctx.obj.sandbox  # type: ignore[attr-defined]
         return _FakeSession()
 
-    monkeypatch.setattr(certinext.cli.domains, "connect", fake_connect)
+    monkeypatch.setattr(certinext.cli.domains, "session", fake_session)
     code = cli_main(["domains", "get", "maine.edu", "--sandbox"])
     assert code == 0
     assert seen["sandbox"] is True
