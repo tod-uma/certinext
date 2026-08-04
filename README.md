@@ -964,6 +964,7 @@ csr_file                    PEM-encoded CSR file (positional; omit to read from 
 -v, --verbose               Increase verbosity (-vvv for debug logging)
 --log-format FORMAT         Non-interactive log format: logfmt (default) or json
 --log-mode MODE             Non-interactive field verbosity: auto (default), syslog, verbose
+--debug-log-path PATH       Append a JSON-lines DEBUG log (with tracebacks) to PATH (env: CERTINEXT_DEBUG_LOG)
 ```
 
 Requestor and certificate values can also come from stored defaults — see
@@ -1058,6 +1059,7 @@ lookups and list only account-level parents.
 -v, --verbose           Increase verbosity (-v shows progress, -vvv enables debug logging)
 --log-format FORMAT     Non-interactive log format: logfmt (default) or json
 --log-mode MODE         Non-interactive field verbosity: auto (default), syslog, verbose
+--debug-log-path PATH   Append a JSON-lines DEBUG log (with tracebacks) to PATH (env: CERTINEXT_DEBUG_LOG)
 ```
 
 #### Examples
@@ -1139,6 +1141,7 @@ instead of letting the failure surface as a confusing crash downstream. As of
 -v, --verbose           Increase verbosity (-v progress, -vvv per-probe debug)
 --log-format FORMAT     Non-interactive log format: logfmt (default) or json
 --log-mode MODE         Non-interactive field verbosity: auto (default), syslog, verbose
+--debug-log-path PATH   Append a JSON-lines DEBUG log (with tracebacks) to PATH (env: CERTINEXT_DEBUG_LOG)
 ```
 
 #### Examples
@@ -1189,13 +1192,19 @@ fields as redundant with journald/syslog's own stamping:
 | `syslog` | Always drop the fields, even with no systemd signal — for cron output piped through `logger(1)` |
 | `verbose` | Always keep the fields, even under systemd — for interactively debugging a unit's output |
 
-**Cron example** — capture logfmt output to a file:
+**`--debug-log-path PATH`** (env: `CERTINEXT_DEBUG_LOG`) appends a JSON-lines
+DEBUG-level log to `PATH`, independent of `-v` — every event, including full
+tracebacks, so an unattended run's failure is never lost even at the default
+verbosity. Off unless a path is given; rotate it with logrotate, not this
+tool. `-v` still controls only what appears on stderr/the journal.
+
+**Cron example** — capture logfmt output and a debug sidecar to files:
 
 ```bash
-certinext parent-dcv-status --sandbox 2>> /var/log/certinext.log
+certinext parent-dcv-status --sandbox --debug-log-path /var/log/certinext/debug.log 2>> /var/log/certinext.log
 ```
 
-Each line is a self-contained JSON object with `--log-format json`:
+Each line of the JSON debug log (or the stderr stream with `--log-format json`) is a self-contained JSON object:
 
 ```json
 {"timestamp": "2026-06-03T14:00:01.234Z", "level": "info", "event": "Connecting", "account": "5912517854", "profile": "default", "url": "https://us-api.certinext.io"}
@@ -1252,9 +1261,9 @@ without copying any of it:
 - **`certinext.cli_options`** — typer-specific: `Annotated` option aliases
   (`ProfileOption`, `SandboxOption`, `BaseUrlOption`, `TokenUrlOption`,
   `AccountNumberOption`, `ClientSecretOption`, `ScopeOption`, `JsonOption`,
-  `VerboseOption`, `LogFormatOption`, `LogModeOption`) carrying the exact flag
-  spellings and help text of the bundled `certinext` CLI, plus `connect()`
-  which chains `resolve_connection()` + `build_session()`.
+  `VerboseOption`, `LogFormatOption`, `LogModeOption`, `DebugLogPathOption`)
+  carrying the exact flag spellings and help text of the bundled `certinext`
+  CLI, plus `connect()` which chains `resolve_connection()` + `build_session()`.
 
 ```python
 import typer
@@ -1287,7 +1296,8 @@ in non-interactive output), `console_quiet_keys=` (fields hidden from
 interactive output at verbosity 0), and `quiet_loggers=` (additional
 third-party loggers capped at WARNING below `-vvvv`); plus `log_mode=`
 (`LogMode`, drop redundant `timestamp`/`pid` under systemd — see
-[Log output](#log-output)).
+[Log output](#log-output)) and `debug_log_path=` (always-on JSON DEBUG
+sidecar file, independent of verbosity).
 
 ### Working with domains
 

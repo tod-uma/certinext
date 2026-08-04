@@ -91,7 +91,7 @@ implements the slice of them that lives in its repo.
 |-------|---------|--------|------------|------------|----------|
 | 1 | Shared root-level CLI options | done (ADR 0009) | — | IDEA-008 | `certinext` |
 | 2 | Syslog/journald-aware output (`--log-mode`) | done (ADR 0010, `certinext` side only) | 1 | IDEA-009 | `certinext` lib + `nm` copy |
-| 3 | Debug-log file (`--debug-log-path`, JSON) | planned | 1 | (new) | `certinext` lib + `nm` copy |
+| 3 | Debug-log file (`--debug-log-path`, JSON) | done (ADR 0011, `certinext` side only) | 1 | (new) | `certinext` lib + `nm` copy |
 | 4 | Wire options into each CLI | planned | 2, 3 | IDEA-008/009 | `certinext-zabbix`, `ums-certinext-scripts`, `nm` |
 | 5 | Ansible: log dir + logrotate | planned | 4 | D1, D2 | Ansible role |
 

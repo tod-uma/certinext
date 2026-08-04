@@ -24,6 +24,7 @@ between the default logfmt non-interactive output and the opt-in JSON one.
 import logging
 import sys
 from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
 import structlog
@@ -274,3 +275,51 @@ def test_log_mode_ignored_on_interactive_output(monkeypatch: pytest.MonkeyPatch)
     setup_logging(0, log_mode=LogMode.SYSLOG)
     line = _render_foreign_record()
     assert "hello from somelib" in line
+
+
+def test_debug_log_path_captures_debug_events_at_verbosity_zero(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """debug_log_path receives DEBUG events (with traceback + correlation_id) even at verbose=0.
+
+    This is the crux of Phase 3: the filtering bound logger normally drops
+    DEBUG-level calls before any handler sees them when verbose < 3. Setting
+    debug_log_path must open that gate for the file handler while the stderr
+    handler stays capped at INFO, so the journal stays clean but the
+    traceback is never lost.
+    """
+    monkeypatch.setattr(sys.stderr, "isatty", lambda: False)
+    debug_log_path = tmp_path / "debug.jsonl"
+    structlog.contextvars.bind_contextvars(correlation_id="abc-123")
+
+    setup_logging(0, debug_log_path=debug_log_path)
+
+    logger = structlog.get_logger()
+    try:
+        raise ValueError("boom")
+    except ValueError:
+        logger.debug("caught", exc_info=True)
+
+    content = debug_log_path.read_text()
+    assert '"event": "caught"' in content
+    assert '"correlation_id": "abc-123"' in content
+    assert "ValueError: boom" in content
+    assert content.count("\n") == 1  # one JSON object per line, no multi-line traceback
+
+    captured = capsys.readouterr()
+    assert "caught" not in captured.err
+    assert "ValueError" not in captured.err
+
+
+def test_debug_log_path_unset_keeps_debug_events_out_of_every_handler(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Without debug_log_path, DEBUG events are dropped at verbose=0 exactly as before Phase 3."""
+    monkeypatch.setattr(sys.stderr, "isatty", lambda: False)
+
+    setup_logging(0)
+    logger = structlog.get_logger()
+    logger.debug("should not appear")
+
+    captured = capsys.readouterr()
+    assert "should not appear" not in captured.err

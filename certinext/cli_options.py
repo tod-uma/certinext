@@ -37,6 +37,7 @@ The bundled CLI's rendering helpers (rich consoles and tables) are internal
 and deliberately not exported here.
 """
 
+from pathlib import Path
 from typing import Annotated, Optional
 
 import typer
@@ -103,6 +104,14 @@ LogModeOption = Annotated[LogMode, typer.Option(
         "timestamp/pid fields when systemd is detected, 'syslog' always drops "
         "them (e.g. cron piped to logger(1)), 'verbose' always keeps them. "
         "Ignored when attached to a terminal."
+    ),
+)]
+DebugLogPathOption = Annotated[Optional[Path], typer.Option(
+    "--debug-log-path", metavar="PATH", envvar="CERTINEXT_DEBUG_LOG",
+    help=(
+        "Append a JSON-lines DEBUG-level log (with full tracebacks) to this path, "
+        "independent of --verbose (env: CERTINEXT_DEBUG_LOG; default: off). "
+        "Rotation is the deployer's responsibility (e.g. logrotate)."
     ),
 )]
 

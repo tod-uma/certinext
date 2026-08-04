@@ -44,6 +44,7 @@ import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import Enum
+from pathlib import Path
 from typing import Any, NoReturn
 
 import structlog
@@ -376,6 +377,7 @@ def setup_logging(
     *,
     log_format: LogFormat = LogFormat.LOGFMT,
     log_mode: LogMode = LogMode.AUTO,
+    debug_log_path: Path | None = None,
     extra_priority_keys: Sequence[str] = (),
     console_quiet_keys: Sequence[str] = (),
     quiet_loggers: Sequence[str] = (),
@@ -397,6 +399,12 @@ def setup_logging(
         log_mode: Whether to drop the ``timestamp``/``pid`` fields from
             non-interactive output as redundant with journald/syslog's own
             stamping — see :class:`LogMode`. Ignored when stderr is a TTY.
+        debug_log_path: When set, append a JSON-lines DEBUG-level log to this
+            path independent of ``verbose`` — every event, including full
+            tracebacks, regardless of the visible verbosity level. No
+            default (there is no library-level log directory); rotation is
+            logrotate's job, not this function's. Callers should pass their
+            own env-var-resolved path (e.g. ``CERTINEXT_ZABBIX_DEBUG_LOG``).
         extra_priority_keys: Additional event dict keys (e.g. run-level
             ``correlation_id``/``pid`` contextvars) placed right after the built-in
             keys in non-interactive output, so cron log lines keep a stable field order.
@@ -448,9 +456,17 @@ def setup_logging(
         final_processors.append(_reorder_log_keys_processor(extra_priority_keys))
         final_processors.append(renderer)
 
+    # A DEBUG-level debug-log file must receive every event regardless of
+    # `verbose`, but structlog's filtering bound logger drops below-level
+    # calls before any handler sees them — so the wrapper (and the root
+    # logger passed to basicConfig) must open up to DEBUG whenever
+    # debug_log_path is set. The stderr handler stays capped at `level`
+    # via its own handler-level filter, so visible output is unaffected.
+    wrapper_level = logging.DEBUG if debug_log_path is not None else level
+
     structlog.configure(
         processors=pre_chain + [structlog.stdlib.ProcessorFormatter.wrap_for_formatter],
-        wrapper_class=structlog.make_filtering_bound_logger(level),
+        wrapper_class=structlog.make_filtering_bound_logger(wrapper_level),
         context_class=dict,
         logger_factory=structlog.stdlib.LoggerFactory(),
         cache_logger_on_first_use=True,
@@ -462,7 +478,25 @@ def setup_logging(
     )
     handler = logging.StreamHandler(sys.stderr)
     handler.setFormatter(formatter)
-    logging.basicConfig(handlers=[handler], level=level, force=True)
+    handler.setLevel(level)
+    handlers: list[logging.Handler] = [handler]
+
+    if debug_log_path is not None:
+        debug_formatter = structlog.stdlib.ProcessorFormatter(
+            foreign_pre_chain=foreign_pre_chain,
+            processors=[
+                structlog.stdlib.ProcessorFormatter.remove_processors_meta,
+                structlog.processors.format_exc_info,
+                _reorder_log_keys_processor(extra_priority_keys),
+                structlog.processors.JSONRenderer(),
+            ],
+        )
+        debug_handler = logging.FileHandler(debug_log_path)
+        debug_handler.setFormatter(debug_formatter)
+        debug_handler.setLevel(logging.DEBUG)
+        handlers.append(debug_handler)
+
+    logging.basicConfig(handlers=handlers, level=wrapper_level, force=True)
 
     if verbose < 4:
         # httpx logs one INFO line per request; keep it quiet unless -vvvv

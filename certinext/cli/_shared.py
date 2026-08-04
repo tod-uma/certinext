@@ -33,6 +33,7 @@ JSON/PEM; diagnostics go through structlog or :data:`err_console`.
 
 import sys
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import typer
@@ -47,6 +48,9 @@ from certinext.cli_options import (
 )
 from certinext.cli_options import (
     ClientSecretOption as ClientSecretOption,
+)
+from certinext.cli_options import (
+    DebugLogPathOption as DebugLogPathOption,
 )
 from certinext.cli_options import (
     JsonOption as JsonOption,
@@ -109,6 +113,7 @@ class GlobalOptions:
         verbose: ``-v`` count.
         log_format: ``--log-format`` value.
         log_mode: ``--log-mode`` value.
+        debug_log_path: ``--debug-log-path`` value, or None.
     """
 
     profile: str | None
@@ -122,6 +127,7 @@ class GlobalOptions:
     verbose: int
     log_format: LogFormat
     log_mode: LogMode
+    debug_log_path: Path | None
 
 
 def session(ctx: typer.Context, *, prompt: bool = True) -> CertiNextSession:

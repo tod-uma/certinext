@@ -87,6 +87,11 @@ class _FakeSession:
         ["--log-mode", "syslog", "domains", "list"],
         id="log-mode-hoisted",
     ),
+    pytest.param(
+        ["domains", "list", "--debug-log-path", "/tmp/d.log"],
+        ["--debug-log-path", "/tmp/d.log", "domains", "list"],
+        id="debug-log-path-hoisted",
+    ),
     pytest.param(["--help"], ["--help"], id="help-flag-left-in-place"),
     pytest.param([], [], id="empty-args-left-in-place"),
 ])

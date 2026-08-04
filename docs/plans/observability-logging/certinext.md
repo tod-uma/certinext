@@ -1,7 +1,7 @@
 ---
-status: in-progress
+status: done
 depends-on: []
-implements-adr: [0009, 0010]
+implements-adr: [0009, 0010, 0011]
 ---
 
 # `certinext` sub-plan — shared options, syslog-aware output, debug-log file

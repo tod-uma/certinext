@@ -35,6 +35,7 @@ from certinext.cli._shared import (
     AccountNumberOption,
     BaseUrlOption,
     ClientSecretOption,
+    DebugLogPathOption,
     GlobalOptions,
     JsonOption,
     LogFormatOption,
@@ -97,11 +98,12 @@ def _main(
     verbose: VerboseOption = 0,
     log_format: LogFormatOption = LogFormat.LOGFMT,
     log_mode: LogModeOption = LogMode.AUTO,
+    debug_log_path: DebugLogPathOption = None,
 ) -> None:
-    setup_logging(verbose, log_format=log_format, log_mode=log_mode)
+    setup_logging(verbose, log_format=log_format, log_mode=log_mode, debug_log_path=debug_log_path)
     ctx.obj = GlobalOptions(
         profile=profile, sandbox=sandbox, base_url=base_url, token_url=token_url,
         account_number=account_number, client_secret=client_secret, scope=scope,
         output_json=output_json, verbose=verbose, log_format=log_format,
-        log_mode=log_mode,
+        log_mode=log_mode, debug_log_path=debug_log_path,
     )
