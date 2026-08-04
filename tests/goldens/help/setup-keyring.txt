@@ -8,10 +8,6 @@
  running the consuming command.                                                                     
                                                                                                     
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --profile        NAME  Credential profile for keyring lookup (env: CERTINEXT_PROFILE; default:   │
-│                        use the default profile)                                                  │
-│ --sandbox              Connect to the CertiNext sandbox API; implies --profile sandbox unless    │
-│                        --profile is set                                                          │
-│ --help                 Show this message and exit.                                               │
+│ --help          Show this message and exit.                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 

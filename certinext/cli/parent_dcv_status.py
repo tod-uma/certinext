@@ -30,23 +30,7 @@ import typer
 from rich.progress import Progress
 
 from certinext.cli._app import app
-from certinext.cli._shared import (
-    AccountNumberOption,
-    BaseUrlOption,
-    ClientSecretOption,
-    JsonOption,
-    LogFormatOption,
-    ProfileOption,
-    SandboxOption,
-    TokenUrlOption,
-    VerboseOption,
-    connect,
-    data_console,
-    err_console,
-    progress_disabled,
-    rows_table,
-)
-from certinext.cli_support import LogFormat, setup_logging
+from certinext.cli._shared import data_console, err_console, progress_disabled, rows_table, session
 from certinext.domains import Domain
 
 log = structlog.get_logger()
@@ -133,6 +117,7 @@ def _build_row(domain: Domain, expiring_days: int) -> dict[str, str]:
 
 @app.command()
 def parent_dcv_status(
+    ctx: typer.Context,
     pattern: Optional[str] = typer.Option(
         None, "--pattern", metavar="REGEX",
         help="Filter domains by regex before identifying parents (re.fullmatch, case-insensitive)",
@@ -151,7 +136,6 @@ def parent_dcv_status(
             "(used by --status expiring and the ! indicator; default: 30)"
         ),
     ),
-    output_json: JsonOption = False,
     no_ns_check: bool = typer.Option(
         False, "--no-ns-check",
         help=(
@@ -161,25 +145,14 @@ def parent_dcv_status(
             "domain is registered. Requires dnspython (pip install certinext[dns])."
         ),
     ),
-    verbose: VerboseOption = 0,
-    log_format: LogFormatOption = LogFormat.LOGFMT,
-    profile: ProfileOption = None,
-    sandbox: SandboxOption = False,
-    base_url: BaseUrlOption = None,
-    token_url: TokenUrlOption = None,
-    account_number: AccountNumberOption = None,
-    client_secret: ClientSecretOption = None,
 ) -> None:
     """Show DCV status and expiry for domains that require direct DCV validation.
 
     Includes account-level parents (no registered ancestor) and, by default,
     zone-boundary subdomains whose NS records block DCV inheritance from a parent.
     """
-    setup_logging(verbose, log_format=log_format)
-    sess = connect(
-        profile=profile, sandbox=sandbox, base_url=base_url, token_url=token_url,
-        account_number=account_number, client_secret=client_secret,
-    )
+    verbose = ctx.obj.verbose
+    sess = session(ctx)
 
     log.info("Fetching domain list")
     domains = sess.domain.get_list(pattern=pattern)
@@ -232,7 +205,7 @@ def parent_dcv_status(
             if _status_category(d, expiring_days) == status.value
         ]
 
-    if output_json:
+    if ctx.obj.output_json:
         output = [
             {
                 "domain": d.name,

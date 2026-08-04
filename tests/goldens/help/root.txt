@@ -4,11 +4,61 @@
  CertiNext certificate management CLI.                                                              
                                                                                                     
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --version                     Show the installed certinext version and exit.                     │
-│ --install-completion          Install completion for the current shell.                          │
-│ --show-completion             Show completion for the current shell, to copy it or customize the │
-│                               installation.                                                      │
-│ --help                        Show this message and exit.                                        │
+│ --version                                                    Show the installed certinext        │
+│                                                              version and exit.                   │
+│ --profile                             NAME                   Credential profile for keyring      │
+│                                                              lookup (env: CERTINEXT_PROFILE;     │
+│                                                              default: use the default profile)   │
+│ --sandbox                                                    Connect to the CertiNext sandbox    │
+│                                                              API; implies --profile sandbox      │
+│                                                              unless --profile is set             │
+│ --base-url                            URL                    CertiNext base URL (default:        │
+│                                                              https://us-api.certinext.io, or the │
+│                                                              profile/sandbox endpoint)           │
+│ --token-url                           URL                    OAuth2 token endpoint URL (default: │
+│                                                              derived from the base URL)          │
+│ --account-number,--client-id          ACCT                   CertiNext account number / OAuth2   │
+│                                                              client_id (env:                     │
+│                                                              CERTINEXT_CLIENT_ID)                │
+│ --client-secret                       SECRET                 OAuth2 client secret (env:          │
+│                                                              CERTINEXT_CLIENT_SECRET)            │
+│ --scope                               SCOPE                  OAuth2 scope (optional)             │
+│ --json                                                       Write output as JSON instead of     │
+│                                                              human-readable text                 │
+│ --verbose                     -v      INTEGER                Increase verbosity: -v shows        │
+│                                                              progress, -vvv enables debug        │
+│                                                              logging, -vvvv also enables         │
+│                                                              third-party debug logging (httpx)   │
+│                                                              [default: 0]                        │
+│ --log-format                          [logfmt|json]          Non-interactive (redirected/cron)   │
+│                                                              log line format: 'logfmt'           │
+│                                                              (key=value, default) or 'json'.     │
+│                                                              Ignored when attached to a          │
+│                                                              terminal, which always uses         │
+│                                                              human-readable output.              │
+│                                                              [default: logfmt]                   │
+│ --log-mode                            [auto|syslog|verbose]  Non-interactive field verbosity:    │
+│                                                              'auto' (default) drops the          │
+│                                                              redundant timestamp/pid fields when │
+│                                                              systemd is detected, 'syslog'       │
+│                                                              always drops them (e.g. cron piped  │
+│                                                              to logger(1)), 'verbose' always     │
+│                                                              keeps them. Ignored when attached   │
+│                                                              to a terminal.                      │
+│                                                              [default: auto]                     │
+│ --debug-log-path                      PATH                   Append a JSON-lines DEBUG-level log │
+│                                                              (with full tracebacks) to this      │
+│                                                              path, independent of --verbose      │
+│                                                              (env: CERTINEXT_DEBUG_LOG; default: │
+│                                                              off). Rotation is the deployer's    │
+│                                                              responsibility (e.g. logrotate).    │
+│                                                              [env var: CERTINEXT_DEBUG_LOG]      │
+│ --install-completion                                         Install completion for the current  │
+│                                                              shell.                              │
+│ --show-completion                                            Show completion for the current     │
+│                                                              shell, to copy it or customize the  │
+│                                                              installation.                       │
+│ --help                                                       Show this message and exit.         │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
 │ accounts           Show account info, groups, and organizations.                                 │

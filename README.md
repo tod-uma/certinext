@@ -48,7 +48,7 @@ Python library and CLI scripts for managing your [CertiNext](https://us.certinex
 - Python 3.10+ (installed automatically when using uv — see [Installation](#installation))
 - A CertiNext account with OAuth API credentials (account number + client secret)
 
-**Runtime dependencies** (`httpx`, `pydantic`, `pydantic-settings`, `tomlkit`, `typer`, `rich`, `structlog`) are installed automatically. `structlog` provides structured logging for the CLI tools and library internals — in cron or redirected contexts all output is emitted as JSON; in a terminal it uses a human-readable format. If you use certinext purely as a library and have a strong reason to exclude `structlog`, open an issue and we'll consider making it optional.
+**Runtime dependencies** (`httpx`, `pydantic`, `pydantic-settings`, `tomlkit`, `typer`, `rich`, `structlog`) are installed automatically. `structlog` provides structured logging for the CLI tools and library internals — in cron or redirected contexts output is `key=value` (logfmt) by default (JSON is available via `--log-format json`); in a terminal it uses a human-readable format. If you use certinext purely as a library and have a strong reason to exclude `structlog`, open an issue and we'll consider making it optional.
 
 ## AI-agent quickstart
 
@@ -963,6 +963,8 @@ csr_file                    PEM-encoded CSR file (positional; omit to read from 
 --save-defaults             Store the effective requestor/certificate values as config defaults
 -v, --verbose               Increase verbosity (-vvv for debug logging)
 --log-format FORMAT         Non-interactive log format: logfmt (default) or json
+--log-mode MODE             Non-interactive field verbosity: auto (default), syslog, verbose
+--debug-log-path PATH       Append a JSON-lines DEBUG log (with tracebacks) to PATH (env: CERTINEXT_DEBUG_LOG)
 ```
 
 Requestor and certificate values can also come from stored defaults — see
@@ -1056,6 +1058,8 @@ lookups and list only account-level parents.
 --no-ns-check           Skip DNS NS lookups; list account-level parents only
 -v, --verbose           Increase verbosity (-v shows progress, -vvv enables debug logging)
 --log-format FORMAT     Non-interactive log format: logfmt (default) or json
+--log-mode MODE         Non-interactive field verbosity: auto (default), syslog, verbose
+--debug-log-path PATH   Append a JSON-lines DEBUG log (with tracebacks) to PATH (env: CERTINEXT_DEBUG_LOG)
 ```
 
 #### Examples
@@ -1136,6 +1140,8 @@ instead of letting the failure surface as a confusing crash downstream. As of
 --json                  Write the full results (with raw error bodies) as JSON
 -v, --verbose           Increase verbosity (-v progress, -vvv per-probe debug)
 --log-format FORMAT     Non-interactive log format: logfmt (default) or json
+--log-mode MODE         Non-interactive field verbosity: auto (default), syslog, verbose
+--debug-log-path PATH   Append a JSON-lines DEBUG log (with tracebacks) to PATH (env: CERTINEXT_DEBUG_LOG)
 ```
 
 #### Examples
@@ -1167,7 +1173,7 @@ the environment automatically:
 | Context | Format |
 |---|---|
 | Interactive terminal (TTY) | `HH:MM:SS [level] event  field=value …` — human-readable, local time |
-| Non-TTY (cron, redirected stderr) | One JSON object per line — suitable for log aggregators and `jq` |
+| Non-TTY (cron, redirected stderr) | `key=value` lines (logfmt) by default — auto-extracted by Splunk and other aggregators with no per-sourcetype configuration; pass `--log-format json` for one JSON object per line instead |
 
 **Verbosity flags** (cumulative, same for all scripts):
 
@@ -1175,15 +1181,30 @@ the environment automatically:
 |---|---|
 | `-v` | Show extra context fields (`correlation_id`, `pid`, credential profile, domain filters) |
 | `-vvv` | Enable DEBUG logging |
-| `-vvvv` | Also enable third-party DEBUG output (urllib3, keyring) |
+| `-vvvv` | Also enable third-party DEBUG output (httpx, keyring) |
 
-**Cron example** — capture JSON logs to a file:
+**`--log-mode`** controls whether non-TTY output drops the `timestamp`/`pid`
+fields as redundant with journald/syslog's own stamping:
+
+| Mode | Effect |
+|---|---|
+| `auto` (default) | Drop the fields when running under systemd (`INVOCATION_ID`/`JOURNAL_STREAM` detected); keep them otherwise |
+| `syslog` | Always drop the fields, even with no systemd signal — for cron output piped through `logger(1)` |
+| `verbose` | Always keep the fields, even under systemd — for interactively debugging a unit's output |
+
+**`--debug-log-path PATH`** (env: `CERTINEXT_DEBUG_LOG`) appends a JSON-lines
+DEBUG-level log to `PATH`, independent of `-v` — every event, including full
+tracebacks, so an unattended run's failure is never lost even at the default
+verbosity. Off unless a path is given; rotate it with logrotate, not this
+tool. `-v` still controls only what appears on stderr/the journal.
+
+**Cron example** — capture logfmt output and a debug sidecar to files:
 
 ```bash
-certinext parent-dcv-status --sandbox 2>> /var/log/certinext.log
+certinext parent-dcv-status --sandbox --debug-log-path /var/log/certinext/debug.log 2>> /var/log/certinext.log
 ```
 
-Each line is a self-contained JSON object:
+Each line of the JSON debug log (or the stderr stream with `--log-format json`) is a self-contained JSON object:
 
 ```json
 {"timestamp": "2026-06-03T14:00:01.234Z", "level": "info", "event": "Connecting", "account": "5912517854", "profile": "default", "url": "https://us-api.certinext.io"}
@@ -1240,9 +1261,9 @@ without copying any of it:
 - **`certinext.cli_options`** — typer-specific: `Annotated` option aliases
   (`ProfileOption`, `SandboxOption`, `BaseUrlOption`, `TokenUrlOption`,
   `AccountNumberOption`, `ClientSecretOption`, `ScopeOption`, `JsonOption`,
-  `VerboseOption`, `LogFormatOption`) carrying the exact flag spellings and
-  help text of the bundled `certinext` CLI, plus `connect()` which chains
-  `resolve_connection()` + `build_session()`.
+  `VerboseOption`, `LogFormatOption`, `LogModeOption`, `DebugLogPathOption`)
+  carrying the exact flag spellings and help text of the bundled `certinext`
+  CLI, plus `connect()` which chains `resolve_connection()` + `build_session()`.
 
 ```python
 import typer
@@ -1273,7 +1294,10 @@ per line.
 context — `extra_priority_keys=` (field order of e.g. `correlation_id`/`pid`
 in non-interactive output), `console_quiet_keys=` (fields hidden from
 interactive output at verbosity 0), and `quiet_loggers=` (additional
-third-party loggers capped at WARNING below `-vvvv`).
+third-party loggers capped at WARNING below `-vvvv`); plus `log_mode=`
+(`LogMode`, drop redundant `timestamp`/`pid` under systemd — see
+[Log output](#log-output)) and `debug_log_path=` (always-on JSON DEBUG
+sidecar file, independent of verbosity).
 
 ### Working with domains
 

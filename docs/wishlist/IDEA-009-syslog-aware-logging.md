@@ -1,8 +1,8 @@
 # IDEA-009: Syslog/journald-aware logging mode
 
-- **Status:** Proposed (coordinating issue: #24)
+- **Status:** Implemented — see [ADR 0010](../adr/0010-log-mode-tri-state-for-syslog-aware-output.md) (coordinating issue: #24)
 - **Created:** 2026-07-23
-- **Updated:** 2026-07-23
+- **Updated:** 2026-08-04
 
 ## Context
 

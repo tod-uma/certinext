@@ -20,25 +20,12 @@ from typing import Optional
 import typer
 
 from certinext.cli._app import app
-from certinext.cli._shared import (
-    AccountNumberOption,
-    BaseUrlOption,
-    ClientSecretOption,
-    JsonOption,
-    LogFormatOption,
-    ProfileOption,
-    SandboxOption,
-    TokenUrlOption,
-    VerboseOption,
-    connect,
-    data_console,
-    rows_table,
-)
-from certinext.cli_support import LogFormat, setup_logging
+from certinext.cli._shared import data_console, rows_table, session
 
 
 @app.command()
 def list_certificates(
+    ctx: typer.Context,
     status: Optional[str] = typer.Option(
         None, "--status", metavar="STATUS",
         help=(
@@ -46,26 +33,13 @@ def list_certificates(
             "(e.g. issued, expired, pending-dcv, pending-csr, revoked, cancelled)"
         ),
     ),
-    output_json: JsonOption = False,
-    verbose: VerboseOption = 0,
-    log_format: LogFormatOption = LogFormat.LOGFMT,
-    profile: ProfileOption = None,
-    sandbox: SandboxOption = False,
-    base_url: BaseUrlOption = None,
-    token_url: TokenUrlOption = None,
-    account_number: AccountNumberOption = None,
-    client_secret: ClientSecretOption = None,
 ) -> None:
     """List SSL/TLS certificate orders from the CertiNext orders report."""
-    setup_logging(verbose, log_format=log_format)
-    sess = connect(
-        profile=profile, sandbox=sandbox, base_url=base_url, token_url=token_url,
-        account_number=account_number, client_secret=client_secret,
-    )
+    sess = session(ctx)
 
     orders = sess.orders.get_list(status=status)
 
-    if output_json:
+    if ctx.obj.output_json:
         print(json.dumps([o.as_dict() for o in orders], indent=2))
         return
 

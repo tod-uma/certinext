@@ -24,12 +24,14 @@ between the default logfmt non-interactive output and the opt-in JSON one.
 import logging
 import sys
 from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
 import structlog
 
 from certinext.cli_support import (
     LogFormat,
+    LogMode,
     _drop_keys_processor,
     _reorder_log_keys_processor,
     setup_logging,
@@ -206,3 +208,118 @@ def test_quiet_loggers_left_alone_at_vvvv() -> None:
     logging.getLogger("filelock").setLevel(logging.NOTSET)
     setup_logging(4, quiet_loggers=["filelock"])
     assert logging.getLogger("filelock").level == logging.NOTSET
+
+
+def _clear_systemd_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Remove both systemd-detection env vars so tests start from a known non-systemd state."""
+    monkeypatch.delenv("INVOCATION_ID", raising=False)
+    monkeypatch.delenv("JOURNAL_STREAM", raising=False)
+
+
+def test_log_mode_auto_drops_fields_under_systemd(monkeypatch: pytest.MonkeyPatch) -> None:
+    """auto + INVOCATION_ID set (systemd-invoked) drops timestamp/pid from non-interactive output."""
+    monkeypatch.setattr(sys.stderr, "isatty", lambda: False)
+    _clear_systemd_env(monkeypatch)
+    monkeypatch.setenv("INVOCATION_ID", "abc123")
+    structlog.contextvars.bind_contextvars(pid=99)
+
+    setup_logging(0, log_mode=LogMode.AUTO, extra_priority_keys=["pid"])
+    line = _render_foreign_record()
+    assert "timestamp=" not in line
+    assert "pid=" not in line
+
+
+def test_log_mode_auto_keeps_fields_outside_systemd(monkeypatch: pytest.MonkeyPatch) -> None:
+    """auto + no systemd env vars keeps timestamp/pid, matching pre-IDEA-009 behavior."""
+    monkeypatch.setattr(sys.stderr, "isatty", lambda: False)
+    _clear_systemd_env(monkeypatch)
+    structlog.contextvars.bind_contextvars(pid=99)
+
+    setup_logging(0, log_mode=LogMode.AUTO, extra_priority_keys=["pid"])
+    line = _render_foreign_record()
+    assert "timestamp=" in line
+    assert "pid=99" in line
+
+
+def test_log_mode_syslog_drops_fields_without_systemd(monkeypatch: pytest.MonkeyPatch) -> None:
+    """syslog forces the drop even with no systemd env signal (e.g. cron piped to logger(1))."""
+    monkeypatch.setattr(sys.stderr, "isatty", lambda: False)
+    _clear_systemd_env(monkeypatch)
+    structlog.contextvars.bind_contextvars(pid=99)
+
+    setup_logging(0, log_mode=LogMode.SYSLOG, extra_priority_keys=["pid"])
+    line = _render_foreign_record()
+    assert "timestamp=" not in line
+    assert "pid=" not in line
+
+
+def test_log_mode_verbose_keeps_fields_under_systemd(monkeypatch: pytest.MonkeyPatch) -> None:
+    """verbose forces the fields to stay even under systemd (interactive unit debugging)."""
+    monkeypatch.setattr(sys.stderr, "isatty", lambda: False)
+    _clear_systemd_env(monkeypatch)
+    monkeypatch.setenv("INVOCATION_ID", "abc123")
+    structlog.contextvars.bind_contextvars(pid=99)
+
+    setup_logging(0, log_mode=LogMode.VERBOSE, extra_priority_keys=["pid"])
+    line = _render_foreign_record()
+    assert "timestamp=" in line
+    assert "pid=99" in line
+
+
+def test_log_mode_ignored_on_interactive_output(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A TTY never drops fields regardless of log_mode — interactive output is unchanged."""
+    monkeypatch.setattr(sys.stderr, "isatty", lambda: True)
+    _clear_systemd_env(monkeypatch)
+    monkeypatch.setenv("INVOCATION_ID", "abc123")
+
+    setup_logging(0, log_mode=LogMode.SYSLOG)
+    line = _render_foreign_record()
+    assert "hello from somelib" in line
+
+
+def test_debug_log_path_captures_debug_events_at_verbosity_zero(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """debug_log_path receives DEBUG events (with traceback + correlation_id) even at verbose=0.
+
+    This is the crux of Phase 3: the filtering bound logger normally drops
+    DEBUG-level calls before any handler sees them when verbose < 3. Setting
+    debug_log_path must open that gate for the file handler while the stderr
+    handler stays capped at INFO, so the journal stays clean but the
+    traceback is never lost.
+    """
+    monkeypatch.setattr(sys.stderr, "isatty", lambda: False)
+    debug_log_path = tmp_path / "debug.jsonl"
+    structlog.contextvars.bind_contextvars(correlation_id="abc-123")
+
+    setup_logging(0, debug_log_path=debug_log_path)
+
+    logger = structlog.get_logger()
+    try:
+        raise ValueError("boom")
+    except ValueError:
+        logger.debug("caught", exc_info=True)
+
+    content = debug_log_path.read_text()
+    assert '"event": "caught"' in content
+    assert '"correlation_id": "abc-123"' in content
+    assert "ValueError: boom" in content
+    assert content.count("\n") == 1  # one JSON object per line, no multi-line traceback
+
+    captured = capsys.readouterr()
+    assert "caught" not in captured.err
+    assert "ValueError" not in captured.err
+
+
+def test_debug_log_path_unset_keeps_debug_events_out_of_every_handler(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Without debug_log_path, DEBUG events are dropped at verbose=0 exactly as before Phase 3."""
+    monkeypatch.setattr(sys.stderr, "isatty", lambda: False)
+
+    setup_logging(0)
+    logger = structlog.get_logger()
+    logger.debug("should not appear")
+
+    captured = capsys.readouterr()
+    assert "should not appear" not in captured.err

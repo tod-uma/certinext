@@ -44,6 +44,7 @@ import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import Enum
+from pathlib import Path
 from typing import Any, NoReturn
 
 import structlog
@@ -323,10 +324,60 @@ class LogFormat(str, Enum):
     """One JSON object per line, via :class:`structlog.processors.JSONRenderer`."""
 
 
+class LogMode(str, Enum):
+    """Whether non-interactive output drops the redundant ``timestamp``/``pid`` fields.
+
+    Journald/syslog already stamps every line it forwards with a timestamp
+    and PID before it reaches Splunk (see ADR 0007's own example), so the
+    structlog-level ``timestamp`` field and any ``pid`` bound via
+    :func:`structlog.contextvars.bind_contextvars` duplicate that (IDEA-009).
+    """
+
+    AUTO = "auto"
+    """Drop the fields when a systemd unit is detected (:func:`_systemd_invoked`); keep them otherwise."""
+
+    SYSLOG = "syslog"
+    """Always drop the fields - for cron output piped through ``logger(1)``, which has no detectable env signal."""
+
+    VERBOSE = "verbose"
+    """Always keep the fields, even under systemd - for interactively debugging a unit's output."""
+
+
+def _systemd_invoked() -> bool:
+    """Whether the current process was invoked by systemd.
+
+    Checks the two env vars systemd sets: ``INVOCATION_ID`` (every
+    systemd-invoked run) and ``JOURNAL_STREAM`` (set only when stdout/stderr
+    feed journald directly). Either one is sufficient.
+
+    Returns:
+        True if either env var is present.
+    """
+    return bool(os.environ.get("INVOCATION_ID") or os.environ.get("JOURNAL_STREAM"))
+
+
+def _effective_syslog_mode(log_mode: LogMode) -> bool:
+    """Resolve a :class:`LogMode` to whether syslog-redundant fields should be dropped.
+
+    Args:
+        log_mode: The requested mode.
+
+    Returns:
+        True if ``timestamp``/``pid`` should be dropped from non-interactive output.
+    """
+    if log_mode is LogMode.SYSLOG:
+        return True
+    if log_mode is LogMode.VERBOSE:
+        return False
+    return _systemd_invoked()
+
+
 def setup_logging(
     verbose: int,
     *,
     log_format: LogFormat = LogFormat.LOGFMT,
+    log_mode: LogMode = LogMode.AUTO,
+    debug_log_path: Path | None = None,
     extra_priority_keys: Sequence[str] = (),
     console_quiet_keys: Sequence[str] = (),
     quiet_loggers: Sequence[str] = (),
@@ -345,6 +396,15 @@ def setup_logging(
         verbose: Verbosity count from -v flags (0=INFO, 3+=DEBUG, 4+=third-party DEBUG).
         log_format: Non-interactive output format — see :class:`LogFormat`.
             Ignored when stderr is a TTY.
+        log_mode: Whether to drop the ``timestamp``/``pid`` fields from
+            non-interactive output as redundant with journald/syslog's own
+            stamping — see :class:`LogMode`. Ignored when stderr is a TTY.
+        debug_log_path: When set, append a JSON-lines DEBUG-level log to this
+            path independent of ``verbose`` — every event, including full
+            tracebacks, regardless of the visible verbosity level. No
+            default (there is no library-level log directory); rotation is
+            logrotate's job, not this function's. Callers should pass their
+            own env-var-resolved path (e.g. ``CERTINEXT_ZABBIX_DEBUG_LOG``).
         extra_priority_keys: Additional event dict keys (e.g. run-level
             ``correlation_id``/``pid`` contextvars) placed right after the built-in
             keys in non-interactive output, so cron log lines keep a stable field order.
@@ -390,13 +450,23 @@ def setup_logging(
         final_processors = [
             structlog.stdlib.ProcessorFormatter.remove_processors_meta,
             structlog.processors.format_exc_info,
-            _reorder_log_keys_processor(extra_priority_keys),
-            renderer,
         ]
+        if _effective_syslog_mode(LogMode(log_mode)):
+            final_processors.append(_drop_keys_processor(["timestamp", "pid"]))
+        final_processors.append(_reorder_log_keys_processor(extra_priority_keys))
+        final_processors.append(renderer)
+
+    # A DEBUG-level debug-log file must receive every event regardless of
+    # `verbose`, but structlog's filtering bound logger drops below-level
+    # calls before any handler sees them — so the wrapper (and the root
+    # logger passed to basicConfig) must open up to DEBUG whenever
+    # debug_log_path is set. The stderr handler stays capped at `level`
+    # via its own handler-level filter, so visible output is unaffected.
+    wrapper_level = logging.DEBUG if debug_log_path is not None else level
 
     structlog.configure(
         processors=pre_chain + [structlog.stdlib.ProcessorFormatter.wrap_for_formatter],
-        wrapper_class=structlog.make_filtering_bound_logger(level),
+        wrapper_class=structlog.make_filtering_bound_logger(wrapper_level),
         context_class=dict,
         logger_factory=structlog.stdlib.LoggerFactory(),
         cache_logger_on_first_use=True,
@@ -408,7 +478,25 @@ def setup_logging(
     )
     handler = logging.StreamHandler(sys.stderr)
     handler.setFormatter(formatter)
-    logging.basicConfig(handlers=[handler], level=level, force=True)
+    handler.setLevel(level)
+    handlers: list[logging.Handler] = [handler]
+
+    if debug_log_path is not None:
+        debug_formatter = structlog.stdlib.ProcessorFormatter(
+            foreign_pre_chain=foreign_pre_chain,
+            processors=[
+                structlog.stdlib.ProcessorFormatter.remove_processors_meta,
+                structlog.processors.format_exc_info,
+                _reorder_log_keys_processor(extra_priority_keys),
+                structlog.processors.JSONRenderer(),
+            ],
+        )
+        debug_handler = logging.FileHandler(debug_log_path)
+        debug_handler.setFormatter(debug_formatter)
+        debug_handler.setLevel(logging.DEBUG)
+        handlers.append(debug_handler)
+
+    logging.basicConfig(handlers=handlers, level=wrapper_level, force=True)
 
     if verbose < 4:
         # httpx logs one INFO line per request; keep it quiet unless -vvvv

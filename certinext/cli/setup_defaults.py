@@ -38,28 +38,18 @@ import dataclasses
 import sys
 from typing import Any
 
+import typer
+
 import certinext
 from certinext._config import ConfigError, config_path, load_config, save_defaults
 from certinext._keyring import keyring_available, keyring_get, keyring_service
 from certinext.accounts import Organization
 from certinext.catalog import Product, ProductCategory
 from certinext.cli._app import setup_app
-from certinext.cli._shared import (
-    AccountNumberOption,
-    BaseUrlOption,
-    ClientSecretOption,
-    LogFormatOption,
-    ProfileOption,
-    SandboxOption,
-    TokenUrlOption,
-    VerboseOption,
-)
 from certinext.cli_support import (
     CredentialsNotFoundError,
-    LogFormat,
     build_session,
     resolve_connection,
-    setup_logging,
 )
 from certinext.exceptions import CertiNextAPIError
 
@@ -525,24 +515,19 @@ def _pick_org(
 
 
 @setup_app.command("defaults")
-def setup_defaults(
-    verbose: VerboseOption = 0,
-    log_format: LogFormatOption = LogFormat.LOGFMT,
-    profile: ProfileOption = None,
-    sandbox: SandboxOption = False,
-    base_url: BaseUrlOption = None,
-    token_url: TokenUrlOption = None,
-    account_number: AccountNumberOption = None,
-    client_secret: ClientSecretOption = None,
-) -> None:
+def setup_defaults(ctx: typer.Context) -> None:
     """Interactively store issue-cert defaults in the config file."""
-    setup_logging(verbose, log_format=log_format)
+    opts = ctx.obj
+    account_number = opts.account_number
+    client_secret = opts.client_secret
     # The raw flags (before resolution folds profile config in) decide what
     # persists — only values explicit on *this* run should be stored.
-    cli_sandbox = bool(sandbox)
-    cli_base_url = base_url
-    cli_token_url = token_url
-    conn = resolve_connection(profile=profile, sandbox=sandbox, base_url=base_url, token_url=token_url)
+    cli_sandbox = bool(opts.sandbox)
+    cli_base_url = opts.base_url
+    cli_token_url = opts.token_url
+    conn = resolve_connection(
+        profile=opts.profile, sandbox=opts.sandbox, base_url=opts.base_url, token_url=opts.token_url,
+    )
 
     path = config_path()
     section_label = f"[profiles.{conn.profile}]" if conn.profile else "[defaults]"

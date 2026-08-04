@@ -28,28 +28,14 @@ from rich.progress import Progress
 
 from certinext import healthcheck as hc
 from certinext.cli._app import app
-from certinext.cli._shared import (
-    AccountNumberOption,
-    BaseUrlOption,
-    ClientSecretOption,
-    JsonOption,
-    LogFormatOption,
-    ProfileOption,
-    SandboxOption,
-    TokenUrlOption,
-    VerboseOption,
-    connect,
-    data_console,
-    err_console,
-    progress_disabled,
-)
-from certinext.cli_support import LogFormat, setup_logging
+from certinext.cli._shared import data_console, err_console, progress_disabled, session
 
 log = structlog.get_logger()
 
 
 @app.command()
 def healthcheck(
+    ctx: typer.Context,
     quick: bool = typer.Option(
         False, "--quick",
         help="Run Tier-1 probes only (skip derived-input Tier-2 probes)",
@@ -58,24 +44,12 @@ def healthcheck(
         False, "--strict",
         help="Also exit non-zero when a baseline list is unexpectedly empty (EMPTY)",
     ),
-    output_json: JsonOption = False,
-    verbose: VerboseOption = 0,
-    log_format: LogFormatOption = LogFormat.LOGFMT,
-    profile: ProfileOption = None,
-    sandbox: SandboxOption = False,
-    base_url: BaseUrlOption = None,
-    token_url: TokenUrlOption = None,
-    account_number: AccountNumberOption = None,
-    client_secret: ClientSecretOption = None,
 ) -> None:
     """Probe every read-only CertiNext endpoint the library exposes and report
     what works for the given credentials. Read-only and safe against production.
     """
-    setup_logging(verbose, log_format=log_format)
-    sess = connect(
-        profile=profile, sandbox=sandbox, base_url=base_url, token_url=token_url,
-        account_number=account_number, client_secret=client_secret,
-    )
+    verbose = ctx.obj.verbose
+    sess = session(ctx)
 
     log.info("Running CertiNext health check", scope="tier-1" if quick else "all")
     with Progress(console=err_console, disable=progress_disabled(verbose)) as progress:
@@ -92,7 +66,7 @@ def healthcheck(
 
         results = hc.run(sess, quick=quick, on_result=_on_result)
 
-    if output_json:
+    if ctx.obj.output_json:
         print(json.dumps([r.to_dict() for r in results], indent=2))
     else:
         data_console().print(hc.results_table(results))

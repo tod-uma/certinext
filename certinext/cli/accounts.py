@@ -16,48 +16,22 @@
 
 import json
 
+import typer
+
 from certinext.cli._app import app
-from certinext.cli._shared import (
-    AccountNumberOption,
-    BaseUrlOption,
-    ClientSecretOption,
-    JsonOption,
-    LogFormatOption,
-    ProfileOption,
-    SandboxOption,
-    TokenUrlOption,
-    VerboseOption,
-    connect,
-    data_console,
-    rows_table,
-)
-from certinext.cli_support import LogFormat, setup_logging
+from certinext.cli._shared import data_console, rows_table, session
 
 
 @app.command()
-def accounts(
-    output_json: JsonOption = False,
-    verbose: VerboseOption = 0,
-    log_format: LogFormatOption = LogFormat.LOGFMT,
-    profile: ProfileOption = None,
-    sandbox: SandboxOption = False,
-    base_url: BaseUrlOption = None,
-    token_url: TokenUrlOption = None,
-    account_number: AccountNumberOption = None,
-    client_secret: ClientSecretOption = None,
-) -> None:
+def accounts(ctx: typer.Context) -> None:
     """Show account info, groups, and organizations."""
-    setup_logging(verbose, log_format=log_format)
-    sess = connect(
-        profile=profile, sandbox=sandbox, base_url=base_url, token_url=token_url,
-        account_number=account_number, client_secret=client_secret,
-    )
+    sess = session(ctx)
 
     me = sess.accounts.me()
     groups = sess.accounts.list_groups()
     orgs = sess.accounts.list_organizations()
 
-    if output_json:
+    if ctx.obj.output_json:
         output = {
             "account": me.as_dict(),
             "groups": [g.as_dict() for g in groups],
