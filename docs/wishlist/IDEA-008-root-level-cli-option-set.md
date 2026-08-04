@@ -1,8 +1,8 @@
 # IDEA-008: Root-level (shared) CLI option set instead of per-command repetition
 
-- **Status:** Proposed (coordinating issue: #23)
+- **Status:** Implemented — see [ADR 0009](../adr/0009-root-callback-for-shared-cli-options.md) (coordinating issue: #23)
 - **Created:** 2026-07-22
-- **Updated:** 2026-07-23
+- **Updated:** 2026-08-04
 
 ## Context
 

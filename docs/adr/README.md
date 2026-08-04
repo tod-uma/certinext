@@ -22,5 +22,6 @@ Numbering is sequential and never reused.
 | [0006](0006-tomlkit-for-config-writes-tomllib-for-reads.md) | tomlkit for config-file writes, tomllib for reads | accepted |
 | [0007](0007-logfmt-default-for-non-interactive-logging.md) | Default non-interactive log output to logfmt, not JSON; add --log-format to opt back into JSON | accepted |
 | [0008](0008-org-scoped-dcv-inheritance-not-dns-zone-boundary.md) | DCV inheritance eligibility is org-scoped, not gated by DNS zone boundaries | accepted |
+| [0009](0009-root-callback-for-shared-cli-options.md) | Centralize shared CLI options on the root `app` callback, resolved via `ctx.obj` | accepted |
 
 See also: [docs/wishlist/](../wishlist/) for deferred ideas not yet committed to.
