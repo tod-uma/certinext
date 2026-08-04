@@ -1,7 +1,7 @@
 ---
-status: planned
+status: in-progress
 depends-on: []
-implements-adr: []   # mint ADRs during implementation — see "ADRs to write"
+implements-adr: [0009, 0010]
 ---
 
 # `certinext` sub-plan — shared options, syslog-aware output, debug-log file

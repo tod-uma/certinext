@@ -323,10 +323,59 @@ class LogFormat(str, Enum):
     """One JSON object per line, via :class:`structlog.processors.JSONRenderer`."""
 
 
+class LogMode(str, Enum):
+    """Whether non-interactive output drops the redundant ``timestamp``/``pid`` fields.
+
+    Journald/syslog already stamps every line it forwards with a timestamp
+    and PID before it reaches Splunk (see ADR 0007's own example), so the
+    structlog-level ``timestamp`` field and any ``pid`` bound via
+    :func:`structlog.contextvars.bind_contextvars` duplicate that (IDEA-009).
+    """
+
+    AUTO = "auto"
+    """Drop the fields when a systemd unit is detected (:func:`_systemd_invoked`); keep them otherwise."""
+
+    SYSLOG = "syslog"
+    """Always drop the fields - for cron output piped through ``logger(1)``, which has no detectable env signal."""
+
+    VERBOSE = "verbose"
+    """Always keep the fields, even under systemd - for interactively debugging a unit's output."""
+
+
+def _systemd_invoked() -> bool:
+    """Whether the current process was invoked by systemd.
+
+    Checks the two env vars systemd sets: ``INVOCATION_ID`` (every
+    systemd-invoked run) and ``JOURNAL_STREAM`` (set only when stdout/stderr
+    feed journald directly). Either one is sufficient.
+
+    Returns:
+        True if either env var is present.
+    """
+    return bool(os.environ.get("INVOCATION_ID") or os.environ.get("JOURNAL_STREAM"))
+
+
+def _effective_syslog_mode(log_mode: LogMode) -> bool:
+    """Resolve a :class:`LogMode` to whether syslog-redundant fields should be dropped.
+
+    Args:
+        log_mode: The requested mode.
+
+    Returns:
+        True if ``timestamp``/``pid`` should be dropped from non-interactive output.
+    """
+    if log_mode is LogMode.SYSLOG:
+        return True
+    if log_mode is LogMode.VERBOSE:
+        return False
+    return _systemd_invoked()
+
+
 def setup_logging(
     verbose: int,
     *,
     log_format: LogFormat = LogFormat.LOGFMT,
+    log_mode: LogMode = LogMode.AUTO,
     extra_priority_keys: Sequence[str] = (),
     console_quiet_keys: Sequence[str] = (),
     quiet_loggers: Sequence[str] = (),
@@ -345,6 +394,9 @@ def setup_logging(
         verbose: Verbosity count from -v flags (0=INFO, 3+=DEBUG, 4+=third-party DEBUG).
         log_format: Non-interactive output format — see :class:`LogFormat`.
             Ignored when stderr is a TTY.
+        log_mode: Whether to drop the ``timestamp``/``pid`` fields from
+            non-interactive output as redundant with journald/syslog's own
+            stamping — see :class:`LogMode`. Ignored when stderr is a TTY.
         extra_priority_keys: Additional event dict keys (e.g. run-level
             ``correlation_id``/``pid`` contextvars) placed right after the built-in
             keys in non-interactive output, so cron log lines keep a stable field order.
@@ -390,9 +442,11 @@ def setup_logging(
         final_processors = [
             structlog.stdlib.ProcessorFormatter.remove_processors_meta,
             structlog.processors.format_exc_info,
-            _reorder_log_keys_processor(extra_priority_keys),
-            renderer,
         ]
+        if _effective_syslog_mode(LogMode(log_mode)):
+            final_processors.append(_drop_keys_processor(["timestamp", "pid"]))
+        final_processors.append(_reorder_log_keys_processor(extra_priority_keys))
+        final_processors.append(renderer)
 
     structlog.configure(
         processors=pre_chain + [structlog.stdlib.ProcessorFormatter.wrap_for_formatter],

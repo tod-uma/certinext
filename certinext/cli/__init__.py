@@ -58,6 +58,7 @@ __all__ = ["app", "main"]
 _VALUE_OPTS = {
     "--profile", "--base-url", "--token-url",
     "--account-number", "--client-id", "--client-secret", "--scope", "--log-format",
+    "--log-mode",
 }
 _FLAG_OPTS = {"--json", "--verbose", "--sandbox"}
 

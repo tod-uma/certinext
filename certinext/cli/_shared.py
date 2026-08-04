@@ -55,6 +55,9 @@ from certinext.cli_options import (
     LogFormatOption as LogFormatOption,
 )
 from certinext.cli_options import (
+    LogModeOption as LogModeOption,
+)
+from certinext.cli_options import (
     ProfileOption as ProfileOption,
 )
 from certinext.cli_options import (
@@ -72,7 +75,7 @@ from certinext.cli_options import (
 from certinext.cli_options import (
     connect as connect,
 )
-from certinext.cli_support import LogFormat
+from certinext.cli_support import LogFormat, LogMode
 from certinext.session import CertiNextSession
 
 # When stdout is piped, rich caps the console at 80 columns and would wrap or
@@ -105,6 +108,7 @@ class GlobalOptions:
         output_json: ``--json`` flag.
         verbose: ``-v`` count.
         log_format: ``--log-format`` value.
+        log_mode: ``--log-mode`` value.
     """
 
     profile: str | None
@@ -117,6 +121,7 @@ class GlobalOptions:
     output_json: bool
     verbose: int
     log_format: LogFormat
+    log_mode: LogMode
 
 
 def session(ctx: typer.Context, *, prompt: bool = True) -> CertiNextSession:

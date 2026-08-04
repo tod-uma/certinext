@@ -23,5 +23,6 @@ Numbering is sequential and never reused.
 | [0007](0007-logfmt-default-for-non-interactive-logging.md) | Default non-interactive log output to logfmt, not JSON; add --log-format to opt back into JSON | accepted |
 | [0008](0008-org-scoped-dcv-inheritance-not-dns-zone-boundary.md) | DCV inheritance eligibility is org-scoped, not gated by DNS zone boundaries | accepted |
 | [0009](0009-root-callback-for-shared-cli-options.md) | Centralize shared CLI options on the root `app` callback, resolved via `ctx.obj` | accepted |
+| [0010](0010-log-mode-tri-state-for-syslog-aware-output.md) | Tri-state `--log-mode auto\|syslog\|verbose` for syslog/journald-aware output | accepted |
 
 See also: [docs/wishlist/](../wishlist/) for deferred ideas not yet committed to.

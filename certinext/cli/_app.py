@@ -38,13 +38,14 @@ from certinext.cli._shared import (
     GlobalOptions,
     JsonOption,
     LogFormatOption,
+    LogModeOption,
     ProfileOption,
     SandboxOption,
     ScopeOption,
     TokenUrlOption,
     VerboseOption,
 )
-from certinext.cli_support import LogFormat, setup_logging
+from certinext.cli_support import LogFormat, LogMode, setup_logging
 
 app = typer.Typer(
     name="certinext",
@@ -95,10 +96,12 @@ def _main(
     output_json: JsonOption = False,
     verbose: VerboseOption = 0,
     log_format: LogFormatOption = LogFormat.LOGFMT,
+    log_mode: LogModeOption = LogMode.AUTO,
 ) -> None:
-    setup_logging(verbose, log_format=log_format)
+    setup_logging(verbose, log_format=log_format, log_mode=log_mode)
     ctx.obj = GlobalOptions(
         profile=profile, sandbox=sandbox, base_url=base_url, token_url=token_url,
         account_number=account_number, client_secret=client_secret, scope=scope,
         output_json=output_json, verbose=verbose, log_format=log_format,
+        log_mode=log_mode,
     )

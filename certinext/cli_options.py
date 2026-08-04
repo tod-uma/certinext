@@ -42,7 +42,7 @@ from typing import Annotated, Optional
 import typer
 
 import certinext
-from certinext.cli_support import LogFormat, build_session, resolve_connection
+from certinext.cli_support import LogFormat, LogMode, build_session, resolve_connection
 from certinext.session import CertiNextSession
 
 # --- Shared connection options (one definition, every command) --------------
@@ -94,6 +94,15 @@ LogFormatOption = Annotated[LogFormat, typer.Option(
         "Non-interactive (redirected/cron) log line format: 'logfmt' (key=value, "
         "default) or 'json'. Ignored when attached to a terminal, which always "
         "uses human-readable output."
+    ),
+)]
+LogModeOption = Annotated[LogMode, typer.Option(
+    "--log-mode",
+    help=(
+        "Non-interactive field verbosity: 'auto' (default) drops the redundant "
+        "timestamp/pid fields when systemd is detected, 'syslog' always drops "
+        "them (e.g. cron piped to logger(1)), 'verbose' always keeps them. "
+        "Ignored when attached to a terminal."
     ),
 )]
 

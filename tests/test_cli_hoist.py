@@ -82,6 +82,11 @@ class _FakeSession:
         ["--json", "accounts"],
         id="leaf-command-option-hoisted",
     ),
+    pytest.param(
+        ["domains", "list", "--log-mode", "syslog"],
+        ["--log-mode", "syslog", "domains", "list"],
+        id="log-mode-hoisted",
+    ),
     pytest.param(["--help"], ["--help"], id="help-flag-left-in-place"),
     pytest.param([], [], id="empty-args-left-in-place"),
 ])

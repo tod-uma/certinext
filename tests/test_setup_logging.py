@@ -30,6 +30,7 @@ import structlog
 
 from certinext.cli_support import (
     LogFormat,
+    LogMode,
     _drop_keys_processor,
     _reorder_log_keys_processor,
     setup_logging,
@@ -206,3 +207,70 @@ def test_quiet_loggers_left_alone_at_vvvv() -> None:
     logging.getLogger("filelock").setLevel(logging.NOTSET)
     setup_logging(4, quiet_loggers=["filelock"])
     assert logging.getLogger("filelock").level == logging.NOTSET
+
+
+def _clear_systemd_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Remove both systemd-detection env vars so tests start from a known non-systemd state."""
+    monkeypatch.delenv("INVOCATION_ID", raising=False)
+    monkeypatch.delenv("JOURNAL_STREAM", raising=False)
+
+
+def test_log_mode_auto_drops_fields_under_systemd(monkeypatch: pytest.MonkeyPatch) -> None:
+    """auto + INVOCATION_ID set (systemd-invoked) drops timestamp/pid from non-interactive output."""
+    monkeypatch.setattr(sys.stderr, "isatty", lambda: False)
+    _clear_systemd_env(monkeypatch)
+    monkeypatch.setenv("INVOCATION_ID", "abc123")
+    structlog.contextvars.bind_contextvars(pid=99)
+
+    setup_logging(0, log_mode=LogMode.AUTO, extra_priority_keys=["pid"])
+    line = _render_foreign_record()
+    assert "timestamp=" not in line
+    assert "pid=" not in line
+
+
+def test_log_mode_auto_keeps_fields_outside_systemd(monkeypatch: pytest.MonkeyPatch) -> None:
+    """auto + no systemd env vars keeps timestamp/pid, matching pre-IDEA-009 behavior."""
+    monkeypatch.setattr(sys.stderr, "isatty", lambda: False)
+    _clear_systemd_env(monkeypatch)
+    structlog.contextvars.bind_contextvars(pid=99)
+
+    setup_logging(0, log_mode=LogMode.AUTO, extra_priority_keys=["pid"])
+    line = _render_foreign_record()
+    assert "timestamp=" in line
+    assert "pid=99" in line
+
+
+def test_log_mode_syslog_drops_fields_without_systemd(monkeypatch: pytest.MonkeyPatch) -> None:
+    """syslog forces the drop even with no systemd env signal (e.g. cron piped to logger(1))."""
+    monkeypatch.setattr(sys.stderr, "isatty", lambda: False)
+    _clear_systemd_env(monkeypatch)
+    structlog.contextvars.bind_contextvars(pid=99)
+
+    setup_logging(0, log_mode=LogMode.SYSLOG, extra_priority_keys=["pid"])
+    line = _render_foreign_record()
+    assert "timestamp=" not in line
+    assert "pid=" not in line
+
+
+def test_log_mode_verbose_keeps_fields_under_systemd(monkeypatch: pytest.MonkeyPatch) -> None:
+    """verbose forces the fields to stay even under systemd (interactive unit debugging)."""
+    monkeypatch.setattr(sys.stderr, "isatty", lambda: False)
+    _clear_systemd_env(monkeypatch)
+    monkeypatch.setenv("INVOCATION_ID", "abc123")
+    structlog.contextvars.bind_contextvars(pid=99)
+
+    setup_logging(0, log_mode=LogMode.VERBOSE, extra_priority_keys=["pid"])
+    line = _render_foreign_record()
+    assert "timestamp=" in line
+    assert "pid=99" in line
+
+
+def test_log_mode_ignored_on_interactive_output(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A TTY never drops fields regardless of log_mode — interactive output is unchanged."""
+    monkeypatch.setattr(sys.stderr, "isatty", lambda: True)
+    _clear_systemd_env(monkeypatch)
+    monkeypatch.setenv("INVOCATION_ID", "abc123")
+
+    setup_logging(0, log_mode=LogMode.SYSLOG)
+    line = _render_foreign_record()
+    assert "hello from somelib" in line
