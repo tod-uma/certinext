@@ -356,10 +356,12 @@ def test_debug_log_format_defaults_to_console_with_a_real_multiline_traceback(
         structlog.get_logger().debug("caught", exc_info=True)
 
     content = debug_log_path.read_text()
-    assert "Traceback (most recent call last):" in content
-    assert "\\n" not in content  # not escaped onto a single line
-    # The frame line, the raise line and the exception line each stand alone.
-    assert content.count("\n") > 3
+    # A real newline before the traceback header, not the two characters "\n":
+    # escaping it (as JSON and logfmt both do) would keep it on the event line.
+    # Don't assert "\\n" is absent anywhere — Windows paths in the traceback
+    # itself contain backslash sequences (e.g. a directory named "nm").
+    assert "\nTraceback (most recent call last):" in content
+    assert content.count("\n") > 3  # frame, source, and exception lines each stand alone
     assert not content.lstrip().startswith("{")  # not JSON
 
 
