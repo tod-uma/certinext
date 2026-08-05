@@ -1274,8 +1274,8 @@ without copying any of it:
 
 - **`certinext.cli_support`** — framework-agnostic: `resolve_connection()`,
   `build_session()`, `setup_logging()`, `prompt_stderr()`,
-  `require_credential()`, `fatal_api_error()`. Depends on no argument-parsing
-  library.
+  `require_credential()`, `fatal_api_error()`, `log_caught_exception()`,
+  `format_truncated_traceback()`. Depends on no argument-parsing library.
 - **`certinext.cli_options`** — typer-specific: `Annotated` option aliases
   (`ProfileOption`, `SandboxOption`, `BaseUrlOption`, `TokenUrlOption`,
   `AccountNumberOption`, `ClientSecretOption`, `ScopeOption`, `JsonOption`,
@@ -1318,6 +1318,46 @@ third-party loggers capped at WARNING below `-vvvv`); plus `log_mode=`
 independent of verbosity) and `debug_log_format=` (`DebugLogFormat`, that
 file's on-disk format — human-readable `console` by default, `json` for one
 object per line).
+
+#### Logging a caught exception
+
+`log_caught_exception(log, event, exc)` emits one concise, syslog-safe line
+(`error`, `error_type`, and a hint to re-run at higher verbosity) and pairs it
+with a DEBUG-level record carrying the full traceback — which reaches the
+`debug_log_path` sidecar even at default verbosity:
+
+```python
+from certinext.cli_support import log_caught_exception
+
+for domain in domains:
+    try:
+        domain.refresh()
+    except CertiNextAPIError as exc:
+        # No traceback on the visible line: this is inside a loop.
+        log_caught_exception(log, "Failed to refresh domain", exc,
+                             level="warning", domain=domain.name)
+```
+
+Pass `include_traceback=True` to attach the traceback to the *visible* line as
+a quoted `exception` field, truncated to its innermost `TRACEBACK_FRAME_LIMIT`
+frames. That gets a stack into the journal — and therefore into a log
+aggregator — without host access:
+
+```python
+try:
+    run()
+except Exception as exc:
+    # Top-level handler: fires at most once per run, so a stack is affordable.
+    log_caught_exception(log, "Unexpected error", exc, include_traceback=True)
+```
+
+**Only use it at a handler that can fire once per run.** Inside a loop it
+emits one stack per iteration, which is what the default exists to prevent.
+Truncation happens in Python rather than being left to rsyslog's 8K message
+cap, because that cap discards the *tail* of a message — the innermost frames
+and the exception itself. The paired DEBUG record always keeps the full,
+untruncated traceback, so the sidecar stays the full-fidelity copy. See
+[ADR 0014](docs/adr/0014-traceback-on-the-operational-log-line.md).
 
 ### Working with domains
 
@@ -1920,7 +1960,8 @@ The Swagger spec is the most authoritative source — it exposes fields not pres
 certinext/
     __init__.py                   # session() factory, top-level exports, URL constants
     cli_support.py                # public CLI-support layer: resolve_connection, build_session,
-                                  #   setup_logging, prompt_stderr, require_credential, fatal_api_error
+                                  #   setup_logging, prompt_stderr, require_credential, fatal_api_error,
+                                  #   log_caught_exception
                                   #   (replaces the pre-1.0 private certinext._cli)
     cli_options.py                # public typer option aliases (ProfileOption, SandboxOption, ...)
                                   #   and connect(); the typer-specific companion to cli_support

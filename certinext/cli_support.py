@@ -41,11 +41,12 @@ import getpass
 import logging
 import os
 import sys
+import traceback
 from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any, NoReturn
+from typing import Any, Literal, NoReturn
 
 import structlog
 
@@ -646,3 +647,96 @@ def fatal_api_error(exc: CertiNextAPIError, message: str) -> NoReturn:
         log.error("Field error", field_error=str(field_err))
     log.debug("Full response body", body=exc.body)
     raise SystemExit(1) from exc
+
+
+TRACEBACK_HINT = "re-run with -vvv for the full traceback"
+"""Hint appended to a concise error line that carries no traceback of its own."""
+
+TRACEBACK_FRAME_LIMIT = 10
+"""Frames kept when ``include_traceback`` truncates a traceback.
+
+Counted from the *innermost* frame outward, so the exception and the code that
+raised it always survive. rsyslog's default ``$MaxMessageSize`` is 8K and it
+truncates the tail of a message - i.e. exactly this part - so the trimming has
+to happen here rather than being left to the log transport (ADR 0014).
+"""
+
+
+def format_truncated_traceback(exc: BaseException, limit: int = TRACEBACK_FRAME_LIMIT) -> str:
+    """Format *exc*'s traceback, keeping only its innermost *limit* frames.
+
+    A negative ``limit`` passed to :func:`traceback.format_exception` keeps the
+    *last* that many frames rather than the first, which is what makes this
+    useful for a deep or self-recursive stack: a ``RecursionError`` traceback is
+    roughly a thousand near-identical frames, and only the end of it says
+    anything.
+
+    Args:
+        exc: The caught exception. Its ``__traceback__`` is used; an exception
+            with none (never raised) formats to just the exception line.
+        limit: Number of innermost frames to keep.
+
+    Returns:
+        The formatted traceback as a single string with real newlines. Callers
+        logging this into a logfmt or JSON stream do not need to escape it -
+        both renderers escape newlines themselves.
+    """
+    return "".join(traceback.format_exception(type(exc), exc, exc.__traceback__, limit=-limit))
+
+
+def log_caught_exception(
+    log: Any,
+    event: str,
+    exc: BaseException,
+    *,
+    level: Literal["warning", "error"] = "error",
+    include_traceback: bool = False,
+    **context: Any,
+) -> None:
+    """Log a caught exception as one concise, syslog-safe line.
+
+    Emits *event* at *level* with the exception's type and message, then pairs
+    it with a DEBUG-level record carrying the full, untruncated traceback.
+    Below ``-vvv``, structlog's filtering bound logger drops that debug call
+    before it does any work unless a ``debug_log_path`` sidecar is configured
+    (ADR 0011), which is what gets a traceback out of an unattended run.
+
+    By default the visible line carries no traceback. Cron-fed logs must not
+    dump one per iteration: a caller looping over domains or attempts would
+    turn a single failure into N multi-KB stack dumps, and the originating
+    incident behind ADR 0011 was a ``RecursionError`` - a thousand
+    near-identical frames. Pass ``include_traceback=True`` only at a handler
+    that can fire at most once per run, typically the ``except`` branch
+    wrapping the whole run (ADR 0014).
+
+    Args:
+        log: The bound structlog logger to emit through.
+        event: The log event name/message (used for both records).
+        exc: The caught exception.
+        level: Log level for the concise line - ``"warning"`` for an expected,
+            lower-severity failure mode, ``"error"`` (default) otherwise.
+        include_traceback: Attach the traceback to the *visible* line as an
+            ``exception`` field, truncated to :data:`TRACEBACK_FRAME_LIMIT`
+            innermost frames, and drop the re-run hint (which is not the next
+            step when the stack is already present). The paired DEBUG record
+            keeps the full traceback either way. Leave False inside any loop.
+        **context: Extra structured fields (e.g. ``domain=...``) attached to
+            both the concise line and the paired debug traceback.
+    """
+    fields: dict[str, Any] = {
+        "error": str(exc),
+        "error_type": type(exc).__name__,
+        **context,
+    }
+    if include_traceback:
+        fields["exception"] = format_truncated_traceback(exc)
+    else:
+        fields["hint"] = TRACEBACK_HINT
+
+    getattr(log, level)(event, **fields)
+    # exc_info=exc, not exc_info=True: True resolves via sys.exc_info(), which is
+    # empty outside an active except block. Every current caller is inside one, so
+    # both forms work today - but passing the exception we were already handed is
+    # correct regardless of calling context, and silently losing the sidecar's
+    # traceback is a bad failure mode to leave armed.
+    log.debug(event, exc_info=exc, **context)
