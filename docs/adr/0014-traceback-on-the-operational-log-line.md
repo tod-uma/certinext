@@ -77,12 +77,20 @@ default off, with the traceback truncated to its last frames.**
 - **Enabled only at top-level handlers** — the `except` branches wrapping a
   whole run, which fire at most once. In `certinext-zabbix` that is the two
   outermost branches in `zabbix_push_cli.py`; the per-domain calls stay off.
-- **Truncate in Python, not in rsyslog.** `traceback.format_exception(...,
-  limit=-10)` keeps the last 10 frames plus the exception line. Letting rsyslog
+- **Truncate in Python, not in rsyslog**, and bound it *twice*. Letting rsyslog
   do the cutting at 8K discards the tail, which is exactly the innermost frames
-  and the exception itself. Truncation also bounds the line regardless of
-  recursion shape, which the frame-collapsing above does not: it caps the
-  non-collapsing case that would otherwise reach tens of KB.
+  and the exception itself.
+  - `traceback.format_exception(..., limit=-10)` keeps the innermost 10 frames.
+  - A **character cap** (`TRACEBACK_BYTE_LIMIT`, 4000) then bounds the whole
+    string, keeping the end. This is the bound that actually holds, because
+    `limit` is applied to *each* traceback in a `__cause__`/`__context__` chain
+    — so the frame limit multiplies with chain length rather than capping the
+    total. Measured on a real `httpx.ConnectError` (chained from `httpcore`),
+    the 10-frame limit alone trimmed 4715 characters to 4570, about 3%; since
+    essentially every httpx failure is chained, that is the common path, not an
+    edge case. With the character cap the same traceback renders as a
+    4316-character logfmt line — escaping inflates it about 1.08x — leaving
+    roughly half the 8K budget spare.
 - **The paired DEBUG record is unchanged**, so the sidecar keeps the full,
   untruncated traceback. The journal gets a triage-grade summary; the file
   stays the full-fidelity copy.

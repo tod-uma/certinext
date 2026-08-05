@@ -127,6 +127,79 @@ def test_truncation_is_a_no_op_on_a_stack_shorter_than_the_limit() -> None:
     )
 
 
+def _chained() -> BaseException:
+    """Return a caught exception with a ``__cause__`` chain, as httpx produces.
+
+    Returns:
+        The outer exception, whose formatting includes both tracebacks.
+    """
+    try:
+        try:
+            _raise_deeply(20)
+        except RecursionError as inner:
+            raise ValueError("outer wrapper") from inner
+    except ValueError as exc:
+        return exc
+    raise AssertionError("unreachable")  # pragma: no cover
+
+
+def test_frame_limit_alone_does_not_bound_a_chained_traceback() -> None:
+    """The frame limit is per chain link, so chaining multiplies it.
+
+    This is the gap the byte limit exists to close, and it is the common case
+    rather than an edge one: every httpx failure arrives chained from httpcore.
+    Pinned so the multiplication can't be quietly assumed away.
+    """
+    exc = _chained()
+    # byte_limit disabled, so only the frame limit is in play.
+    formatted = format_truncated_traceback(exc, limit=5, byte_limit=10**6)
+
+    assert "RecursionError" in formatted  # the cause
+    assert "ValueError: outer wrapper" in formatted  # the effect
+    # Two traceback headers: the limit was applied to each link separately, so
+    # the frame budget is spent once per exception in the chain rather than once
+    # overall. (Asserted via headers, not `File "` lines — CPython collapses
+    # consecutive identical frames, so line counts understate frame counts.)
+    assert formatted.count("Traceback (most recent call last):") == 2
+
+
+def test_byte_limit_caps_the_result_and_keeps_the_tail() -> None:
+    """The byte limit is the actual bound, and it preserves the useful end.
+
+    rsyslog truncates the *tail* of an over-long message, which is exactly the
+    final exception line and innermost frames — so this trims the head instead
+    and says so with an elision marker.
+    """
+    exc = _chained()
+    capped = format_truncated_traceback(exc, byte_limit=600)
+
+    assert len(capped) <= 600
+    assert capped.startswith("[... traceback truncated")
+    # The final exception line — the single most useful part — survives.
+    assert capped.rstrip().endswith("ValueError: outer wrapper")
+    # The kept tail resumes at a line boundary, not mid-frame.
+    assert "\n" in capped
+
+
+def test_byte_limit_leaves_a_short_traceback_untouched() -> None:
+    """A traceback already inside the budget is returned verbatim, unmarked."""
+    capped = format_truncated_traceback(_caught(), byte_limit=10**6)
+
+    assert not capped.startswith("[... traceback truncated")
+    assert capped.startswith("Traceback (most recent call last):")
+
+
+def test_byte_limit_smaller_than_the_elision_marker_still_bounds_output() -> None:
+    """A pathologically small budget still returns at most that many characters.
+
+    The marker alone would exceed it, so the marker is dropped rather than the
+    bound being silently violated.
+    """
+    capped = format_truncated_traceback(_chained(), byte_limit=20)
+
+    assert len(capped) <= 20
+
+
 def test_truncation_handles_an_exception_that_was_never_raised() -> None:
     """An exception with no __traceback__ formats to just its exception line."""
     formatted = format_truncated_traceback(ValueError("never raised"))
