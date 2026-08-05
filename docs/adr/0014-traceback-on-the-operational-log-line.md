@@ -5,6 +5,13 @@ date: 2026-08-05
 
 # Attach a truncated traceback to the operational log line, at top-level handlers only
 
+> **Note:** the *truncation mechanics* decided here — `limit=-10` keeping the
+> innermost frames, and a character cap keeping the end — were superseded the
+> same day by [ADR 0015](0015-traceback-trim-the-middle-not-the-head.md), after a
+> real 965-frame recursion showed the innermost frames to be the wrong ones. The
+> substantive decision below (opt-in `include_traceback`, at top-level handlers
+> only) stands unchanged.
+
 ## Context and problem statement
 
 `log_caught_exception()` deliberately withholds the traceback from the line

@@ -1339,9 +1339,9 @@ for domain in domains:
 ```
 
 Pass `include_traceback=True` to attach the traceback to the *visible* line as
-a quoted `exception` field, truncated to its innermost `TRACEBACK_FRAME_LIMIT`
-frames. That gets a stack into the journal — and therefore into a log
-aggregator — without host access:
+a quoted `exception` field, capped at `TRACEBACK_BYTE_LIMIT` characters. That
+gets a stack into the journal — and therefore into a log aggregator — without
+host access:
 
 ```python
 try:
@@ -1356,19 +1356,29 @@ emits one stack per iteration, which is what the default exists to prevent.
 
 Truncation happens in Python rather than being left to rsyslog's 8K message
 cap, because that cap discards the *tail* of a message — the innermost frames
-and the exception itself. Two limits apply, and both are needed:
+and the exception itself. One bound applies:
 
 | Constant | Default | What it bounds |
 |---|---|---|
-| `TRACEBACK_FRAME_LIMIT` | 10 | Innermost frames kept **per exception in the chain** |
-| `TRACEBACK_BYTE_LIMIT` | 4000 | Characters in the whole result, keeping the end |
+| `TRACEBACK_BYTE_LIMIT` | 4000 | Characters in the whole result, trimmed from the middle |
 
-The frame limit alone does not bound the output: `traceback.format_exception`
-applies it to each traceback in a `__cause__`/`__context__` chain, so it
-multiplies with chain length. On a real chained `httpx.ConnectError` the frame
-limit trimmed only ~3%; the character cap is what actually holds the line under
-8K. When it trims, the result starts with an elision marker and keeps the final
-exception line.
+When it trims, both ends survive — the head names the call site, the tail keeps
+the innermost frames and the exception line — with an elision marker between
+them. No frame limit is applied by default: CPython already collapses repeated
+frames into `[Previous line repeated N more times]`, so even a 965-frame
+recursion formatted to 3971 characters and fitted whole. Spending the budget on
+innermost frames instead, as this helper used to, is actively harmful on a deep
+stack — those frames are whatever incidental code occupied frame ~1000, not the
+fault (see [ADR 0015](docs/adr/0015-traceback-trim-the-middle-not-the-head.md)).
+The `limit` argument still passes a frame limit through for callers that want
+one; note it applies **per exception in a `__cause__`/`__context__` chain**, so
+it multiplies with chain length and does not bound the total.
+
+Double quotes in the traceback are replaced with single quotes. Splunk's
+automatic `key=value` extraction does not understand `\"` inside a quoted value,
+so one `File "..."` would end the `exception` field early and everything after
+it would be mis-parsed as further key/value pairs — corrupting every field on
+the line, not just this one.
 
 The paired DEBUG record always keeps the full, untruncated traceback, so the
 debug-log sidecar stays the full-fidelity copy. See
