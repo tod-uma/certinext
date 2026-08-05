@@ -109,8 +109,8 @@ LogModeOption = Annotated[LogMode, typer.Option(
 DebugLogPathOption = Annotated[Optional[Path], typer.Option(
     "--debug-log-path", metavar="PATH", envvar="CERTINEXT_DEBUG_LOG",
     help=(
-        "Append a JSON-lines DEBUG-level log (with full tracebacks) to this path, "
-        "independent of --verbose (env: CERTINEXT_DEBUG_LOG; default: off). "
+        "Append a human-readable DEBUG-level log (with full multi-line tracebacks) "
+        "to this path, independent of --verbose (env: CERTINEXT_DEBUG_LOG; default: off). "
         "Rotation is the deployer's responsibility (e.g. logrotate)."
     ),
 )]

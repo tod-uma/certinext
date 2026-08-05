@@ -23,6 +23,7 @@ between the default logfmt non-interactive output and the opt-in JSON one.
 
 import json
 import logging
+import re
 import sys
 from collections.abc import Iterator
 from pathlib import Path
@@ -31,12 +32,29 @@ import pytest
 import structlog
 
 from certinext.cli_support import (
+    DebugLogFormat,
     LogFormat,
     LogMode,
     _drop_keys_processor,
     _reorder_log_keys_processor,
     setup_logging,
 )
+
+
+def _raise_from_frame_holding_a_secret(secret: str) -> None:
+    """Raise from a frame whose locals hold *secret*, to pin that they aren't logged.
+
+    Mirrors the real risk shape: ``build_session`` holds an OAuth client secret
+    in a local while the call that may raise is on the stack.
+
+    Args:
+        secret: Sentinel value the test asserts never reaches the log file.
+
+    Raises:
+        ValueError: Always.
+    """
+    client_secret = secret  # noqa: F841 - must exist in frame locals for the assertion to mean anything
+    raise ValueError("boom")
 
 
 @pytest.fixture(autouse=True)
@@ -294,7 +312,7 @@ def test_debug_log_path_captures_debug_events_at_verbosity_zero(
     """
     monkeypatch.setattr(sys.stderr, "isatty", lambda: False)
     _clear_systemd_env(monkeypatch)
-    debug_log_path = tmp_path / "debug.jsonl"
+    debug_log_path = tmp_path / "debug.log"
     structlog.contextvars.bind_contextvars(correlation_id="abc-123")
 
     setup_logging(0, debug_log_path=debug_log_path)
@@ -306,18 +324,91 @@ def test_debug_log_path_captures_debug_events_at_verbosity_zero(
         logger.debug("caught", exc_info=True)
 
     content = debug_log_path.read_text()
-    assert '"event": "caught"' in content
-    assert '"correlation_id": "abc-123"' in content
+    assert "caught" in content
+    assert "correlation_id=abc-123" in content
     assert "ValueError: boom" in content
-    assert content.count("\n") == 1  # one JSON object per line, no multi-line traceback
 
     captured = capsys.readouterr()
     assert "caught" not in captured.err
     assert "ValueError" not in captured.err
 
 
+def test_debug_log_format_defaults_to_console_with_a_real_multiline_traceback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The default debug-log format is console, and its traceback spans real lines.
+
+    ADR 0012 reversed ADR 0011's D2. The file is deliberately not ingested into
+    Splunk, so its only reader is a person over SSH — for whom a traceback
+    escaped onto one line (which is what both JSON and logfmt produce) is
+    unreadable. Real newlines are the entire point of the reversal, so this
+    pins the default rather than trusting the enum's declared order.
+    """
+    monkeypatch.setattr(sys.stderr, "isatty", lambda: False)
+    _clear_systemd_env(monkeypatch)
+    debug_log_path = tmp_path / "debug.log"
+
+    setup_logging(0, debug_log_path=debug_log_path)  # no debug_log_format passed
+
+    try:
+        raise ValueError("boom")
+    except ValueError:
+        structlog.get_logger().debug("caught", exc_info=True)
+
+    content = debug_log_path.read_text()
+    assert "Traceback (most recent call last):" in content
+    assert "\\n" not in content  # not escaped onto a single line
+    # The frame line, the raise line and the exception line each stand alone.
+    assert content.count("\n") > 3
+    assert not content.lstrip().startswith("{")  # not JSON
+
+
+def test_debug_log_console_format_writes_no_ansi_escapes_or_frame_locals(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The console debug log carries neither colour codes nor any frame's locals.
+
+    ``ConsoleRenderer``'s default ``exception_formatter`` is
+    ``RichTracebackFormatter(color_system="truecolor", show_locals=True)``,
+    which would write ANSI escapes into a file *and* dump every frame's local
+    variables — including the OAuth client secret held while a session is being
+    built.
+
+    Scope of what this pins, verified by mutation: dropping ``colors=False``
+    fails the ANSI assertion. Dropping the ``plain_traceback`` pin does *not*
+    fail the locals assertion, because ``format_exc_info`` runs earlier in the
+    chain and flattens ``exc_info`` to a plain string, leaving rich unreachable.
+    The locals assertion is therefore a regression guard for a future reordering
+    of that chain, not a live behavioural difference — keep it, but don't read a
+    pass here as proof the pin is doing work.
+    """
+    monkeypatch.setattr(sys.stderr, "isatty", lambda: False)
+    _clear_systemd_env(monkeypatch)
+    debug_log_path = tmp_path / "debug.log"
+
+    setup_logging(0, debug_log_path=debug_log_path)
+
+    # Bound to a name, not inlined: a traceback echoes each frame's *source
+    # line*, so a literal argument here would appear in the file no matter what
+    # the exception formatter does — and the assertion would prove nothing.
+    secret = "sk-must-never-reach-the-log"
+    try:
+        _raise_from_frame_holding_a_secret(secret)
+    except ValueError:
+        structlog.get_logger().debug("caught", exc_info=True)
+
+    content = debug_log_path.read_text()
+    assert "ValueError: boom" in content  # the traceback did get written
+    assert secret not in content  # show_locals would leak it
+    assert "\x1b[" not in content  # colors=True would emit ANSI escapes
+
+
+@pytest.mark.parametrize("debug_log_format", [DebugLogFormat.CONSOLE, DebugLogFormat.JSON])
 def test_syslog_mode_keeps_timestamp_and_pid_in_the_debug_log(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    debug_log_format: DebugLogFormat,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     """The syslog timestamp/pid drop applies to stderr only — never to the debug log.
 
@@ -329,29 +420,67 @@ def test_syslog_mode_keeps_timestamp_and_pid_in_the_debug_log(
     The drop therefore belongs to the stderr handler's processor chain alone
     (``final_processors``), not the shared ``pre_chain``. Hoisting it up to
     deduplicate the two chains looks harmless and would silently leave the
-    debug log undateable, so this test pins the split.
+    debug log undateable, so this test pins the split — for both debug-log
+    formats, since the drop lives in a chain neither renderer controls.
     """
     monkeypatch.setattr(sys.stderr, "isatty", lambda: False)
     _clear_systemd_env(monkeypatch)  # irrelevant under SYSLOG, which forces the drop; pinned anyway
-    debug_log_path = tmp_path / "debug.jsonl"
+    debug_log_path = tmp_path / "debug.log"
     structlog.contextvars.bind_contextvars(correlation_id="abc-123", pid=99)
 
     setup_logging(
         0,
         log_mode=LogMode.SYSLOG,
         debug_log_path=debug_log_path,
+        debug_log_format=debug_log_format,
         extra_priority_keys=["correlation_id", "pid"],
     )
     structlog.get_logger().info("hello")
 
-    event = json.loads(debug_log_path.read_text())
-    assert event["timestamp"].endswith("Z")  # ISO UTC, not the TTY renderer's %H:%M:%S
-    assert event["pid"] == 99
-    assert event["correlation_id"] == "abc-123"
+    content = debug_log_path.read_text()
+    if debug_log_format is DebugLogFormat.JSON:
+        event = json.loads(content)
+        assert event["timestamp"].endswith("Z")  # ISO UTC, not the TTY renderer's %H:%M:%S
+        assert event["pid"] == 99
+        assert event["correlation_id"] == "abc-123"
+    else:
+        # ConsoleRenderer leads with the timestamp and renders extras as key=value.
+        assert re.match(r"\d{4}-\d{2}-\d{2}T[\d:.]+Z ", content)
+        assert "pid=99" in content
+        assert "correlation_id=abc-123" in content
 
     captured = capsys.readouterr()
     assert "timestamp=" not in captured.err
     assert "pid=" not in captured.err
+
+
+def test_debug_log_json_format_keeps_one_object_per_line(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``DebugLogFormat.JSON`` still yields one parseable object per line.
+
+    ADR 0012 retained JSON specifically so that turning on log ingestion later
+    doesn't require re-litigating the format, which only holds if the traceback
+    stays escaped inside a single object rather than spanning lines.
+    """
+    monkeypatch.setattr(sys.stderr, "isatty", lambda: False)
+    _clear_systemd_env(monkeypatch)
+    debug_log_path = tmp_path / "debug.jsonl"
+    structlog.contextvars.bind_contextvars(correlation_id="abc-123")
+
+    setup_logging(0, debug_log_path=debug_log_path, debug_log_format=DebugLogFormat.JSON)
+
+    try:
+        raise ValueError("boom")
+    except ValueError:
+        structlog.get_logger().debug("caught", exc_info=True)
+
+    content = debug_log_path.read_text()
+    assert content.count("\n") == 1  # one JSON object per line, no multi-line traceback
+    event = json.loads(content)
+    assert event["event"] == "caught"
+    assert event["correlation_id"] == "abc-123"
+    assert "ValueError: boom" in event["exception"]
 
 
 def test_debug_log_path_unset_keeps_debug_events_out_of_every_handler(

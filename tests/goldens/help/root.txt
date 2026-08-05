@@ -46,11 +46,12 @@
 │                                                              keeps them. Ignored when attached   │
 │                                                              to a terminal.                      │
 │                                                              [default: auto]                     │
-│ --debug-log-path                      PATH                   Append a JSON-lines DEBUG-level log │
-│                                                              (with full tracebacks) to this      │
-│                                                              path, independent of --verbose      │
-│                                                              (env: CERTINEXT_DEBUG_LOG; default: │
-│                                                              off). Rotation is the deployer's    │
+│ --debug-log-path                      PATH                   Append a human-readable DEBUG-level │
+│                                                              log (with full multi-line           │
+│                                                              tracebacks) to this path,           │
+│                                                              independent of --verbose (env:      │
+│                                                              CERTINEXT_DEBUG_LOG; default: off). │
+│                                                              Rotation is the deployer's          │
 │                                                              responsibility (e.g. logrotate).    │
 │                                                              [env var: CERTINEXT_DEBUG_LOG]      │
 │ --install-completion                                         Install completion for the current  │

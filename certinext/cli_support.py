@@ -324,6 +324,33 @@ class LogFormat(str, Enum):
     """One JSON object per line, via :class:`structlog.processors.JSONRenderer`."""
 
 
+class DebugLogFormat(str, Enum):
+    """On-disk format for the ``debug_log_path`` sidecar file.
+
+    Deliberately separate from :class:`LogFormat`: the two streams have
+    different consumers and different correct defaults, so sharing one enum
+    would leak console-only values into the machine-readable stderr stream's
+    option surface (ADR 0012).
+    """
+
+    CONSOLE = "console"
+    """Human-readable lines via :class:`structlog.dev.ConsoleRenderer`.
+
+    The default. This file is not ingested into Splunk (ADR 0012) - its only
+    reader is a person on an SSH session, and real multi-line tracebacks are
+    the whole reason the file exists. Rendered with colors off and
+    :func:`structlog.dev.plain_traceback` pinned; see :func:`setup_logging`.
+    """
+
+    JSON = "json"
+    """One JSON object per line, via :class:`structlog.processors.JSONRenderer`.
+
+    The pre-ADR-0012 default, retained so that turning on log ingestion later
+    doesn't require re-litigating the format. Tracebacks embed as a single
+    escaped ``exception`` string, which parses cleanly but reads badly.
+    """
+
+
 class LogMode(str, Enum):
     """Whether non-interactive output drops the redundant ``timestamp``/``pid`` fields.
 
@@ -378,6 +405,7 @@ def setup_logging(
     log_format: LogFormat = LogFormat.LOGFMT,
     log_mode: LogMode = LogMode.AUTO,
     debug_log_path: Path | None = None,
+    debug_log_format: DebugLogFormat = DebugLogFormat.CONSOLE,
     extra_priority_keys: Sequence[str] = (),
     console_quiet_keys: Sequence[str] = (),
     quiet_loggers: Sequence[str] = (),
@@ -399,12 +427,17 @@ def setup_logging(
         log_mode: Whether to drop the ``timestamp``/``pid`` fields from
             non-interactive output as redundant with journald/syslog's own
             stamping — see :class:`LogMode`. Ignored when stderr is a TTY.
-        debug_log_path: When set, append a JSON-lines DEBUG-level log to this
-            path independent of ``verbose`` — every event, including full
+        debug_log_path: When set, append a DEBUG-level log to this path
+            independent of ``verbose`` — every event, including full
             tracebacks, regardless of the visible verbosity level. No
             default (there is no library-level log directory); rotation is
             logrotate's job, not this function's. Callers should pass their
             own env-var-resolved path (e.g. ``CERTINEXT_ZABBIX_DEBUG_LOG``).
+        debug_log_format: On-disk format for that file — see
+            :class:`DebugLogFormat`. Defaults to human-readable console
+            output, because the file is deliberately not ingested into Splunk
+            (ADR 0012) and its only reader is a person over SSH. Ignored when
+            ``debug_log_path`` is None.
         extra_priority_keys: Additional event dict keys (e.g. run-level
             ``correlation_id``/``pid`` contextvars) placed right after the built-in
             keys in non-interactive output, so cron log lines keep a stable field order.
@@ -482,13 +515,35 @@ def setup_logging(
     handlers: list[logging.Handler] = [handler]
 
     if debug_log_path is not None:
+        # ConsoleRenderer's default exception_formatter is
+        # RichTracebackFormatter(show_locals=True, color_system="truecolor"),
+        # which would write ANSI escapes into the file *and* dump every frame's
+        # locals — including OAuth client secrets and tokens held during
+        # session setup. Pinning plain_traceback does two things: it suppresses
+        # the UserWarning structlog raises when a pretty formatter sits behind
+        # format_exc_info ("Remove `format_exc_info` from your processor chain
+        # if you want pretty exceptions"), and it keeps the rich formatter
+        # unreachable if this chain is ever reordered. Today format_exc_info
+        # already flattens exc_info to a plain string first, so rich never gets
+        # the chance — only the reordering risk and the warning are live.
+        debug_renderer: Any = (
+            structlog.processors.JSONRenderer()
+            if DebugLogFormat(debug_log_format) is DebugLogFormat.JSON
+            else structlog.dev.ConsoleRenderer(
+                colors=False,
+                exception_formatter=structlog.dev.plain_traceback,
+                # Keep extra_priority_keys' deliberate order instead of
+                # re-sorting the extras alphabetically.
+                sort_keys=False,
+            )
+        )
         debug_formatter = structlog.stdlib.ProcessorFormatter(
             foreign_pre_chain=foreign_pre_chain,
             processors=[
                 structlog.stdlib.ProcessorFormatter.remove_processors_meta,
                 structlog.processors.format_exc_info,
                 _reorder_log_keys_processor(extra_priority_keys),
-                structlog.processors.JSONRenderer(),
+                debug_renderer,
             ],
         )
         debug_handler = logging.FileHandler(debug_log_path)

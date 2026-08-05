@@ -964,7 +964,7 @@ csr_file                    PEM-encoded CSR file (positional; omit to read from 
 -v, --verbose               Increase verbosity (-vvv for debug logging)
 --log-format FORMAT         Non-interactive log format: logfmt (default) or json
 --log-mode MODE             Non-interactive field verbosity: auto (default), syslog, verbose
---debug-log-path PATH       Append a JSON-lines DEBUG log (with tracebacks) to PATH (env: CERTINEXT_DEBUG_LOG)
+--debug-log-path PATH       Append a human-readable DEBUG log (with tracebacks) to PATH (env: CERTINEXT_DEBUG_LOG)
 ```
 
 Requestor and certificate values can also come from stored defaults — see
@@ -1059,7 +1059,7 @@ lookups and list only account-level parents.
 -v, --verbose           Increase verbosity (-v shows progress, -vvv enables debug logging)
 --log-format FORMAT     Non-interactive log format: logfmt (default) or json
 --log-mode MODE         Non-interactive field verbosity: auto (default), syslog, verbose
---debug-log-path PATH   Append a JSON-lines DEBUG log (with tracebacks) to PATH (env: CERTINEXT_DEBUG_LOG)
+--debug-log-path PATH   Append a human-readable DEBUG log (with tracebacks) to PATH (env: CERTINEXT_DEBUG_LOG)
 ```
 
 #### Examples
@@ -1141,7 +1141,7 @@ instead of letting the failure surface as a confusing crash downstream. As of
 -v, --verbose           Increase verbosity (-v progress, -vvv per-probe debug)
 --log-format FORMAT     Non-interactive log format: logfmt (default) or json
 --log-mode MODE         Non-interactive field verbosity: auto (default), syslog, verbose
---debug-log-path PATH   Append a JSON-lines DEBUG log (with tracebacks) to PATH (env: CERTINEXT_DEBUG_LOG)
+--debug-log-path PATH   Append a human-readable DEBUG log (with tracebacks) to PATH (env: CERTINEXT_DEBUG_LOG)
 ```
 
 #### Examples
@@ -1192,11 +1192,29 @@ fields as redundant with journald/syslog's own stamping:
 | `syslog` | Always drop the fields, even with no systemd signal — for cron output piped through `logger(1)` |
 | `verbose` | Always keep the fields, even under systemd — for interactively debugging a unit's output |
 
-**`--debug-log-path PATH`** (env: `CERTINEXT_DEBUG_LOG`) appends a JSON-lines
-DEBUG-level log to `PATH`, independent of `-v` — every event, including full
-tracebacks, so an unattended run's failure is never lost even at the default
-verbosity. Off unless a path is given; rotate it with logrotate, not this
-tool. `-v` still controls only what appears on stderr/the journal.
+**`--debug-log-path PATH`** (env: `CERTINEXT_DEBUG_LOG`) appends a DEBUG-level
+log to `PATH`, independent of `-v` — every event, including full tracebacks, so
+an unattended run's failure is never lost even at the default verbosity. Off
+unless a path is given; rotate it with logrotate, not this tool. `-v` still
+controls only what appears on stderr/the journal.
+
+This file is written in the same human-readable format you get on a terminal,
+with tracebacks spanning real lines, because it is meant to be read over SSH
+after a failure rather than shipped to a log aggregator:
+
+```text
+2026-06-03T14:00:01.234567Z [error    ] Zabbix push failed   correlation_id=ab88ea9b env=prod
+Traceback (most recent call last):
+  File "/opt/certinext-zabbix/zabbix_push.py", line 142, in push
+    sender.send(packet)
+RecursionError: maximum recursion depth exceeded
+```
+
+Library callers that do want a machine-parseable file can pass
+`debug_log_format=DebugLogFormat.JSON` to `setup_logging()` for one JSON object
+per line instead. There is no CLI flag for it — see
+[ADR 0012](docs/adr/0012-debug-log-host-local-console-format.md) for why the
+default flipped and why the file is deliberately not ingested into Splunk.
 
 **Cron example** — capture logfmt output and a debug sidecar to files:
 
@@ -1204,7 +1222,7 @@ tool. `-v` still controls only what appears on stderr/the journal.
 certinext parent-dcv-status --sandbox --debug-log-path /var/log/certinext/debug.log 2>> /var/log/certinext.log
 ```
 
-Each line of the JSON debug log (or the stderr stream with `--log-format json`) is a self-contained JSON object:
+Each line of the stderr stream with `--log-format json` is a self-contained JSON object:
 
 ```json
 {"timestamp": "2026-06-03T14:00:01.234Z", "level": "info", "event": "Connecting", "account": "5912517854", "profile": "default", "url": "https://us-api.certinext.io"}
@@ -1296,8 +1314,10 @@ in non-interactive output), `console_quiet_keys=` (fields hidden from
 interactive output at verbosity 0), and `quiet_loggers=` (additional
 third-party loggers capped at WARNING below `-vvvv`); plus `log_mode=`
 (`LogMode`, drop redundant `timestamp`/`pid` under systemd — see
-[Log output](#log-output)) and `debug_log_path=` (always-on JSON DEBUG
-sidecar file, independent of verbosity).
+[Log output](#log-output)), `debug_log_path=` (always-on DEBUG sidecar file,
+independent of verbosity) and `debug_log_format=` (`DebugLogFormat`, that
+file's on-disk format — human-readable `console` by default, `json` for one
+object per line).
 
 ### Working with domains
 
