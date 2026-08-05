@@ -27,6 +27,7 @@ Numbering is sequential and never reused.
 | [0011](0011-always-on-json-debug-log-sidecar.md) | Always-on JSON debug-log sidecar file, independent of `--verbose`, no library default path | accepted (D2 superseded by [0012](0012-debug-log-host-local-console-format.md)) |
 | [0012](0012-debug-log-host-local-console-format.md) | Keep the debug-log sidecar out of Splunk; render it with `ConsoleRenderer`, format configurable | accepted |
 | [0013](0013-shared-log-caught-exception-helper.md) | Promote `log_caught_exception` from a per-repo copy into `certinext.cli_support` | accepted |
-| [0014](0014-traceback-on-the-operational-log-line.md) | Attach a truncated traceback to the operational log line, at top-level handlers only | accepted |
+| [0014](0014-traceback-on-the-operational-log-line.md) | Attach a truncated traceback to the operational log line, at top-level handlers only | accepted (truncation mechanics superseded by [0015](0015-traceback-trim-the-middle-not-the-head.md)) |
+| [0015](0015-traceback-trim-the-middle-not-the-head.md) | Trim an over-long traceback from the middle, and strip its double quotes | accepted |
 
 See also: [docs/wishlist/](../wishlist/) for deferred ideas not yet committed to.

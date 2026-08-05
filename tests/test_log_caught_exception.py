@@ -17,8 +17,10 @@
 This helper was promoted out of two byte-identical downstream copies (ADR 0013)
 and gained an opt-in traceback on the visible line (ADR 0014). The tests here
 pin the parts that make it safe to call from cron-fed scripts: the traceback is
-off by default, truncation keeps the *innermost* frames, and the visible line
-never carries a real newline that journald/rsyslog could split into fragments.
+off by default, truncation keeps *both ends* of the stack (ADR 0015), the output
+carries no double quotes for Splunk's KV extractor to choke on, and the visible
+line never carries a real newline that journald/rsyslog could split into
+fragments.
 """
 
 import logging
@@ -30,7 +32,7 @@ import pytest
 import structlog
 
 from certinext.cli_support import (
-    TRACEBACK_FRAME_LIMIT,
+    TRACEBACK_BYTE_LIMIT,
     TRACEBACK_HINT,
     LogMode,
     format_truncated_traceback,
@@ -89,42 +91,115 @@ def _caught(depth: int = 0) -> BaseException:
     raise AssertionError("unreachable")  # pragma: no cover
 
 
+def _ping(depth: int) -> None:
+    """Recurse via :func:`_pong`, building a stack CPython cannot collapse.
+
+    ``[Previous line repeated N more times]`` only collapses *consecutive
+    identical* frames, so alternating between two functions defeats it and
+    produces a traceback that grows linearly with depth. That is the shape the
+    character cap has to handle (ADR 0014 measured ~50KB by depth 300).
+
+    Args:
+        depth: Remaining recursion depth.
+
+    Raises:
+        RecursionError: At the bottom of the recursion.
+    """
+    if depth:
+        _pong(depth - 1)
+        return
+    raise RecursionError("maximum recursion depth exceeded")
+
+
+def _pong(depth: int) -> None:
+    """Recurse via :func:`_ping` — the other half of the alternating pair.
+
+    Args:
+        depth: Remaining recursion depth.
+
+    Raises:
+        RecursionError: Propagated from :func:`_ping`.
+    """
+    _ping(depth)
+
+
+def _caught_alternating(depth: int) -> BaseException:
+    """Return a caught exception whose traceback is too big for the byte budget.
+
+    Args:
+        depth: Recursion depth; each level adds two uncollapsible frames.
+
+    Returns:
+        The caught exception, with ``__traceback__`` populated.
+    """
+    try:
+        _ping(depth)
+    except RecursionError as exc:
+        return exc
+    raise AssertionError("unreachable")  # pragma: no cover
+
+
 # --- format_truncated_traceback ------------------------------------------------
 
-def test_truncation_keeps_the_innermost_frames_and_the_exception_line() -> None:
-    """Truncation must keep the *end* of the stack, where the actual error is.
+def test_a_deep_self_recursive_stack_survives_whole() -> None:
+    """The regression test for ADR 0015: no frame limit, so both ends survive.
 
-    ``traceback.format_exception``'s ``limit`` counts from the outermost frame
-    when positive; the helper negates it so the innermost frames survive. Getting
-    this backwards would keep the least informative half of a deep stack, which
-    is also exactly what rsyslog's 8K tail truncation would do to us (ADR 0014).
+    This is the incident shape. A 965-frame ``__send_to_cluster`` redirect loop
+    produced a traceback whose innermost frames were structlog's own log
+    formatter — the code that happened to occupy frame ~1000, not the fault. The
+    previous ``limit=-10`` spent the entire budget there and the journal line
+    named nothing useful; the real traceback was 3971 characters and would have
+    fitted whole.
 
-    Asserted by comparing against the untruncated formatting rather than by
-    counting ``File "`` lines: CPython collapses consecutive identical frames
-    into ``[Previous line repeated N more times]``, so for a self-recursive
-    stack the line count is not the frame count.
+    So: the call site *and* the raise site must both be present, untrimmed,
+    because CPython's collapsing of repeated frames keeps such a stack small.
+    """
+    exc = _caught(depth=900)
+    formatted = format_truncated_traceback(exc)
+
+    assert len(formatted) <= TRACEBACK_BYTE_LIMIT
+    assert "[... traceback truncated" not in formatted, "should have fitted whole"
+    # CPython collapsed the repetition instead of emitting 900 frames.
+    assert "[Previous line repeated" in formatted
+    # Both ends: the outermost caller and the innermost raise site.
+    assert "in _caught" in formatted
+    assert "in _raise_deeply" in formatted
+    assert formatted.rstrip().endswith("RecursionError: maximum recursion depth exceeded")
+
+
+def test_output_carries_no_double_quotes() -> None:
+    """Double quotes are replaced, so Splunk's KV extractor can read the field.
+
+    Splunk's automatic ``key=value`` extraction does not understand ``\\"``
+    inside a quoted value: one ``File "..."`` in the rendered ``exception="..."``
+    field ends the field early and everything after it is mis-parsed as further
+    key/value pairs, corrupting every field on the line. Frame lines are the
+    guaranteed source of quotes, so their absence is the assertion.
+    """
+    formatted = format_truncated_traceback(_caught(depth=3))
+
+    assert '"' not in formatted
+    assert "  File '" in formatted, "frame lines should still be readable"
+
+
+def test_an_explicit_negative_limit_still_keeps_the_innermost_frames() -> None:
+    """The ``limit`` passthrough is retained for callers that want it.
+
+    Only the *default* changed to None; a caller asking for innermost-only
+    trimming still gets ``traceback.format_exception``'s negative-limit
+    behaviour. Asserted against the unlimited formatting rather than by counting
+    frame lines, since CPython collapses consecutive identical frames.
     """
     exc = _caught(depth=40)
-    truncated = format_truncated_traceback(exc, limit=5)
-    full = format_truncated_traceback(exc, limit=10_000)
+    innermost = format_truncated_traceback(exc, limit=-5)
+    full = format_truncated_traceback(exc)
 
-    assert truncated.startswith("Traceback (most recent call last):")
-    assert "RecursionError: maximum recursion depth exceeded" in truncated
-    # The raise site is the innermost frame, so it must survive truncation.
-    assert "_raise_deeply" in truncated
-    assert len(truncated) < len(full), "truncation did not actually shorten the stack"
+    assert "in _raise_deeply" in innermost
     # `exc.__traceback__` spans the catching frame down to the raise, so its
-    # outermost frame is _caught — and that is what truncation drops first.
+    # outermost frame is _caught — dropped by an innermost-only limit, kept by
+    # the new default.
+    assert "in _caught" not in innermost
     assert "in _caught" in full
-    assert "in _caught" not in truncated
-
-
-def test_truncation_is_a_no_op_on_a_stack_shorter_than_the_limit() -> None:
-    """A shallow traceback is returned whole rather than padded or trimmed."""
-    exc = _caught()
-    assert format_truncated_traceback(exc, limit=TRACEBACK_FRAME_LIMIT) == (
-        format_truncated_traceback(exc, limit=10_000)
-    )
 
 
 def _chained() -> BaseException:
@@ -146,46 +221,48 @@ def _chained() -> BaseException:
 def test_frame_limit_alone_does_not_bound_a_chained_traceback() -> None:
     """The frame limit is per chain link, so chaining multiplies it.
 
-    This is the gap the byte limit exists to close, and it is the common case
-    rather than an edge one: every httpx failure arrives chained from httpcore.
-    Pinned so the multiplication can't be quietly assumed away.
+    This is why the character cap, not the frame limit, is the bound — and it is
+    the common case rather than an edge one: every httpx failure arrives chained
+    from httpcore. Pinned so the multiplication can't be quietly assumed away by
+    a caller that passes ``limit`` expecting a total.
     """
     exc = _chained()
     # byte_limit disabled, so only the frame limit is in play.
-    formatted = format_truncated_traceback(exc, limit=5, byte_limit=10**6)
+    formatted = format_truncated_traceback(exc, limit=-5, byte_limit=10**6)
 
     assert "RecursionError" in formatted  # the cause
     assert "ValueError: outer wrapper" in formatted  # the effect
     # Two traceback headers: the limit was applied to each link separately, so
     # the frame budget is spent once per exception in the chain rather than once
-    # overall. (Asserted via headers, not `File "` lines — CPython collapses
+    # overall. (Asserted via headers, not frame lines — CPython collapses
     # consecutive identical frames, so line counts understate frame counts.)
     assert formatted.count("Traceback (most recent call last):") == 2
 
 
-def test_byte_limit_caps_the_result_and_keeps_the_tail() -> None:
-    """The byte limit is the actual bound, and it preserves the useful end.
+def test_byte_limit_trims_the_middle_and_keeps_both_ends() -> None:
+    """Over budget, the head and tail both survive and the middle is elided.
 
-    rsyslog truncates the *tail* of an over-long message, which is exactly the
-    final exception line and innermost frames — so this trims the head instead
-    and says so with an elision marker.
+    The tail carries the exception line and innermost frames; the head names the
+    call site. Keeping only the tail — the pre-ADR-0015 behaviour — is what left
+    a deep-recursion journal line saying nothing about which code path failed.
     """
     exc = _chained()
     capped = format_truncated_traceback(exc, byte_limit=600)
 
     assert len(capped) <= 600
-    assert capped.startswith("[... traceback truncated")
-    # The final exception line — the single most useful part — survives.
+    # Head: the traceback still opens normally rather than mid-stack.
+    assert capped.startswith("Traceback (most recent call last):")
+    # Tail: the final exception line — the single most useful part — survives.
     assert capped.rstrip().endswith("ValueError: outer wrapper")
-    # The kept tail resumes at a line boundary, not mid-frame.
-    assert "\n" in capped
+    # The elision sits between them, on its own line.
+    assert "\n[... traceback truncated" in capped
 
 
 def test_byte_limit_leaves_a_short_traceback_untouched() -> None:
     """A traceback already inside the budget is returned verbatim, unmarked."""
     capped = format_truncated_traceback(_caught(), byte_limit=10**6)
 
-    assert not capped.startswith("[... traceback truncated")
+    assert "[... traceback truncated" not in capped
     assert capped.startswith("Traceback (most recent call last):")
 
 
@@ -205,7 +282,7 @@ def test_truncation_handles_an_exception_that_was_never_raised() -> None:
     formatted = format_truncated_traceback(ValueError("never raised"))
 
     assert "ValueError: never raised" in formatted
-    assert "  File \"" not in formatted
+    assert "  File '" not in formatted
 
 
 # --- log_caught_exception -----------------------------------------------------
@@ -239,17 +316,25 @@ def test_include_traceback_attaches_the_stack_and_drops_the_hint() -> None:
     assert "hint" not in visible
 
 
-def test_include_traceback_truncates_to_the_frame_limit() -> None:
-    """A deep stack on the visible line is trimmed, not passed through whole."""
-    exc = _caught(depth=60)
+def test_include_traceback_caps_an_over_budget_stack() -> None:
+    """A stack too big for the budget is capped on the visible line, not passed whole.
+
+    Uses the alternating-frame recursion because that is the shape CPython
+    *cannot* collapse — a directly self-recursive stack formats compactly enough
+    to stay inside the budget (see the ADR 0015 regression test), so it would
+    make this assertion vacuous.
+    """
+    exc = _caught_alternating(depth=200)
     with structlog.testing.capture_logs() as entries:
         log_caught_exception(
             structlog.get_logger(), "Unexpected error", exc, include_traceback=True
         )
 
     attached = entries[0]["exception"]
-    assert attached == format_truncated_traceback(exc, limit=TRACEBACK_FRAME_LIMIT)
-    assert len(attached) < len(format_truncated_traceback(exc, limit=10_000))
+    assert attached == format_truncated_traceback(exc)
+    assert len(attached) <= TRACEBACK_BYTE_LIMIT
+    assert len(attached) < len(format_truncated_traceback(exc, byte_limit=10**6))
+    assert "[... traceback truncated" in attached
 
 
 def test_level_warning_downgrades_only_the_visible_line() -> None:
@@ -321,13 +406,21 @@ def test_full_traceback_still_reaches_the_debug_sidecar_untruncated(
     debug_log_path = tmp_path / "debug.log"
     setup_logging(0, debug_log_path=debug_log_path)
 
-    exc = _caught(depth=60)
+    # Alternating frames, so the visible line genuinely is capped — a directly
+    # self-recursive stack fits whole and would prove nothing here.
+    exc = _caught_alternating(depth=200)
     log_caught_exception(
         structlog.get_logger(), "Unexpected error", exc, include_traceback=True,
     )
 
+    # The file carries *both* records — the capped operational line and the
+    # paired DEBUG one — so the capped traceback is legitimately present. Only
+    # the last one, the DEBUG record's, claims to be full-fidelity.
     content = debug_log_path.read_text()
-    # The outermost frame truncation drops (see the truncation test) is _caught.
-    # Its presence in the file proves the sidecar kept the whole stack.
-    assert "in _caught" not in format_truncated_traceback(exc, limit=TRACEBACK_FRAME_LIMIT)
-    assert "in _caught" in content, "the sidecar's traceback was truncated too"
+    assert "[... traceback truncated" in format_truncated_traceback(exc)
+    sidecar = content[content.rindex("Traceback (most recent call last):"):]
+
+    assert "[... traceback truncated" not in sidecar, "the sidecar was capped too"
+    # The sidecar is also byte-exact: the visible line's quote substitution is a
+    # transport concession for Splunk, not a change to the record of what failed.
+    assert '  File "' in sidecar, "the sidecar's quotes were rewritten too"
