@@ -5,6 +5,12 @@ date: 2026-08-04
 
 # Always-on JSON debug-log sidecar file, independent of `--verbose`, no library default path
 
+> **Note:** D2 (JSON-lines format) below is superseded by
+> [ADR 0012](0012-debug-log-host-local-console-format.md), which switched the
+> debug file to `ConsoleRenderer` after the file was deliberately kept out of
+> Splunk ingestion — removing D2's justification. D1, D5, and D7 remain in
+> force.
+
 ## Context and problem statement
 
 On 2026-08-03 `certinext-zabbix`'s systemd units failed with

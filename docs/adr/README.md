@@ -24,6 +24,7 @@ Numbering is sequential and never reused.
 | [0008](0008-org-scoped-dcv-inheritance-not-dns-zone-boundary.md) | DCV inheritance eligibility is org-scoped, not gated by DNS zone boundaries | accepted |
 | [0009](0009-root-callback-for-shared-cli-options.md) | Centralize shared CLI options on the root `app` callback, resolved via `ctx.obj` | accepted |
 | [0010](0010-log-mode-tri-state-for-syslog-aware-output.md) | Tri-state `--log-mode auto\|syslog\|verbose` for syslog/journald-aware output | accepted |
-| [0011](0011-always-on-json-debug-log-sidecar.md) | Always-on JSON debug-log sidecar file, independent of `--verbose`, no library default path | accepted |
+| [0011](0011-always-on-json-debug-log-sidecar.md) | Always-on JSON debug-log sidecar file, independent of `--verbose`, no library default path | accepted (D2 superseded by [0012](0012-debug-log-host-local-console-format.md)) |
+| [0012](0012-debug-log-host-local-console-format.md) | Keep the debug-log sidecar out of Splunk; render it with `ConsoleRenderer`, format configurable | accepted |
 
 See also: [docs/wishlist/](../wishlist/) for deferred ideas not yet committed to.
