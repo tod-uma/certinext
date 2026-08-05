@@ -653,35 +653,90 @@ TRACEBACK_HINT = "re-run with -vvv for the full traceback"
 """Hint appended to a concise error line that carries no traceback of its own."""
 
 TRACEBACK_FRAME_LIMIT = 10
-"""Frames kept when ``include_traceback`` truncates a traceback.
+"""Frames kept *per exception in the chain* when a traceback is truncated.
 
 Counted from the *innermost* frame outward, so the exception and the code that
 raised it always survive. rsyslog's default ``$MaxMessageSize`` is 8K and it
 truncates the tail of a message - i.e. exactly this part - so the trimming has
 to happen here rather than being left to the log transport (ADR 0014).
+
+Note this is a *per-chain-link* budget, not a total:
+:func:`traceback.format_exception` applies ``limit`` to each traceback in a
+``__cause__``/``__context__`` chain separately. A chained exception therefore
+yields up to ``limit x chain_length`` frames, which is why
+:data:`TRACEBACK_BYTE_LIMIT` exists as the actual bound.
 """
 
+TRACEBACK_BYTE_LIMIT = 4000
+"""Hard ceiling on a formatted traceback's length, in characters.
 
-def format_truncated_traceback(exc: BaseException, limit: int = TRACEBACK_FRAME_LIMIT) -> str:
-    """Format *exc*'s traceback, keeping only its innermost *limit* frames.
+The frame limit alone does not bound the output: chaining multiplies it (see
+:data:`TRACEBACK_FRAME_LIMIT`). Measured, a single ``httpx.ConnectError``
+- chained from ``httpcore`` - trims from 4715 to 4570 characters under a 10-frame
+limit, about 3%. Since essentially every httpx failure is chained, that is the
+common path rather than an edge case, and a longer chain would clear rsyslog's
+8K cap outright.
 
-    A negative ``limit`` passed to :func:`traceback.format_exception` keeps the
-    *last* that many frames rather than the first, which is what makes this
-    useful for a deep or self-recursive stack: a ``RecursionError`` traceback is
-    roughly a thousand near-identical frames, and only the end of it says
-    anything.
+Set below 8K with room for the rest of the logfmt line (event, correlation_id,
+error, context fields) and for the escaping both renderers apply to newlines,
+quotes and backslashes. Measured, that escaping inflates a capped traceback by
+about 1.08x - 3986 characters render as a 4316-character logfmt line - so the
+default leaves roughly half the 8K budget spare.
+"""
+
+_TRACEBACK_ELISION = "[... traceback truncated, see the debug log for the full stack ...]\n"
+
+
+def format_truncated_traceback(
+    exc: BaseException,
+    limit: int = TRACEBACK_FRAME_LIMIT,
+    byte_limit: int = TRACEBACK_BYTE_LIMIT,
+) -> str:
+    """Format *exc*'s traceback, bounded by both a frame and a length limit.
+
+    Two independent trims, because neither alone bounds the result:
+
+    - ``limit`` keeps the innermost frames of each traceback. A negative value
+      passed to :func:`traceback.format_exception` keeps the *last* that many
+      rather than the first, which is what makes it useful on a deep or
+      self-recursive stack where only the end says anything.
+    - ``byte_limit`` then caps the whole string, keeping the **end**. This is
+      what actually holds the line under rsyslog's message cap, since ``limit``
+      is applied per link of a ``__cause__``/``__context__`` chain and so
+      multiplies with chain length.
+
+    Keeping the end rather than the beginning is deliberate and matches what the
+    frame limit does: the final exception line and the innermost frames are the
+    part worth having. Truncating the head only loses the outer callers, which
+    the surrounding log context already implies.
 
     Args:
         exc: The caught exception. Its ``__traceback__`` is used; an exception
             with none (never raised) formats to just the exception line.
-        limit: Number of innermost frames to keep.
+        limit: Innermost frames to keep per exception in the chain.
+        byte_limit: Maximum characters to return, including the elision marker.
+            Values at or below the marker's own length disable frame-level
+            output entirely and return just the tail.
 
     Returns:
         The formatted traceback as a single string with real newlines. Callers
         logging this into a logfmt or JSON stream do not need to escape it -
         both renderers escape newlines themselves.
     """
-    return "".join(traceback.format_exception(type(exc), exc, exc.__traceback__, limit=-limit))
+    formatted = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__, limit=-limit))
+    if len(formatted) <= byte_limit:
+        return formatted
+
+    keep = byte_limit - len(_TRACEBACK_ELISION)
+    if keep <= 0:
+        return formatted[-byte_limit:]
+    # Resume at a line boundary where possible, so the kept tail doesn't start
+    # mid-frame; fall back to a hard cut when no newline falls inside the window.
+    tail = formatted[-keep:]
+    newline = tail.find("\n")
+    if 0 <= newline < len(tail) - 1:
+        tail = tail[newline + 1:]
+    return _TRACEBACK_ELISION + tail
 
 
 def log_caught_exception(

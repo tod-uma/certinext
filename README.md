@@ -1353,10 +1353,25 @@ except Exception as exc:
 
 **Only use it at a handler that can fire once per run.** Inside a loop it
 emits one stack per iteration, which is what the default exists to prevent.
+
 Truncation happens in Python rather than being left to rsyslog's 8K message
 cap, because that cap discards the *tail* of a message — the innermost frames
-and the exception itself. The paired DEBUG record always keeps the full,
-untruncated traceback, so the sidecar stays the full-fidelity copy. See
+and the exception itself. Two limits apply, and both are needed:
+
+| Constant | Default | What it bounds |
+|---|---|---|
+| `TRACEBACK_FRAME_LIMIT` | 10 | Innermost frames kept **per exception in the chain** |
+| `TRACEBACK_BYTE_LIMIT` | 4000 | Characters in the whole result, keeping the end |
+
+The frame limit alone does not bound the output: `traceback.format_exception`
+applies it to each traceback in a `__cause__`/`__context__` chain, so it
+multiplies with chain length. On a real chained `httpx.ConnectError` the frame
+limit trimmed only ~3%; the character cap is what actually holds the line under
+8K. When it trims, the result starts with an elision marker and keeps the final
+exception line.
+
+The paired DEBUG record always keeps the full, untruncated traceback, so the
+debug-log sidecar stays the full-fidelity copy. See
 [ADR 0014](docs/adr/0014-traceback-on-the-operational-log-line.md).
 
 ### Working with domains
