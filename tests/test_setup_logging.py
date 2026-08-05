@@ -21,6 +21,7 @@ behavior and the backward-compatible defaults, plus the ``log_format`` switch
 between the default logfmt non-interactive output and the opt-in JSON one.
 """
 
+import json
 import logging
 import sys
 from collections.abc import Iterator
@@ -313,6 +314,44 @@ def test_debug_log_path_captures_debug_events_at_verbosity_zero(
     captured = capsys.readouterr()
     assert "caught" not in captured.err
     assert "ValueError" not in captured.err
+
+
+def test_syslog_mode_keeps_timestamp_and_pid_in_the_debug_log(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The syslog timestamp/pid drop applies to stderr only — never to the debug log.
+
+    Under syslog the journal supplies the stamp for stderr, so repeating it there
+    is redundant. The debug-log file has no such header: its own ``timestamp``
+    field is the only record of when an event happened, which is the whole point
+    of a file you read after an unattended failure.
+
+    The drop therefore belongs to the stderr handler's processor chain alone
+    (``final_processors``), not the shared ``pre_chain``. Hoisting it up to
+    deduplicate the two chains looks harmless and would silently leave the
+    debug log undateable, so this test pins the split.
+    """
+    monkeypatch.setattr(sys.stderr, "isatty", lambda: False)
+    _clear_systemd_env(monkeypatch)  # irrelevant under SYSLOG, which forces the drop; pinned anyway
+    debug_log_path = tmp_path / "debug.jsonl"
+    structlog.contextvars.bind_contextvars(correlation_id="abc-123", pid=99)
+
+    setup_logging(
+        0,
+        log_mode=LogMode.SYSLOG,
+        debug_log_path=debug_log_path,
+        extra_priority_keys=["correlation_id", "pid"],
+    )
+    structlog.get_logger().info("hello")
+
+    event = json.loads(debug_log_path.read_text())
+    assert event["timestamp"].endswith("Z")  # ISO UTC, not the TTY renderer's %H:%M:%S
+    assert event["pid"] == 99
+    assert event["correlation_id"] == "abc-123"
+
+    captured = capsys.readouterr()
+    assert "timestamp=" not in captured.err
+    assert "pid=" not in captured.err
 
 
 def test_debug_log_path_unset_keeps_debug_events_out_of_every_handler(
