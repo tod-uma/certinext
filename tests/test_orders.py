@@ -156,6 +156,15 @@ class TestOrderRecordProperties:
         """certificate_status maps to the certificateStatus field."""
         assert order.certificate_status == "Certificate Downloaded"
 
+    def test_originator(self) -> None:
+        """originator maps to the originator field (observed: ACME, CERTInext, CERTInext API)."""
+        rec = OrderRecord.model_validate({"originator": "ACME"})
+        assert rec.originator == "ACME"
+
+    def test_originator_none_when_absent(self, order: OrderRecord) -> None:
+        """originator is None when the field is absent from the response."""
+        assert order.originator is None
+
     def test_common_name_from_domain_name_field(self, order: OrderRecord) -> None:
         """common_name reads domainName — the primary field in the real orders report API."""
         assert order.common_name == "maine.edu"

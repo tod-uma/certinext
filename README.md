@@ -1660,6 +1660,7 @@ recent = sess.orders.get_list(status="issued", since=date(2026, 7, 1), until=dat
 | `common_name` | `str \| None` | Certificate common name (hostname or domain) |
 | `order_date` | `datetime \| None` | Order creation timestamp, UTC-aware (no offset on the wire, unlike every other CertiNext timestamp, but the vendor confirmed UTC); see [GitLab issue #20](https://gitlab.its.maine.edu/sysadmin/python-libs/certinext/-/issues/20) |
 | `certificate_expiry_date` | `datetime \| None` | Certificate expiry timestamp, UTC-aware, for the same reason as `order_date` |
+| `originator` | `str \| None` | System/channel that created the order (observed: `ACME`, `CERTInext`, `CERTInext API`) |
 
 ```python
 o.as_dict()   # raw API response dict

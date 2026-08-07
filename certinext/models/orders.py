@@ -127,6 +127,17 @@ class OrderRecord(CertiNextModel):
             ":attr:`order_date` - see GitLab issue #20."
         ),
     )
+    originator: str | None = Field(
+        default=None,
+        alias="originator",
+        description=(
+            "System or channel that created the order, e.g. ``ACME``, "
+            "``CERTInext``, ``CERTInext API``. A prod fixture predating "
+            "2026-08-07 showed this as always ``None``; confirmed populated "
+            "on every row of a fresh 462-row prod sample taken that day, so "
+            "the field is safe to key alerting logic on."
+        ),
+    )
 
     @model_validator(mode="before")
     @classmethod
