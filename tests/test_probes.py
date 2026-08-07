@@ -430,6 +430,63 @@ def test_probe_r16_reports_paging_semantics(client: CertiNextClient) -> None:
         )
 
 
+def test_probe_r16_date_range_filter(client: CertiNextClient) -> None:
+    """R16 follow-up: ``from``/``to`` date params actually filter ``/reports/orders``.
+
+    Confirmed 2026-08-07 against the OpenAPI spec (``from``/``to``, both
+    inclusive, ``YYYY-MM-DD``) and empirically here: a single-day window
+    around a known order's ``orderDate`` returns exactly that order, and an
+    out-of-range window returns zero rows. This is the basis for the
+    ``since``/``until`` params added to ``get_list()``/``get_page()``/
+    ``_fetch_page()`` in ``orders.py``.
+    """
+    err, baseline = _try_get(client, _ORDERS, {"page": 1, "size": 100})
+    assert err is None, f"baseline orders fetch rejected: HTTP {err}"
+    rows = [r for r in _rows(baseline) if isinstance(r, dict) and r.get("orderDate")]
+    if not rows:
+        pytest.skip("no orders with orderDate in this environment to probe a date window against")
+
+    target = rows[0]
+    order_day = str(target["orderDate"])[:10]  # YYYY-MM-DD prefix
+    err, windowed = _try_get(client, _ORDERS, {"page": 1, "size": 100, "from": order_day, "to": order_day})
+    assert err is None, f"from/to date filter rejected: HTTP {err}"
+    windowed_rows = _rows(windowed)
+    assert windowed_rows, f"single-day window for {order_day!r} returned zero rows, expected at least the target order"
+    assert all(str(r.get("orderDate", "")).startswith(order_day) for r in windowed_rows if isinstance(r, dict)), (
+        f"from={order_day}&to={order_day} returned rows outside that day"
+    )
+
+    err, empty = _try_get(client, _ORDERS, {"page": 1, "size": 100, "from": "2000-01-01", "to": "2000-01-02"})
+    assert err is None, f"out-of-range date window rejected: HTTP {err}"
+    assert not _rows(empty), "out-of-range date window (year 2000) unexpectedly returned rows"
+
+
+def test_probe_r16_pending_substatus_rejected(client: CertiNextClient) -> None:
+    """R16 follow-up: 5 of 6 documented pending-``*`` ``status`` values 422.
+
+    Confirmed 2026-08-07 against the OpenAPI spec's ``status`` enum
+    (``issued``/``revoked``/``expired``/``cancelled``/``rejected``/
+    ``pending-approval`` only) and empirically here. Not a ``certinext``
+    workaround site — no code here passes the rejected values — but
+    ``certinext-zabbix``'s daily ``--order-health`` job reportedly filters
+    across all 6 pending-``*`` values, so a regression or vendor fix here is
+    signal for that workspace, not this one.
+    """
+    rejected = [
+        "pending-dcv",
+        "pending-organization-verification",
+        "pending-csr",
+        "pending-documents",
+        "pending-agreement",
+    ]
+    for status in rejected:
+        err, _ = _try_get(client, _ORDERS, {"page": 1, "size": 1, "status": status})
+        assert err == 422, f"status={status!r} expected HTTP 422 per OpenAPI enum, got {err}"
+
+    err, _ = _try_get(client, _ORDERS, {"page": 1, "size": 1, "status": "pending-approval"})
+    assert err is None, f"status='pending-approval' expected to be accepted per OpenAPI enum, got HTTP {err}"
+
+
 def test_probe_r17_exact_search_reliability(client: CertiNextClient, baseline_domains: list[Domain]) -> None:
     """R17: exact-FQDN ``search`` returns exactly the requested domain.
 

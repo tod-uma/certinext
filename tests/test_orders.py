@@ -14,7 +14,7 @@
 
 """Tests for certinext.orders (OrderRecord, OrderAccessor) and domain_cert_count.build_rows."""
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -272,6 +272,22 @@ class TestOrderAccessorGetPage:
         _, kwargs = mock_client.get.call_args
         assert "status" not in kwargs["params"]
 
+    def test_since_until_params_forwarded(self, accessor: OrderAccessor, mock_client: MagicMock) -> None:
+        """get_page() passes since/until as the API's from/to params, ISO-formatted."""
+        mock_client.get.return_value = []
+        accessor.get_page(since=date(2026, 7, 1), until=date(2026, 7, 31))
+        _, kwargs = mock_client.get.call_args
+        assert kwargs["params"]["from"] == "2026-07-01"
+        assert kwargs["params"]["to"] == "2026-07-31"
+
+    def test_no_since_until_params_when_none(self, accessor: OrderAccessor, mock_client: MagicMock) -> None:
+        """get_page() omits from/to when since/until are None."""
+        mock_client.get.return_value = []
+        accessor.get_page()
+        _, kwargs = mock_client.get.call_args
+        assert "from" not in kwargs["params"]
+        assert "to" not in kwargs["params"]
+
 
 # ---------------------------------------------------------------------------
 # OrderAccessor.get_list pagination
@@ -309,6 +325,22 @@ class TestOrderAccessorGetList:
         accessor.get_list(status="expired")
         _, kwargs = mock_client.get.call_args
         assert kwargs["params"]["status"] == "expired"
+
+    def test_since_until_filter_forwarded(self, accessor: OrderAccessor, mock_client: MagicMock) -> None:
+        """get_list() passes since/until as from/to on each page request."""
+        mock_client.get.return_value = [SAMPLE_ORDER]
+        accessor.get_list(since=date(2026, 7, 1), until=date(2026, 7, 31))
+        _, kwargs = mock_client.get.call_args
+        assert kwargs["params"]["from"] == "2026-07-01"
+        assert kwargs["params"]["to"] == "2026-07-31"
+
+    def test_no_since_until_when_none(self, accessor: OrderAccessor, mock_client: MagicMock) -> None:
+        """get_list() omits from/to when since/until are None."""
+        mock_client.get.return_value = [SAMPLE_ORDER]
+        accessor.get_list()
+        _, kwargs = mock_client.get.call_args
+        assert "from" not in kwargs["params"]
+        assert "to" not in kwargs["params"]
 
     def test_exact_full_page_fetches_next(self, accessor: OrderAccessor, mock_client: MagicMock) -> None:
         """get_list() fetches the next page when the current page is exactly page_size."""

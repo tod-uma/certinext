@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from datetime import date
 from typing import Any
 
 import structlog
@@ -55,6 +56,8 @@ class OrderAccessor:
         page: int,
         size: int,
         status: str | None = None,
+        since: date | None = None,
+        until: date | None = None,
     ) -> tuple[list[Any], int | None]:
         """Fetch one raw report page plus the server-reported total page count.
 
@@ -64,6 +67,10 @@ class OrderAccessor:
             status: Optional order status filter passed to the API (e.g.
                 ``"issued"``, ``"expired"`` — see :meth:`get_list` for the
                 distinction from :attr:`OrderRecord.certificate_status`).
+            since: Optional start date (inclusive), passed as the API's
+                ``from`` param. See :meth:`get_list`.
+            until: Optional end date (inclusive), passed as the API's ``to``
+                param. See :meth:`get_list`.
 
         Returns:
             ``(rows, total_pages)`` — ``total_pages`` is taken from the
@@ -76,6 +83,10 @@ class OrderAccessor:
         params: dict[str, Any] = {"page": page, "size": size}
         if status is not None:
             params["status"] = status
+        if since is not None:
+            params["from"] = since.isoformat()
+        if until is not None:
+            params["to"] = until.isoformat()
         result = self._client.get(_BASE, params=params)
         if isinstance(result, list):
             return result, None
@@ -92,6 +103,8 @@ class OrderAccessor:
         page: int = 1,
         size: int = 100,
         status: str | None = None,
+        since: date | None = None,
+        until: date | None = None,
     ) -> list[OrderRecord]:
         """Fetch a single page of orders from the report endpoint.
 
@@ -108,6 +121,8 @@ class OrderAccessor:
                 ``"expired"``). Passed directly to the API ``status`` param
                 — see :meth:`get_list` for why this does not guarantee
                 anything about the returned records' ``certificate_status``.
+            since: Optional start date (inclusive). See :meth:`get_list`.
+            until: Optional end date (inclusive). See :meth:`get_list`.
 
         Returns:
             List of `OrderRecord` objects for this page.
@@ -115,13 +130,15 @@ class OrderAccessor:
         Raises:
             CertiNextAPIError: On a non-2xx API response. Provides ``.status_code`` and ``.body``.
         """
-        raw, _ = self._fetch_page(page, size, status)
+        raw, _ = self._fetch_page(page, size, status, since, until)
         return [OrderRecord.model_validate(item) for item in raw if isinstance(item, dict)]
 
     def get_list(
         self,
         status: str | None = None,
         page_size: int = 100,
+        since: date | None = None,
+        until: date | None = None,
     ) -> list[OrderRecord]:
         """Return all orders by iterating through all pages automatically.
 
@@ -149,6 +166,16 @@ class OrderAccessor:
                 :class:`~certinext.models.orders.CertificateStatus` for
                 more detail).
             page_size: Records per page; maximum 100 (default: 100).
+            since: Optional start date (inclusive), passed as the API's
+                ``from`` param on every page request. Confirmed working in
+                sandbox 2026-08-07 (probe R16 follow-up): a
+                ``2026-07-29``/``2026-07-29`` window returned exactly the one
+                order dated that day, and an out-of-range window returned
+                zero rows.
+            until: Optional end date (inclusive), passed as the API's ``to``
+                param on every page request. Per the OpenAPI spec, a
+                date-only value is expanded to end-of-day server-side before
+                filtering.
 
         Returns:
             Combined list of `OrderRecord` objects from all pages.
@@ -159,7 +186,7 @@ class OrderAccessor:
         records: list[OrderRecord] = []
         page = 1
         while True:
-            raw, total_pages = self._fetch_page(page, page_size, status)
+            raw, total_pages = self._fetch_page(page, page_size, status, since, until)
             records.extend(OrderRecord.model_validate(item) for item in raw if isinstance(item, dict))
             if total_pages is not None:
                 if page >= total_pages:

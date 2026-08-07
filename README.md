@@ -1639,6 +1639,15 @@ expired = sess.orders.get_list(status="expired")
 page = sess.orders.get_page(page=1, size=50, status="issued")
 ```
 
+Bound the fetch to a date range with `since`/`until` (both inclusive) to
+avoid re-fetching the entire order history on every call:
+
+```python
+from datetime import date
+
+recent = sess.orders.get_list(status="issued", since=date(2026, 7, 1), until=date(2026, 7, 31))
+```
+
 #### OrderRecord properties
 
 | Property | Type | Description |
