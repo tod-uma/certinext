@@ -487,6 +487,30 @@ def test_probe_r16_pending_substatus_rejected(client: CertiNextClient) -> None:
     assert err is None, f"status='pending-approval' expected to be accepted per OpenAPI enum, got HTTP {err}"
 
 
+def test_probe_r16_orders_originator_populated(client: CertiNextClient) -> None:
+    """R16 follow-up: ``originator`` is populated on ``/reports/orders`` rows.
+
+    Not a phase-0 register row — raised in the 2026-08-07 orders-report
+    hand-off. A prod fixture predating that date showed ``originator`` as
+    always ``None``, which would make ACME-vs-manual alert-threshold
+    bucketing unsafe. Confirmed populated on every row of a fresh 462-row
+    prod sample taken 2026-08-07 (values: ``ACME``, ``CERTInext``,
+    ``CERTInext API``); the corpus fixture was recaptured the same day and
+    ``OrderRecord.originator`` added. A regression back to ``None`` here is
+    signal to revert callers relying on this field, not just this probe.
+    """
+    err, body = _try_get(client, _ORDERS, {"page": 1, "size": 100})
+    assert err is None, f"orders fetch rejected: HTTP {err}"
+    rows = [r for r in _rows(body) if isinstance(r, dict)]
+    if not rows:
+        pytest.skip("no orders in this environment to check originator on")
+    missing = [r.get("orderNumber") for r in rows if r.get("originator") is None]
+    assert not missing, (
+        f"{len(missing)}/{len(rows)} rows have a null originator (order numbers: {missing[:5]}...) — "
+        "originator population may have regressed, re-check before relying on it for alerting"
+    )
+
+
 def test_probe_r17_exact_search_reliability(client: CertiNextClient, baseline_domains: list[Domain]) -> None:
     """R17: exact-FQDN ``search`` returns exactly the requested domain.
 
