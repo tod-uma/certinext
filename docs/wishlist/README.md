@@ -29,3 +29,4 @@ a terminal state. Numbering is sequential and never reused.
 | [IDEA-008](IDEA-008-root-level-cli-option-set.md) | Root-level (shared) CLI option set instead of per-command repetition | Proposed | #23 | 2026-07-22 |
 | [IDEA-009](IDEA-009-syslog-aware-logging.md) | Syslog/journald-aware logging mode (drop redundant timestamp/pid) | Proposed | #24 | 2026-07-23 |
 | [IDEA-010](IDEA-010-windows-ci-runner.md) | Windows CI runner leg | Proposed | #25 | 2026-08-04 |
+| [IDEA-011](IDEA-011-order-cleanup-cli.md) | `orders cleanup` CLI command for cancelling stale orders | Proposed | TBD | 2026-08-07 |
