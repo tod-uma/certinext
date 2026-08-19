@@ -788,7 +788,18 @@ class SslOrder(CertiNextModel):
                 preceding one. Defaults to ``False``.
 
         Returns:
-            Raw API response dict.
+            Raw API response dict, describing a **new order** - not this one. A
+            reissue creates a fresh order derived from the original
+            (``<orderId>`` -> ``<orderId>R001``) and leaves this order as it is,
+            so the response's ``orderId`` is the one to track from here on, and
+            its ``status`` is where the *new* order stands. An OV/EV reissue that
+            has to re-run validation comes back ``pending-approval`` or
+            ``pending-organization-verification`` rather than issued.
+
+            This object still points at the original order, so calling
+            :meth:`refresh` after a reissue polls the order you called against
+            and will never reflect the reissue's progress. Fetch the new order
+            with :meth:`SslAccessor.get` using the returned ``orderId``.
 
         Raises:
             ValueError: If required arguments for the selected ``mode`` are missing.
