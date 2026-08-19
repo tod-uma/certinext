@@ -1893,6 +1893,21 @@ order.revoke(reason="keyCompromise")        # revoke an issued certificate
 order.reissue("rekey", csr=new_csr_pem)     # reissue with a new key
 ```
 
+> **A reissue creates a new order.** It does not modify the order you call it
+> on. The API derives a fresh order from the original (`<orderId>` →
+> `<orderId>R001`), leaves the original as it is, and returns the *new* order's
+> `orderId` — so track the reissue on that, not on the order you called against:
+>
+> ```python
+> result = order.reissue("rekey", csr=new_csr_pem)
+> reissued = sess.ssl.get(result["orderId"])   # the reissue lives here
+> # order.refresh() would poll the ORIGINAL order and never show the reissue
+> ```
+>
+> The returned `status` is the new order's, so an OV/EV reissue that has to
+> re-run validation comes back `pending-approval` or
+> `pending-organization-verification` rather than issued.
+
 ### Error handling
 
 All API errors raise `CertiNextAPIError` (or a typed subclass), which carries
