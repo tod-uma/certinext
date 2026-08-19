@@ -269,12 +269,32 @@ def _find_downloadable_cert(client: CertiNextClient) -> tuple[str, dict[str, Any
     return None
 
 
-def test_probe_r05_chain_order_misordered(probe_env: str, client: CertiNextClient) -> None:
-    """R05: raw ``chainPem`` is misordered (root before intermediate) — GitLab #4/#5."""
-    _sandbox_only(probe_env)
+def test_probe_r05_chain_order_correct(probe_env: str, client: CertiNextClient) -> None:
+    """R05: raw ``chainPem`` arrives in correct signing order — GitLab #4 (vendor #134123).
+
+    This probe is inverted from its original form. It was written to assert the
+    vendor bug was *present* (root before intermediate, breaking Windows
+    Schannel/IIS validation). The vendor fixed it, confirmed in both
+    environments on 2026-07-14 by ``f42427c`` — but that commit corrected only
+    the probe's comparison bug and left the assertion pointing the old way, so
+    the probe then failed continuously for five weeks while correctly reporting
+    a fix that had already been verified. Re-verified 2026-08-19: 8/8 sampled
+    orders already correctly ordered in sandbox *and* prod, prod chains three
+    certificates deep.
+
+    It now guards the fixed state, so a vendor **regression** fails loudly
+    instead of a vendor fix doing so. Runs against prod as well as sandbox — the
+    behaviour is confirmed in both and this is a read-only GET.
+
+    Note this asserts nothing about ``order_certificate_chain``, whose sorting
+    stays on by default regardless of vendor behaviour: normalizing an
+    already-correct chain is a no-op, and one observed vendor fix is not grounds
+    to drop a defensive guard. See IDEA-012 for the parked question of whether
+    that default should ever change.
+    """
     found = _find_downloadable_cert(client)
     if not found:
-        pytest.skip("no downloadable issued certificate with a chain in the sandbox")
+        pytest.skip(f"no downloadable issued certificate with a chain in {probe_env}")
     _, body = found
     dl = CertificateDownload.model_validate(body)
     raw = dl.chain_pem
@@ -283,11 +303,12 @@ def test_probe_r05_chain_order_misordered(probe_env: str, client: CertiNextClien
     ordered = order_certificate_chain(raw, leaf_pem=dl.certificate_pem)
     # order_certificate_chain() anchors the result on the leaf, so `ordered`
     # always has one more element than `raw` (which is chain-only). Comparing
-    # the full lists made every raw chain trivially "fail" this check
-    # regardless of its actual order — compare the chain-only slice instead.
-    assert ordered[1:] != raw, (
-        "raw chainPem is now correctly ordered — vendor fix? Update order_certificate_chain "
-        "default, README, and GitLab issues #4/#5 together (vendor #134123)"
+    # the full lists made every raw chain trivially mismatch regardless of its
+    # actual order — compare the chain-only slice instead.
+    assert ordered[1:] == raw, (
+        f"raw chainPem is misordered again in {probe_env} — vendor regression of GitLab #4 "
+        "(vendor #134123). order_certificate_chain() still normalises it, so callers using "
+        "the default sort are unaffected; --raw-chain / sort=False consumers are not."
     )
 
 

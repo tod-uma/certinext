@@ -1874,15 +1874,21 @@ end-entity certificate followed by its intermediates, with a single trailing
 newline. Use this instead of `download()` when the bundle order matters (e.g.
 when writing a `fullchain.pem` for an ACME server).
 
-> **Chain ordering.** CertiNext returns the chain in a non-standard order — the
-> root CA appears right after the leaf instead of last — which breaks Windows
-> Schannel / IIS validation ([GitLab #4](https://gitlab.its.maine.edu/sysadmin/python-libs/certinext/-/issues/4)).
+> **Chain ordering.** CertiNext used to return the chain in a non-standard
+> order — the root CA right after the leaf instead of last — which breaks Windows
+> Schannel / IIS validation ([GitLab #4](https://gitlab.its.maine.edu/sysadmin/python-libs/certinext/-/issues/4),
+> vendor #134123). **The vendor has fixed this**, confirmed in sandbox and
+> production on 2026-07-14 and re-verified 2026-08-19.
+>
 > `as_pem_chain()` (and `download_chain()`, `--fullchain-out`, `--chain-out`, and
-> the `--output`/stdout bundle) re-sort the chain into correct leaf-first signing
-> order by default. Pass `as_pem_chain(sort=False)` — or `certinext issue-cert
-> --raw-chain` — to emit the exact bytes the API returned. Sorting needs the
-> `cryptography` package (`pip install certinext[csr]`); without it the CLI exits
-> with guidance and the library raises `ImportError` unless you use the raw path.
+> the `--output`/stdout bundle) nonetheless still sort the chain into leaf-first
+> signing order **by default, deliberately**. Normalizing an already-correct
+> chain is a no-op, and one observed vendor fix isn't grounds to drop a guard
+> against a regression that would silently break certificate validation. Pass
+> `as_pem_chain(sort=False)` — or `certinext issue-cert --raw-chain` — to emit
+> the exact bytes the API returned. Sorting needs the `cryptography` package
+> (`pip install certinext[csr]`); without it the CLI exits with guidance and the
+> library raises `ImportError` unless you use the raw path.
 
 #### Other lifecycle operations
 
