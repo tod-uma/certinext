@@ -1374,15 +1374,24 @@ The `limit` argument still passes a frame limit through for callers that want
 one; note it applies **per exception in a `__cause__`/`__context__` chain**, so
 it multiplies with chain length and does not bound the total.
 
-Double quotes in the traceback are replaced with single quotes. Splunk's
-automatic `key=value` extraction does not understand `\"` inside a quoted value,
-so one `File "..."` would end the `exception` field early and everything after
-it would be mis-parsed as further key/value pairs — corrupting every field on
-the line, not just this one.
+**Double quotes are replaced with single quotes in every field value** of
+logfmt output — not just the traceback. Splunk's automatic `key=value`
+extraction does not understand `\"` inside a quoted value, so a single `"`
+anywhere on the line ends that field early and everything after it is
+mis-parsed as further key/value pairs, corrupting **every** field including
+`correlation_id`. Partial coverage is close to no coverage, so the substitution
+runs as a processor on the logfmt chain rather than at each call site: `error`,
+`hint`, any `**context` you attach, and the `exception` field are all covered.
+This is realistic rather than theoretical — a proxy returning an HTML error
+page instead of JSON yields an error body that is wall-to-wall double quotes.
 
-The paired DEBUG record always keeps the full, untruncated traceback, so the
-debug-log sidecar stays the full-fidelity copy. See
-[ADR 0014](docs/adr/0014-traceback-on-the-operational-log-line.md).
+Two deliberate exclusions: **JSON output is left untouched** (its escaping is
+understood by every JSON parser, so rewriting it would lose fidelity for no
+gain), and keys are never rewritten — only values, since keys are code-defined
+identifiers. The paired DEBUG record always keeps the full, untruncated
+traceback, so the debug-log sidecar stays the byte-exact full-fidelity copy.
+See [ADR 0016](docs/adr/0016-sanitize-quotes-in-a-processor-not-per-call-site.md)
+and [ADR 0014](docs/adr/0014-traceback-on-the-operational-log-line.md).
 
 ### Working with domains
 
