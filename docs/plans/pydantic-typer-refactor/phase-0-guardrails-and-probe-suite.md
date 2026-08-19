@@ -12,6 +12,17 @@ implements-adr: [0005]
 > Deliberately open: 11 sandbox-lifecycle probe skips (R10–R15, R18, R19,
 > R21 need a mutating issuance run; R13/R14 need TTL/429 runs) and the
 > R24 tag-pipeline observation.
+>
+> **Status note (2026-08-19):** the register table below is the live index
+> `tests/test_probes.py` points at, so it is amended when a probe's meaning
+> changes even though this phase is `done`. **R05 has been inverted** — the
+> vendor fixed chain ordering (confirmed 2026-07-14, re-verified 2026-08-19
+> at 8/8 in both environments), so the probe now guards the fixed state and a
+> vendor *regression* is what fails. Its `Env` moved sandbox → both. A register
+> row that still described the old assumption is what let R05 fail unread for
+> five weeks (#28). **R08 is currently failing and unexplained** — no known DCV
+> token key in any sampled payload; tracked in #29, row not yet amended because
+> the correct assumption is not yet known.
 
 Tracking: issue #13 · milestone %v1.0.0 · label ~"refactor-v1"
 
@@ -98,7 +109,7 @@ issues, `.claude/skills/certinext-api-bugs/SKILL.md`, and the GitLab issue
 | R02 | `domainStatus`+`dcvStatus` together → HTTP 400 → `get_pending_dcv` fetches all + `needs_dcv` client-side (`domains.py`) | Send combined filters. **Contradiction to resolve:** issue #6 records combo `domainStatus=ACTIVE&dcvStatus=PENDING,REJECTED` as working. **Conditional scope change:** if confirmed in BOTH envs, phase 1 switches `get_pending_dcv()` to server-side filtering (and fixes `pending_dcv_cli.py`'s comment + README); if prod still 400s, the fetch-all workaround stays and the sandbox/prod split is recorded on issue #2/#6 | both |
 | R03 | Raw offset paging under default `createdAt desc` sort skips/dups rows → `get_list` pages under `sortBy=domainName&sortDir=asc`, dedupes, `_MAX_LIST_PAGES` ceiling | Loop raw offset pages under default sort, diff IDs across pages; confirm `sortBy=domainName` still accepted; **prod specifically** — issue #1 was CLOSED while its own text said the prod vendor fix was still pending, so closure is NOT prod evidence; keep the dedupe/ceiling defenses regardless (ordering-drift insurance) | both |
 | R04 | Server default page ≈50 silently truncates when no `limit` sent | No-param request row count vs sortBy-paged total | both |
-| R05 | Chain order: root at position 2 not last → `order_certificate_chain` re-sort default-on (issues #4/#5, vendor #134123) | Inspect raw `chainPem` order on a sandbox-issued cert | sandbox |
+| R05 | Chain order: root at position 2 not last → `order_certificate_chain` re-sort default-on (issues #4/#5, vendor #134123). **Vendor fixed 2026-07-14; probe inverted 2026-08-19 (#28) to guard the fixed state — re-sort stays default-on regardless (IDEA-012)** | Inspect raw `chainPem` order on an issued cert; assert it *is* leaf-first | both |
 | R06 | PKCS#7 download → 406, removed per ADR 0001; format downloads non-fatal | PKCS#7 Accept header on certificate GET | sandbox |
 | R07 | List endpoints alternate bare-array vs wrapper dict → first-list-valued-key unwrap (`domains.py`, `orders.py`) | Corpus capture of /domains, /reports/orders, /reports/ledger — record actual shape per env | both |
 | R08 | DCV field-name variance (`txtToken`/`fileToken`/`token`/`dnsContents`; `dnsHost`/`host`); host may be absent → implied `_emudhra-challenge.<domain>` | Corpus of domain-DCV + order-DCV payloads; record keys present. **Discrepancy to resolve:** `DcvInfo` docstring implies `_emudhra-challenge.<domain>`, `examples/dns_txt_dcv.py:267-269` falls back to apex — determine which is correct, fix the other | sandbox |
