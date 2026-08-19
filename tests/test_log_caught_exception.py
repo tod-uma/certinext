@@ -21,8 +21,14 @@ off by default, truncation keeps *both ends* of the stack (ADR 0015), the output
 carries no double quotes for Splunk's KV extractor to choke on, and the visible
 line never carries a real newline that journald/rsyslog could split into
 fragments.
+
+The quote rule is enforced for the whole event dict by the `_sanitize_quotes`
+processor rather than for the traceback alone (ADR 0016); the final section
+covers it, including the boundaries it must not overstep - JSON output and the
+debug-log sidecar both keep their quotes.
 """
 
+import json
 import logging
 import sys
 from collections.abc import Iterator
@@ -34,11 +40,13 @@ import structlog
 from certinext.cli_support import (
     TRACEBACK_BYTE_LIMIT,
     TRACEBACK_HINT,
+    LogFormat,
     LogMode,
     format_truncated_traceback,
     log_caught_exception,
     setup_logging,
 )
+from certinext.exceptions import CertiNextAPIError
 
 
 @pytest.fixture(autouse=True)
@@ -424,3 +432,186 @@ def test_full_traceback_still_reaches_the_debug_sidecar_untruncated(
     # The sidecar is also byte-exact: the visible line's quote substitution is a
     # transport concession for Splunk, not a change to the record of what failed.
     assert '  File "' in sidecar, "the sidecar's quotes were rewritten too"
+
+
+# --- _sanitize_quotes (ADR 0016) -----------------------------------------------
+
+
+def _assert_no_escaped_quote(rendered: str) -> None:
+    """Assert no backslash-escaped quote survived into rendered logfmt output.
+
+    ``LogfmtRenderer`` legitimately wraps any value containing whitespace in
+    double quotes, so the mere presence of ``"`` on a line proves nothing. The
+    corrupting construct is specifically ``\\"`` - an *inner* quote the renderer
+    had to escape, which Splunk's ``kv_mode=auto`` extractor does not understand:
+    it ends the value there and mis-parses the rest of the line as further
+    key/value pairs.
+
+    Args:
+        rendered: A rendered log line.
+    """
+    assert '\\"' not in rendered, f"an escaped inner quote survived: {rendered!r}"
+
+
+def test_quotes_in_the_error_field_are_sanitized(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A quote in ``str(exc)`` is rewritten, not just one in the traceback.
+
+    This is the gap ADR 0016 closes. Before the processor, only
+    :func:`format_truncated_traceback` sanitized its output, so an exception
+    whose *message* carried a quote corrupted the line while the traceback
+    beside it was safe.
+    """
+    monkeypatch.setattr(sys.stderr, "isatty", lambda: False)
+    setup_logging(0)
+
+    exc = ValueError('HTTP 502: <meta charset="utf-8"> bad gateway')
+    log_caught_exception(structlog.get_logger(), "Request failed", exc)
+
+    err = capsys.readouterr().err
+    _assert_no_escaped_quote(err)
+    assert "charset='utf-8'" in err, "the message text was lost, not just its quotes"
+
+
+def test_quotes_in_caller_context_are_sanitized(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Arbitrary ``**context`` values are sanitized too.
+
+    ``context`` is the open-ended exposure: every current and future call site
+    can attach any value, so it cannot be audited the way a fixed field can.
+    """
+    monkeypatch.setattr(sys.stderr, "isatty", lambda: False)
+    setup_logging(0)
+
+    log_caught_exception(
+        structlog.get_logger(),
+        "Order lookup failed",
+        ValueError("plain message"),
+        detail='vendor said "no such order"',
+    )
+
+    err = capsys.readouterr().err
+    _assert_no_escaped_quote(err)
+    assert "'no such order'" in err
+
+
+def test_quotes_in_the_event_name_are_sanitized(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The ``event`` message is a value like any other and is not exempt."""
+    monkeypatch.setattr(sys.stderr, "isatty", lambda: False)
+    setup_logging(0)
+
+    structlog.get_logger().error('Could not parse "orderId" from the response')
+
+    err = capsys.readouterr().err
+    _assert_no_escaped_quote(err)
+    assert "'orderId'" in err
+
+
+def test_quotes_in_non_string_values_are_sanitized(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A dict value whose repr carries quotes is covered.
+
+    ``fatal_api_error`` logs ``body=exc.body`` - a parsed JSON dict. Python's
+    repr uses single quotes until a value contains one, at which point it
+    switches to double quotes and the line would break.
+    """
+    monkeypatch.setattr(sys.stderr, "isatty", lambda: False)
+    setup_logging(0)
+
+    structlog.get_logger().error("Full response body", body={"detail": "it's rejected"})
+
+    err = capsys.readouterr().err
+    _assert_no_escaped_quote(err)
+    assert "rejected" in err
+
+
+def test_values_without_quotes_are_left_untouched(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Sanitizing must not pre-stringify values that carry no quotes.
+
+    ``LogfmtRenderer`` has its own ``bool`` handling - ``True`` renders as a bare
+    key and ``False`` as ``false``. Coercing every non-string value to ``str``
+    would leak Python's ``True``/``False`` into the log instead, so the processor
+    rewrites a non-string value only when its rendered form actually contains a
+    quote.
+    """
+    monkeypatch.setattr(sys.stderr, "isatty", lambda: False)
+    setup_logging(0)
+
+    structlog.get_logger().info("Order state", issued=True, revoked=False, count=3)
+
+    err = capsys.readouterr().err
+    assert "issued " in err or err.rstrip().endswith("issued"), "bare-key bool form was lost"
+    assert "revoked=false" in err
+    assert "issued=True" not in err
+    assert "count=3" in err
+
+
+def test_json_output_keeps_its_quotes(capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
+    """JSON mode is deliberately not sanitized.
+
+    JSON escaping is understood by every JSON parser, so rewriting quotes there
+    would lose fidelity for no gain - the processor is registered on the logfmt
+    chain only.
+    """
+    monkeypatch.setattr(sys.stderr, "isatty", lambda: False)
+    setup_logging(0, log_format=LogFormat.JSON)
+
+    structlog.get_logger().error("Parse failed", detail='vendor said "no"')
+
+    err = capsys.readouterr().err
+    assert json.loads(err)["detail"] == 'vendor said "no"'
+
+
+def test_api_error_with_an_html_body_does_not_corrupt_the_line(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The realistic trigger: a proxy returning HTML instead of JSON.
+
+    ``CertiNextAPIError.__str__`` falls through to embedding a non-dict body
+    verbatim, and an HTML error page is wall-to-wall double quotes. Every
+    subsequent field on the line - ``correlation_id`` included - used to be
+    mis-parsed as key/value pairs, destroying exactly the fields needed to
+    investigate the failure.
+    """
+    monkeypatch.setattr(sys.stderr, "isatty", lambda: False)
+    setup_logging(0, extra_priority_keys=["correlation_id"])
+
+    exc = CertiNextAPIError(502, '<html><meta charset="utf-8"></html>')
+    log_caught_exception(
+        structlog.get_logger(),
+        "Zabbix push failed",
+        exc,
+        correlation_id="abc123",
+    )
+
+    err = capsys.readouterr().err
+    _assert_no_escaped_quote(err)
+    assert "correlation_id=abc123" in err, "the correlation id was swallowed by a broken field"
+    assert "error_type=CertiNextAPIError" in err, "fields after the quoted value were lost"
+
+
+def test_the_debug_sidecar_stays_byte_exact_when_the_line_is_sanitized(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The processor is scoped to the stderr chain, not the sidecar.
+
+    ADR 0012 makes the sidecar the full-fidelity record and ADR 0016 keeps it
+    that way: quote substitution is a transport concession for Splunk, not a
+    change to the record of what failed. The two chains are separate
+    ``ProcessorFormatter`` instances precisely so this holds.
+    """
+    monkeypatch.setattr(sys.stderr, "isatty", lambda: False)
+    debug_log_path = tmp_path / "debug.log"
+    setup_logging(0, debug_log_path=debug_log_path)
+
+    exc = ValueError('vendor said "no such order"')
+    log_caught_exception(structlog.get_logger(), "Order lookup failed", exc)
+
+    assert '"no such order"' in debug_log_path.read_text(), "the sidecar was sanitized too"

@@ -303,6 +303,45 @@ def _drop_keys_processor(keys: Sequence[str]) -> structlog.typing.Processor:
     return _drop
 
 
+def _sanitize_quotes(
+    _logger: Any, _method: str, event_dict: structlog.typing.EventDict
+) -> structlog.typing.EventDict:
+    """Replace double quotes with single quotes in every field value.
+
+    Splunk's automatic ``key=value`` extraction does not understand
+    backslash-escaped quotes inside a quoted value, so a single ``"`` anywhere
+    in a logfmt value ends that field early and the rest of the line is
+    mis-parsed as further key/value pairs - corrupting *every* field on the
+    line, ``correlation_id`` included. The failure therefore destroys exactly
+    the fields needed to investigate the error that carried the quote, which is
+    why this is enforced centrally instead of at each call site: the previous
+    approach sanitized only :func:`format_truncated_traceback`'s output, leaving
+    ``error``, ``**context`` and ``format_exc_info``'s ``exception`` field
+    exposed. See ADR 0016.
+
+    Values are sanitized, not keys: keys are code-defined identifiers, while
+    values routinely carry vendor API bodies, exception messages and arbitrary
+    caller context. Non-string values are rewritten only when their rendered
+    form actually contains a quote, which leaves ``LogfmtRenderer``'s own
+    ``bool`` handling (a bare key for ``True``, ``false`` for ``False``) intact.
+
+    Args:
+        _logger: Unused; part of the structlog processor signature.
+        _method: Unused; part of the structlog processor signature.
+        event_dict: The event dict to sanitize. Mutated in place.
+
+    Returns:
+        The same event dict, with quote-bearing values rewritten.
+    """
+    for key, value in list(event_dict.items()):
+        if isinstance(value, str):
+            if '"' in value:
+                event_dict[key] = value.replace('"', "'")
+        elif '"' in (rendered := str(value)):
+            event_dict[key] = rendered.replace('"', "'")
+    return event_dict
+
+
 class LogFormat(str, Enum):
     """Non-interactive (cron/redirected) structlog output format.
 
@@ -476,9 +515,10 @@ def setup_logging(
             final_processors.append(_drop_keys_processor(console_quiet_keys))
         final_processors.append(renderer)
     else:
+        is_json = LogFormat(log_format) is LogFormat.JSON
         renderer = (
             structlog.processors.JSONRenderer()
-            if LogFormat(log_format) is LogFormat.JSON
+            if is_json
             else structlog.processors.LogfmtRenderer()
         )
         final_processors = [
@@ -488,6 +528,13 @@ def setup_logging(
         if _effective_syslog_mode(LogMode(log_mode)):
             final_processors.append(_drop_keys_processor(["timestamp", "pid"]))
         final_processors.append(_reorder_log_keys_processor(extra_priority_keys))
+        if not is_json:
+            # Logfmt only (ADR 0016): JSON escapes quotes in a form JSON parsers
+            # read correctly, so rewriting them there would lose fidelity for no
+            # gain. Placed after format_exc_info so the `exception` field it
+            # builds is covered too, and before the renderer so nothing can be
+            # added to the event dict after sanitization.
+            final_processors.append(_sanitize_quotes)
         final_processors.append(renderer)
 
     # A DEBUG-level debug-log file must receive every event regardless of
@@ -709,6 +756,13 @@ def format_truncated_traceback(
     ``exception="..."`` field ends the field early and the remainder of the line
     is mis-parsed as further key/value pairs - corrupting *every* field on the
     line, not just this one. The debug-log sidecar keeps the byte-exact text.
+
+    :func:`_sanitize_quotes` now enforces the same rule for the whole event dict
+    on the logfmt chain (ADR 0016), so this replacement is redundant *there* -
+    but deliberately kept, and deliberately idempotent: it keeps the guarantee
+    part of this function's own contract for any caller that logs its return
+    value outside that chain. Do not remove it on the grounds that the processor
+    covers it.
 
     Args:
         exc: The caught exception. Its ``__traceback__`` is used; an exception
