@@ -345,25 +345,61 @@ def test_probe_r07_list_endpoint_shapes(client: CertiNextClient) -> None:
 
 
 def test_probe_r08_dcv_payload_keys(probe_env: str, client: CertiNextClient, baseline_domains: list[Domain]) -> None:
-    """R08: DCV payloads use one of the known token-key variants (host may be absent)."""
+    """R08: domain DCV payloads carry no key the library fails to model.
+
+    R08's charter is to *record* which token-key variant an environment uses,
+    not to require that one be present. ``GET /domains/{id}/dcv`` returns a
+    token only while a challenge is actively pending: for a VERIFIED domain the
+    vendor emits ``{"method": ...}`` alone, and its own ``dcv/attempts/last``
+    diagnostics agree (``tokenIsStale: true``, empty ``expected.recordValue``).
+    An estate with no PENDING domain therefore has no token to observe, which is
+    not drift — see GitLab #29, where an earlier form of this probe failed for
+    exactly that reason against 105 sandbox and 206 prod domains, all VERIFIED.
+
+    So the assertion is inverted onto the condition that *would* be drift: a key
+    the library does not model. A renamed or re-nested token field shows up as an
+    unmodelled key, which fails loudly here; a merely-absent token skips.
+    """
     _sandbox_only(probe_env)
     token_keys = {"txtToken", "fileToken", "token", "dnsContents"}
     host_keys = {"dnsHost", "host"}
+    # Every key from_wire() consumes, plus those the models tolerate. Anything
+    # outside this set is a payload change nobody has modelled yet.
+    known_keys = token_keys | host_keys | {"method", "dcvMethod", "tokenExpiry"}
+
+    # PENDING domains are the only ones that can carry a token, so scan them
+    # first. dcv_status comes from the already-fetched list — no extra GETs.
+    pending = [d for d in baseline_domains if (d.dcv_status or "").upper() == "PENDING"]
+    others = [d for d in baseline_domains if (d.dcv_status or "").upper() != "PENDING"]
     checked = 0
-    for domain in baseline_domains[:20]:
+    unmodelled: dict[str, set[str]] = {}
+    for domain in (pending + others)[:20]:
         err, body = _try_get(client, f"{_DOMAINS}/{domain.id}/dcv")
         if err is not None or not isinstance(body, dict):
             continue
         checked += 1
+        extra = set(body) - known_keys
+        if extra:
+            unmodelled[str(domain.id)] = extra
         present_token = token_keys & set(body)
         if present_token:
             found_host = host_keys & set(body)
             # Record for the register: which variant this environment uses now.
             print(f"R08: domain {domain.id} dcv keys: token={sorted(present_token)} host={sorted(found_host)}")
-            return
+            break
+
+    assert not unmodelled, (
+        f"unmodelled key(s) in {probe_env} domain DCV payloads: "
+        f"{ {k: sorted(v) for k, v in unmodelled.items()} } — DcvInfo.from_wire() ignores these, so a "
+        "renamed or re-nested token field would be silently dropped. Update the model and this key set."
+    )
     if not checked:
         pytest.skip("no domain DCV payloads retrievable")
-    pytest.fail(f"none of {checked} DCV payloads contained a known token key {sorted(token_keys)}")
+    if not pending:
+        pytest.skip(
+            f"no PENDING domain among {len(baseline_domains)} in {probe_env} — no active challenge exists, "
+            "so no token key can be observed (GitLab #29). Payload keys checked and all modelled."
+        )
 
 
 def test_probe_r09_dcv_inheritance_recon() -> None:

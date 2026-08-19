@@ -20,9 +20,14 @@ implements-adr: [0005]
 > at 8/8 in both environments), so the probe now guards the fixed state and a
 > vendor *regression* is what fails. Its `Env` moved sandbox → both. A register
 > row that still described the old assumption is what let R05 fail unread for
-> five weeks (#28). **R08 is currently failing and unexplained** — no known DCV
-> token key in any sampled payload; tracked in #29, row not yet amended because
-> the correct assumption is not yet known.
+> five weeks (#28). **R08 has been reframed** — its failure (no known DCV token
+> key in any sampled payload, #29) was the probe over-asserting, not vendor
+> drift: `GET /domains/{id}/dcv` returns a token only while a challenge is
+> pending, and every domain in both environments is VERIFIED (105/105 sandbox,
+> 206/206 prod, 2026-08-19). The 2026-07-02 corpus predates v2.8.13 and already
+> showed `{"method": ...}` alone, so the old assertion had never been sound. The
+> probe now asserts the condition that *would* be drift — an unmodelled payload
+> key — and skips when no PENDING domain exists to observe.
 
 Tracking: issue #13 · milestone %v1.0.0 · label ~"refactor-v1"
 
@@ -112,7 +117,7 @@ issues, `.claude/skills/certinext-api-bugs/SKILL.md`, and the GitLab issue
 | R05 | Chain order: root at position 2 not last → `order_certificate_chain` re-sort default-on (issues #4/#5, vendor #134123). **Vendor fixed 2026-07-14; probe inverted 2026-08-19 (#28) to guard the fixed state — re-sort stays default-on regardless (IDEA-012)** | Inspect raw `chainPem` order on an issued cert; assert it *is* leaf-first | both |
 | R06 | PKCS#7 download → 406, removed per ADR 0001; format downloads non-fatal | PKCS#7 Accept header on certificate GET | sandbox |
 | R07 | List endpoints alternate bare-array vs wrapper dict → first-list-valued-key unwrap (`domains.py`, `orders.py`) | Corpus capture of /domains, /reports/orders, /reports/ledger — record actual shape per env | both |
-| R08 | DCV field-name variance (`txtToken`/`fileToken`/`token`/`dnsContents`; `dnsHost`/`host`); host may be absent → implied `_emudhra-challenge.<domain>` | Corpus of domain-DCV + order-DCV payloads; record keys present. **Discrepancy to resolve:** `DcvInfo` docstring implies `_emudhra-challenge.<domain>`, `examples/dns_txt_dcv.py:267-269` falls back to apex — determine which is correct, fix the other | sandbox |
+| R08 | DCV field-name variance (`txtToken`/`fileToken`/`token`/`dnsContents`; `dnsHost`/`host`); host absent at the domain level → apex. **Host discrepancy resolved in phase 5** (Domains API returns no `host`; the apex fallback is correct, `_emudhra-challenge.<domain>` applies to *order*-level DCV only). **Reframed 2026-08-19 (#29):** a domain-level token appears only while a challenge is PENDING, so absence is not drift — the probe asserts no *unmodelled* key and skips when nothing is PENDING | Walk domain-DCV payloads (PENDING first); record keys present, fail on a key `DcvInfo.from_wire()` does not consume | sandbox |
 | R09 | DCV-inheritance heuristic (`dcv_covering_parent`, NS-boundary rule) is pre-GA anecdote; GA "Verification Type" field name unknown | = DCV-inheritance plan Phase 0 recon: read-only prod /domains rows, look for verification-type / exclusion fields (see `docs/plans/dcv-inheritance-ga.md`) | prod RO |
 | R10 | Order create body: key is `agreement`, though error messages say `agreementDetails` | Sandbox POST with `agreement` block; cross-check sandbox OpenAPI schema | sandbox |
 | R11 | Post-issuance 422 lag before certificate downloadable → retry loop (5×5s) in `OrderWorkflow` | Time status=issued → first successful download during sandbox issuance | sandbox |
