@@ -19,10 +19,10 @@ repo's `docs/deployment.md`): the stuck-order triggers fire immediately
 against it, so nothing can be alerted on until it is cleared. Clearing it
 today means finding each order by hand in the portal.
 
-The same measurement showed what the junk looks like: `cm-unet1-ms.its.maine.edu`
-carries four orders placed within 13 minutes of each other on
-2026-06-12 — three cancelled retries and one that succeeded — which is
-the signature of a script retrying against a failing call.
+The same measurement showed what the junk looks like: a single host
+carried four orders placed within 13 minutes of each other — three
+cancelled retries and one that succeeded — which is the signature of a
+script retrying against a failing call.
 
 Cleanup is a vendor-API operation, not a monitoring concern, so it
 belongs in this library rather than in `certinext-zabbix`. That also
@@ -38,7 +38,7 @@ Feasibility is already confirmed against the live prod API (read-only
 GETs, 2026-08-07):
 
 - `OrderRecord.order_number` from `/reports/orders` **is** the `orderId`
-  that `SslAccessor.get()` accepts — `sess.ssl.get("1176751963R007")`
+  that `SslAccessor.get()` accepts — `sess.ssl.get(order.order_number)`
   returns a live order exposing `.cancel()` and `.revoke()`.
 - `request_number` is **not** a lookup key; `sess.ssl.get()` returns 404
   for it.
