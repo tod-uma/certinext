@@ -42,7 +42,12 @@ Cut a release for certinext. The tag message is the source of truth — GitLab C
 
    If the README is missing any changes, **stop**. Create a `docs/` branch, update the README, bump to the next rc, merge it, and tag that version instead. Do not skip this check or defer it to a follow-up PR — the release is the public record.
 
-4. **Draft the release notes.** Write a concise Markdown changelog:
+4. **Stable release only — clear pre-1.0-style debt before tagging.** Skip this step for alpha/beta/rc tags; run it before any `X.Y.0`-first-stable or long-deferred stable tag:
+   - **Suppressed checks.** Search for `noqa`, `type: ignore`, `# pragma: no cover`, `xfail`, `pytest.mark.skip`, and any CI job with `allow_failure: true` or commented out. Every hit needs an inline reason comment (not just the suppression) — if one is missing, either add the justification or fix the underlying issue. Distinguish real suppressions from ordinary pipeline-dedup patterns (`when: never` guarding duplicate branch/MR pipelines is not a suppressed check).
+   - **Plan doc drift.** Read the frontmatter `status:` of every file under `docs/plans/**/*.md` and check it against reality (shipped code, closed issues), not just what the doc claims — a plan can say `planned` after the feature already shipped. Fix stale statuses. Move any plan whose `status: done` (or whose entire multi-phase roadmap is done) into `docs/plans/archive/` so active and finished plans don't get confused; leave partially-done roadmaps in place.
+   - **Stale package-registry packages.** List packages on the GitLab package registry (`glab api projects/:id/packages` or the Packages & Registries UI) and delete any version that isn't associated with a pushed git tag — dev/pre-release builds accumulated during iteration are useful while developing but shouldn't be kept indefinitely. Keep every version that has a matching tag.
+
+5. **Draft the release notes.** Write a concise Markdown changelog:
    - Lead with a `## Highlights` section (2–4 sentences of prose on the most important user-facing changes).
    - Follow with grouped detail lists (`## Features`, `## Fixes`, etc.); merge closely related entries and drop noise.
    - Preserve bare commit SHAs in parentheses — GitLab auto-links them.
@@ -51,9 +56,9 @@ Cut a release for certinext. The tag message is the source of truth — GitLab C
 
    **Output the full message as plain text in the response before any tool call.**
 
-5. **Get approval.** Use `AskUserQuestion` with Yes/No.
+6. **Get approval.** Use `AskUserQuestion` with Yes/No.
 
-6. **Create the annotated tag.**
+7. **Create the annotated tag.**
    Write the approved notes to a temp file, then:
    ```bash
    git tag -a vX.Y.Z --cleanup=verbatim -F <notes-file>
@@ -62,14 +67,14 @@ Cut a release for certinext. The tag message is the source of truth — GitLab C
    - `--cleanup=verbatim` is required: git's default strips lines starting with `#`, silently deleting every Markdown heading.
    - To re-cut a tag (e.g. after fixing the notes), add `-f`: `git tag -a vX.Y.Z --cleanup=verbatim -F <notes-file> -f`
 
-7. **Push the tag.** Use `AskUserQuestion` to confirm before pushing. Push to
+8. **Push the tag.** Use `AskUserQuestion` to confirm before pushing. Push to
    the `gitlab` remote — this repo has no `origin` (see the `git-remotes`
    skill); GitHub is a mirror populated by GitLab CI, not pushed to directly.
    ```bash
    git push gitlab vX.Y.Z
    ```
 
-8. **Verify all three destinations:**
+9. **Verify all three destinations:**
    - **GitLab** — `release_job` passes; release at `sysadmin/python-libs/certinext/-/releases` has the correct description.
    - **GitHub Actions** — `publish-pypi` job passes; GitHub release appears with the same description.
    - **PyPI** — stable versions are visible without `--pre`; pre-releases require `pip install --pre certinext` to see.
