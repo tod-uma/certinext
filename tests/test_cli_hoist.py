@@ -107,7 +107,8 @@ def test_sandbox_after_subcommand_reaches_session(
     seen: dict[str, object] = {}
 
     def fake_session(ctx: object, **_kwargs: object) -> _FakeSession:
-        seen["sandbox"] = ctx.obj.sandbox  # type: ignore[attr-defined] - ctx typed as object to match the monkeypatched callback signature
+        # ctx is typed as object to match the monkeypatched callback signature.
+        seen["sandbox"] = ctx.obj.sandbox  # type: ignore[attr-defined]
         return _FakeSession()
 
     monkeypatch.setattr(certinext.cli.domains, "session", fake_session)

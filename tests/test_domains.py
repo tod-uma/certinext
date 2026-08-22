@@ -399,7 +399,8 @@ class TestDomainAPIMethods:
     def test_change_dcv_method_rejects_unknown_method(self, domain: Domain, mock_client: MagicMock) -> None:
         """change_dcv_method() still rejects methods outside VALID_DCV_METHODS (write-strict)."""
         with pytest.raises(ValueError, match="Invalid DCV method"):
-            domain.change_dcv_method("DNS-PERSIST")  # type: ignore[arg-type] - deliberately outside the Literal to exercise the runtime rejection
+            # Deliberately outside the Literal, to exercise the runtime rejection.
+            domain.change_dcv_method("DNS-PERSIST")  # type: ignore[arg-type]
         mock_client.patch.assert_not_called()
 
     def test_reinitiate_dcv_rejects_unsupported_current_method(

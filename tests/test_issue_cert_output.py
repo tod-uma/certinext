@@ -222,7 +222,8 @@ def _issue_cert_params() -> dict[str, Any]:
     from certinext.cli import app
 
     group = typer.main.get_command(app)
-    command = group.commands["issue-cert"]  # type: ignore[attr-defined] - typer.main.get_command()'s return type is the base click.Command, but it's always a Group here
+    # typer.main.get_command()'s return type is the base click.Command, but it's always a Group here.
+    command = group.commands["issue-cert"]  # type: ignore[attr-defined]
     return {param.opts[0]: param for param in command.params}
 
 
