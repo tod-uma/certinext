@@ -105,7 +105,7 @@ def parse_csr(pem: str) -> CsrInfo:
         raise ValueError(f"Failed to parse CSR: {exc}") from exc
 
     def _get(oid: object) -> str | None:
-        attrs = csr.subject.get_attributes_for_oid(oid)  # type: ignore[arg-type]
+        attrs = csr.subject.get_attributes_for_oid(oid)  # type: ignore[arg-type] - oid is loosely typed as object to avoid importing ObjectIdentifier at call sites
         return str(attrs[0].value) if attrs else None
 
     cn = _get(NameOID.COMMON_NAME)
