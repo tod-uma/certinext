@@ -24,7 +24,7 @@ support, and headers cost nothing to keep), and the JSON body.
 
 The corpus files are the ground-truth fixtures the 1.0 pydantic models must
 parse (ADR 0005), and the shape evidence for assumption-register rows R07,
-R08, and R20 (see docs/plans/pydantic-typer-refactor/).
+R08, and R20 (see docs/plans/archive/pydantic-typer-refactor/).
 
 Sanitization
 ------------

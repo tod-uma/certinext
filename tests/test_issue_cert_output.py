@@ -134,6 +134,10 @@ class FakeOrder:
 
     Returns canned values supplied at construction time, so tests control
     exactly which parts are present and can inject real cryptographic bytes.
+
+    Duck-types SslOrder rather than subclassing it, so every call site below
+    that passes a FakeOrder where SslOrder is expected carries a bare
+    ``# type: ignore[arg-type]`` for that reason.
     """
 
     def __init__(
@@ -218,6 +222,7 @@ def _issue_cert_params() -> dict[str, Any]:
     from certinext.cli import app
 
     group = typer.main.get_command(app)
+    # typer.main.get_command()'s return type is the base click.Command, but it's always a Group here.
     command = group.commands["issue-cert"]  # type: ignore[attr-defined]
     return {param.opts[0]: param for param in command.params}
 
