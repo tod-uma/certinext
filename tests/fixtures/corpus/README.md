@@ -12,7 +12,7 @@ These files are:
 - the shape evidence for assumption-register rows R07 (bare-array vs
   wrapper-dict lists), R08 (DCV field-name variance), and R20 (org list vs
   detail field sets) — see
-  `docs/plans/pydantic-typer-refactor/phase-0-guardrails-and-probe-suite.md`;
+  `docs/plans/archive/pydantic-typer-refactor/phase-0-guardrails-and-probe-suite.md`;
 - the input for deciding wishlist IDEA-006 (caching): whether the API sends
   `ETag` / `Last-Modified` / `Cache-Control`.
 

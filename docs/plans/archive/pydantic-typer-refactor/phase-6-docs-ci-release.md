@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: done
 depends-on: [phase-4, phase-5]
 implements-adr: []
 ---
@@ -144,6 +144,15 @@ documentation half of phase 6, on child branch `refactor/phase-6-docs`
 Not done in this slice (explicitly out of scope, next up): the release
 train (1.0.0aN → rcN → 1.0.0 stable) and its fresh-machine verification
 pass, and closing out the roadmap/issues/milestone.
+
+## Closing note (2026-08-21)
+
+The release train this document describes as outstanding completed some
+time ago without this doc being updated: `v1.0.0` and `v1.1.0` are both
+tagged and released, and the repo is now well past them (on `v1.2.0rc2`
+tagged this same day). Marking this phase — and the roadmap — done and
+archiving. Issue #19 and the `v1.0.0` milestone are still open on GitLab;
+closing those is a separate, explicit step (not folded into this doc edit).
 
 ---
 > **AI-assistant disclaimer:** Drafted by Claude Code (Claude Fable 5,

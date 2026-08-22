@@ -15,7 +15,7 @@
 """Assumption-register probes against the live CertiNext API (read-only).
 
 One probe per register row (R01-R24) of
-``docs/plans/pydantic-typer-refactor/phase-0-guardrails-and-probe-suite.md``.
+``docs/plans/archive/pydantic-typer-refactor/phase-0-guardrails-and-probe-suite.md``.
 Each probe asserts the *currently believed* vendor-API behavior, so a vendor
 fix or regression shows up as a failing probe — the signal to update the
 code workaround, README known issues, the ``certinext-api-bugs`` skill, and

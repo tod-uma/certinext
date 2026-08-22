@@ -31,7 +31,7 @@ the table. Wishlist issues #7–#12 are deliberately *outside* the milestone
 | 3 — pydantic-settings config | [phase-3-pydantic-settings-config.md](phase-3-pydantic-settings-config.md) | #16 | done | phase-0 | 0003 |
 | 4 — typer CLI + rich | [phase-4-typer-cli.md](phase-4-typer-cli.md) | #17 | done | phase-1, phase-2, phase-3 | 0003, 0004 |
 | 5 — Consumer migration | [phase-5-consumer-migration.md](phase-5-consumer-migration.md) | #18 | done | phase-4 | — |
-| 6 — Docs, CI, release | [phase-6-docs-ci-release.md](phase-6-docs-ci-release.md) | #19 | in-progress (CI+typing + docs slices done; release train remains) | phase-4, phase-5 | — |
+| 6 — Docs, CI, release | [phase-6-docs-ci-release.md](phase-6-docs-ci-release.md) | #19 | done | phase-4, phase-5 | — |
 
 ```text
 phase-0 (on main, merges into the branch)

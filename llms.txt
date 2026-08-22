@@ -31,7 +31,7 @@ run `certinext healthcheck` before relying on any endpoint.
 - [Architecture decision records](docs/adr/): why the library is built the
   way it is (pydantic/typer/httpx stack, lenient response models, CLI
   aliasing strategy, tomlkit for config writes).
-- [Refactor plan and phase records](docs/plans/pydantic-typer-refactor/README.md):
+- [Refactor plan and phase records](docs/plans/archive/pydantic-typer-refactor/README.md):
   detailed implementation history of the 0.3.x → 1.0 rewrite, useful when a
   behavior seems to have changed and you want to know why.
 - CertiNext's own OpenAPI spec (sandbox):
