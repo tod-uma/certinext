@@ -451,6 +451,27 @@ of a typo elsewhere in the file. Pass `--sandbox` or `--base-url` explicitly
 to run anyway; either one pins both the API and token endpoints, so the
 unreadable file is downgraded to a warning.
 
+The same holds for a file that parses but whose endpoint settings name no
+host. Because endpoint keys replace the inherited destination as a group, a
+section that discards `[defaults]`' endpoint and then names no host of its
+own — every one of its endpoint values rejected, or only a `token_url` given —
+leaves nothing to resolve, and the fallback below it is production:
+
+```toml
+[defaults]
+sandbox = true
+
+[profiles.sandbox]
+sandbox = "yes"     # not a boolean, so rejected — and declaring it already
+                    # discarded the inherited sandbox destination
+```
+
+That exits 2 as well. A bad value is still only a warning where the section
+names a host regardless: `base_url = "https://qa-api.certinext.io"` alongside a
+malformed `token_url` keeps the base URL and derives the token endpoint from
+it. Only `sandbox` and `base_url` choose a host — `token_url` just says where
+that host's OAuth endpoint lives.
+
 CERTInext runs several regions. Non-US customers can point a profile at theirs —
 for example India production:
 
