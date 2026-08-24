@@ -280,14 +280,30 @@ def test_connection_config_custom_urls(cfg_file: Path) -> None:
     assert conn == {"base_url": "https://s-api", "token_url": "https://s-api/oauth/token"}
 
 
-def test_connection_config_profile_over_defaults(cfg_file: Path) -> None:
-    """[profiles.NAME] connection keys merge over [defaults] connection keys."""
+def test_connection_config_profile_replaces_defaults_endpoint(cfg_file: Path) -> None:
+    """A profile's endpoint keys replace [defaults]' outright, not key by key.
+
+    The inherited ``sandbox = true`` is dropped: a profile that names a custom
+    ``base_url`` describes a different destination, and carrying half of
+    [defaults]' endpoint into it would assemble a connection out of two
+    environments.
+    """
     cfg_file.write_text(
         '[defaults]\nsandbox = true\n\n[profiles.prod]\nbase_url = "https://p-api"\n',
         encoding="utf-8",
     )
     conn, _ = connection_config("prod")
-    assert conn == {"sandbox": True, "base_url": "https://p-api"}
+    assert conn == {"base_url": "https://p-api"}
+
+
+def test_connection_config_profile_without_endpoint_inherits(cfg_file: Path) -> None:
+    """A profile with no endpoint key inherits the [defaults] destination whole."""
+    cfg_file.write_text(
+        '[defaults]\nsandbox = true\n\n[profiles.p]\ntype = "dv"\n',
+        encoding="utf-8",
+    )
+    conn, _ = connection_config("p")
+    assert conn == {"sandbox": True}
 
 
 def test_connection_config_wrong_types_warn(cfg_file: Path) -> None:
@@ -464,6 +480,53 @@ def test_broken_config_with_explicit_base_url_still_resolves(cfg_file: Path) -> 
     # The whole point of treating --base-url as sufficient to continue: the
     # unreadable file cannot redirect *either* endpoint to production.
     assert args.token_url == "https://custom-api/oauth/token"
+
+
+def test_profile_sandbox_overrides_default_custom_endpoint(cfg_file: Path) -> None:
+    """A sandbox profile reaches sandbox even when [defaults] holds custom URLs.
+
+    Without atomic endpoint settings this resolved to the QA URLs from
+    [defaults] while still reporting sandbox — the wrong environment behind a
+    label that hid it.
+    """
+    cfg_file.write_text(
+        '[defaults]\n'
+        'base_url = "https://qa-api.certinext.io"\n'
+        'token_url = "https://qa-api.certinext.io/oauth/token"\n'
+        '\n'
+        '[profiles.sandbox]\n'
+        'sandbox = true\n',
+        encoding="utf-8",
+    )
+    args = _resolved_args(profile="sandbox")
+    assert args.base_url == certinext.SANDBOX_BASE_URL
+    assert args.token_url == certinext.SANDBOX_TOKEN_URL
+    assert args.sandbox is True
+
+
+def test_profile_custom_endpoint_overrides_default_sandbox(cfg_file: Path) -> None:
+    """A custom-endpoint profile drops an inherited sandbox = true, flag included."""
+    cfg_file.write_text(
+        '[defaults]\nsandbox = true\n\n[profiles.india]\nbase_url = "https://api.certinext.io"\n',
+        encoding="utf-8",
+    )
+    args = _resolved_args(profile="india")
+    assert args.base_url == "https://api.certinext.io"
+    assert args.token_url == "https://api.certinext.io/oauth/token"
+    # The destination is not the sandbox, so the flag must not claim it is.
+    assert args.sandbox is False
+
+
+def test_sandbox_flag_describes_resolved_destination(cfg_file: Path) -> None:
+    """An explicit --base-url pointing at sandbox reports sandbox=True."""
+    args = _resolved_args(base_url=certinext.SANDBOX_BASE_URL)
+    assert args.sandbox is True
+
+
+def test_sandbox_flag_false_for_custom_base_url(cfg_file: Path) -> None:
+    """An explicit --base-url elsewhere reports sandbox=False."""
+    args = _resolved_args(base_url="https://qa-api.certinext.io")
+    assert args.sandbox is False
 
 
 def test_profile_without_config_section_still_resolves(cfg_file: Path) -> None:

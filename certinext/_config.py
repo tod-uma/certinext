@@ -50,6 +50,12 @@ degrades into a warning while the rest of the file still applies.
 Resolution precedence (highest first): explicit CLI argument, environment
 variable, ``[profiles.NAME]`` value, ``[defaults]`` value, built-in default.
 
+The two families inherit differently. Issue-cert defaults merge key by key, so
+a profile can override ``type`` while still inheriting ``requestor_name``.
+Connection settings do not: ``sandbox``, ``base_url``, and ``token_url``
+describe one destination, so a profile declaring any of them replaces
+``[defaults]``' endpoint outright. See :func:`connection_settings`.
+
 Writes go through tomlkit, so comments and formatting in a hand-edited file
 survive ``certinext-setup-defaults`` / ``--save-defaults`` round trips.
 
@@ -251,11 +257,21 @@ def connection_settings(profile: str | None, path: Path | None = None) -> tuple[
     """Return stored connection settings for a profile as a validated model.
 
     Merges the ``[defaults]`` section with the matching ``[profiles.NAME]``
-    section (profile values win), keeping only the
-    :class:`~certinext.settings.ConnectionSettings` keys. Values of the wrong
-    type are skipped and reported via the warnings list rather than raising,
-    so a typo never blocks a CLI from connecting (it just falls back to the
-    production default).
+    section, keeping only the :class:`~certinext.settings.ConnectionSettings`
+    keys. Values of the wrong type are skipped and reported via the warnings
+    list rather than raising, so a typo never blocks a CLI from connecting (it
+    just falls back to the production default).
+
+    Unlike the issue-cert defaults, connection keys do **not** merge key by
+    key. ``sandbox``, ``base_url``, and ``token_url`` together name a single
+    destination, so the most specific section that declares *any* of them
+    decides *all* of them: a ``[profiles.NAME]`` carrying an endpoint key
+    discards every endpoint key inherited from ``[defaults]``. Otherwise a
+    profile saying ``sandbox = true`` would still be sent to a custom
+    ``base_url`` left in ``[defaults]`` — a connection assembled out of two
+    environments, and a destination the operator never asked for. A profile
+    that declares no endpoint key at all still inherits the ``[defaults]``
+    destination whole.
 
     Args:
         profile: Profile name, or None for the default profile only.
@@ -274,10 +290,15 @@ def connection_settings(profile: str | None, path: Path | None = None) -> tuple[
     for label, section in _sections(doc, profile):
         if not isinstance(section, dict):
             continue  # config_defaults() already warns about a non-table section
-        for key, value in section.items():
-            if key not in CONNECTION_KEYS:
-                continue  # issue-cert defaults are read by config_defaults()
-            checked = _checked(ConnectionSettings, key, value, label, warnings)
+        # issue-cert defaults are read by config_defaults()
+        section_keys = [key for key in section if key in CONNECTION_KEYS]
+        if not section_keys:
+            continue  # says nothing about the destination; keep the inherited one
+        # This section names a destination, so it replaces the inherited one
+        # wholesale instead of overlaying onto it.
+        merged = {}
+        for key in section_keys:
+            checked = _checked(ConnectionSettings, key, section[key], label, warnings)
             if checked is not None:
                 merged[key] = checked
     return ConnectionSettings.model_validate(merged), warnings

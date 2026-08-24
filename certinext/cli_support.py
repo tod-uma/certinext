@@ -152,9 +152,11 @@ class ResolvedConnection:
     Attributes:
         base_url: Concrete CertiNext API base URL.
         token_url: Concrete OAuth2 token endpoint URL.
-        sandbox: The *effective* sandbox choice (CLI flag or profile config),
-            so :attr:`certinext.session.CertiNextSession.sandbox` and portal
-            hints are correct.
+        sandbox: Whether :attr:`base_url` is the CertiNext sandbox endpoint —
+            derived from the resolved destination, not from which config
+            section carried ``sandbox``, so
+            :attr:`certinext.session.CertiNextSession.sandbox` and portal
+            hints describe where the session actually points.
         profile: The credential profile for keyring lookups, or None for the
             default profile.
     """
@@ -296,12 +298,16 @@ def resolve_connection(
     if cli_sandbox and profile is None:
         effective_profile = "sandbox"
 
-    # Effective sandbox flag: a profile that targets sandbox counts even
-    # without the CLI flag, so sess.sandbox and portal hints stay right.
+    # Effective sandbox flag: describe where we actually ended up, not which
+    # section happened to carry `sandbox`. A profile pointed at a custom
+    # base_url is not the sandbox even if `sandbox = true` sits in [defaults],
+    # and CertiNextSession.sandbox is documented as "connected to the sandbox
+    # API" — so deriving it from the resolved endpoint keeps that true and
+    # keeps portal hints honest.
     return ResolvedConnection(
         base_url=resolved_base,
         token_url=resolved_token,
-        sandbox=cli_sandbox or cfg_sandbox,
+        sandbox=resolved_base.rstrip("/") == certinext.SANDBOX_BASE_URL,
         profile=effective_profile,
     )
 
