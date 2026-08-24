@@ -30,5 +30,6 @@ Numbering is sequential and never reused.
 | [0014](0014-traceback-on-the-operational-log-line.md) | Attach a truncated traceback to the operational log line, at top-level handlers only | accepted (truncation mechanics superseded by [0015](0015-traceback-trim-the-middle-not-the-head.md)) |
 | [0015](0015-traceback-trim-the-middle-not-the-head.md) | Trim an over-long traceback from the middle, and strip its double quotes | accepted (quote substitution extended by [0016](0016-sanitize-quotes-in-a-processor-not-per-call-site.md)) |
 | [0016](0016-sanitize-quotes-in-a-processor-not-per-call-site.md) | Strip double quotes in a logfmt processor, not per call site | accepted |
+| [0017](0017-connection-destinations-fail-closed.md) | Connection destination settings fail closed; issuance defaults warn and continue | accepted |
 
 See also: [docs/wishlist/](../wishlist/) for deferred ideas not yet committed to.
