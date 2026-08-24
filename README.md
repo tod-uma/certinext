@@ -248,7 +248,11 @@ portal under **Integrations → APIs → OAuth mode**:
 | Client secret | The OAuth access key generated in the portal |
 | Prevetting token | Optional, for auto-approving OV/EV orders — see [Prevetting token](#prevetting-token-optional-ovev-orders) |
 
-The token endpoint defaults to `https://us-api.certinext.io/oauth/token`. Override with `--token-url` if yours differs.
+The token endpoint defaults to `https://us-api.certinext.io/oauth/token`. If you
+pass `--base-url` (or store one in a profile), the token endpoint is derived from
+it as `<base_url>/oauth/token` instead, so credentials follow the deployment you
+named rather than going to the US production endpoint. Override with
+`--token-url` if yours differs.
 
 ### Storing credentials in the OS keychain (recommended)
 
@@ -426,8 +430,8 @@ If the config file exists but cannot be parsed, commands **fail with exit
 code 2 rather than falling back to the production endpoint** — a profile you
 believed pointed at sandbox must never silently resolve to production because
 of a typo elsewhere in the file. Pass `--sandbox` or `--base-url` explicitly
-to run anyway; either one pins the endpoint, so the unreadable file is
-downgraded to a warning.
+to run anyway; either one pins both the API and token endpoints, so the
+unreadable file is downgraded to a warning.
 
 CERTInext runs several regions. Non-US customers can point a profile at theirs —
 for example India production:

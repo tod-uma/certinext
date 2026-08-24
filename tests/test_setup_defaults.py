@@ -20,6 +20,7 @@ from unittest.mock import MagicMock
 import pytest
 
 import certinext
+from certinext._config import ConfigError
 from certinext.accounts import Organization
 from certinext.catalog import ProductCategory
 from certinext.cli.setup_defaults import (
@@ -27,6 +28,7 @@ from certinext.cli.setup_defaults import (
     _endpoint_from_flags,
     _endpoint_sandbox,
     _endpoint_url,
+    _fatal_config_error,
     _filter_products,
     _org_location,
     _prompt_endpoint,
@@ -34,6 +36,19 @@ from certinext.cli.setup_defaults import (
 )
 
 INDIA = "https://api.certinext.io"
+
+
+def test_fatal_config_error_exits_2(capsys: pytest.CaptureFixture[str]) -> None:
+    """A config error exits 2, matching connect() and issue-cert.
+
+    A bare ``SystemExit(str)`` would exit 1, which automation cannot tell
+    apart from an ordinary runtime failure.
+    """
+    with pytest.raises(SystemExit) as excinfo:
+        _fatal_config_error(ConfigError("Invalid TOML in /tmp/config.toml: boom"))
+
+    assert excinfo.value.code == 2
+    assert "Invalid TOML" in capsys.readouterr().err
 
 
 # --- known endpoints registry ------------------------------------------------

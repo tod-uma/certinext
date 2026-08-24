@@ -36,7 +36,7 @@ custom endpoint for non-US regions, and with no flag the tool prompts for it.
 
 import dataclasses
 import sys
-from typing import Any
+from typing import Any, NoReturn
 
 import typer
 
@@ -48,6 +48,7 @@ from certinext.catalog import Product, ProductCategory
 from certinext.cli._app import setup_app
 from certinext.cli_support import (
     CredentialsNotFoundError,
+    _derive_token_url,
     build_session,
     resolve_connection,
 )
@@ -147,7 +148,7 @@ def _endpoint_url(
         and a stored ``sandbox`` flag is cleared (an explicit URL supersedes it).
     """
     base = base.rstrip("/")
-    token = token or f"{base}/oauth/token"
+    token = token or _derive_token_url(base)
     values: dict[str, Any] = {}
     for key, val in (("base_url", base), ("token_url", token)):
         if val != current.get(key):
@@ -272,7 +273,7 @@ def _prompt_endpoint(
         assert url is not None  # non-custom options always carry a URL
         values, cleared = _endpoint_url(url, None, current)
         base = url.rstrip("/")
-        return values, cleared, (base, f"{base}/oauth/token", False)
+        return values, cleared, (base, _derive_token_url(base), False)
     # Custom URL: offer the current stored URL (if any) as the default.
     cur_custom = str(cur_base) if cur_base else ""
     hint = f" [{cur_custom}]" if cur_custom else ""
@@ -284,7 +285,7 @@ def _prompt_endpoint(
         return {}, [], None
     values, cleared = _endpoint_url(entered, None, current)
     base = entered.rstrip("/")
-    return values, cleared, (base, f"{base}/oauth/token", False)
+    return values, cleared, (base, _derive_token_url(base), False)
 
 
 def _validated(key: str, value: str) -> Any:
@@ -514,6 +515,24 @@ def _pick_org(
         print(f"  Enter a number between 1 and {len(orgs)}", file=sys.stderr)
 
 
+def _fatal_config_error(exc: ConfigError) -> NoReturn:
+    """Report a config-file error on stderr and exit with status 2.
+
+    Config problems exit 2 across the CLI (see
+    :func:`certinext.cli_options.connect` and ``issue-cert``). A bare
+    ``SystemExit(str)`` would exit 1 instead, so automation could not tell a
+    malformed config apart from an ordinary runtime failure.
+
+    Args:
+        exc: The config error to report.
+
+    Raises:
+        SystemExit: Always, with status 2.
+    """
+    print(f"Error: {exc}", file=sys.stderr)
+    raise SystemExit(2) from exc
+
+
 @setup_app.command("defaults")
 def setup_defaults(ctx: typer.Context) -> None:
     """Interactively store issue-cert defaults in the config file."""
@@ -530,9 +549,9 @@ def setup_defaults(ctx: typer.Context) -> None:
             profile=opts.profile, sandbox=opts.sandbox, base_url=opts.base_url, token_url=opts.token_url,
         )
     except ConfigError as exc:
-        # Same clean message the load_config() call below would give; without
-        # this the endpoint guard would traceback before reaching it.
-        raise SystemExit(f"Error: {exc}") from exc
+        # Without this the endpoint guard would traceback before reaching the
+        # load_config() call below.
+        _fatal_config_error(exc)
 
     path = config_path()
     section_label = f"[profiles.{conn.profile}]" if conn.profile else "[defaults]"
@@ -546,7 +565,7 @@ def setup_defaults(ctx: typer.Context) -> None:
     try:
         doc = load_config(path)
     except ConfigError as exc:
-        raise SystemExit(f"Error: {exc}")
+        _fatal_config_error(exc)
     if conn.profile:
         current = doc.get("profiles", {}).get(conn.profile, {})
     else:
@@ -687,7 +706,7 @@ def setup_defaults(ctx: typer.Context) -> None:
         try:
             saved_path = save_defaults(values, conn.profile, path, remove=tuple(cleared))
         except ConfigError as exc:
-            raise SystemExit(f"Error: {exc}")
+            _fatal_config_error(exc)
 
         print(f"\nSaved to {saved_path}")
         print(f"Section {section_label}:")

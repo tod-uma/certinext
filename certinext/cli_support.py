@@ -165,6 +165,25 @@ class ResolvedConnection:
     profile: str | None
 
 
+def _derive_token_url(base_url: str) -> str:
+    """Return the OAuth2 token endpoint belonging to a CertiNext base URL.
+
+    CertiNext deployments expose their token endpoint at
+    ``<base_url>/oauth/token`` — the relationship every entry in
+    :data:`certinext.ENDPOINTS` follows, and the one the built-in production
+    and sandbox constants follow too. Deriving it keeps client credentials
+    going to the deployment the caller actually named instead of falling back
+    to the production token endpoint.
+
+    Args:
+        base_url: A CertiNext API base URL, with or without a trailing slash.
+
+    Returns:
+        The matching token endpoint URL.
+    """
+    return f"{base_url.rstrip('/')}/oauth/token"
+
+
 def resolve_connection(
     profile: str | None = None,
     sandbox: bool = False,
@@ -181,6 +200,11 @@ def resolve_connection(
        ``base_url`` / ``token_url``, or ``sandbox = true`` — from the config
        file (see :func:`certinext._config.connection_config`).
     4. The built-in production endpoints.
+
+    A ``base_url`` given without a matching ``token_url`` — from either the
+    CLI or the config file — derives its token endpoint via
+    :func:`_derive_token_url` rather than falling back to the production one,
+    so client credentials are never posted to a host the caller did not name.
 
     As in 0.3.x, the bare ``sandbox`` flag also defaults the profile to
     ``'sandbox'`` so keyring lookups find sandbox credentials; a profile
@@ -248,12 +272,19 @@ def resolve_connection(
         resolved_token = token_url  # explicit CLI value wins
     elif cli_sandbox:
         resolved_token = certinext.SANDBOX_TOKEN_URL
+    elif base_url is not None:
+        # An explicit --base-url names the deployment; derive its OAuth
+        # endpoint rather than posting client credentials to the production
+        # token endpoint the operator never named. Matches the documented
+        # convention that a deployment's token endpoint is
+        # <base_url>/oauth/token (see certinext.ENDPOINTS).
+        resolved_token = _derive_token_url(base_url)
     elif cfg_token is not None:
         resolved_token = str(cfg_token)
     elif cfg_base is not None:
-        # Custom base_url without a matching token_url — keep the production
-        # token endpoint; setup defaults always writes the two together.
-        resolved_token = certinext.TOKEN_URL
+        # Same derivation for a stored base_url. `setup defaults` writes the
+        # two together, so this mainly covers a hand-edited config file.
+        resolved_token = _derive_token_url(str(cfg_base))
     elif cfg_sandbox:
         resolved_token = certinext.SANDBOX_TOKEN_URL
     else:
