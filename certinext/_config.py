@@ -45,7 +45,9 @@ Two key families live side by side, each defined by a pydantic model in
 :func:`connection_config`. Each reader ignores the other family's keys, so a
 ``sandbox``/``base_url`` entry never trips an "unknown key" warning during
 certificate issuance. Values are validated one key at a time, so a bad entry
-degrades into a warning while the rest of the file still applies.
+degrades into a warning while the rest of the file still applies — except
+where ignoring it would leave a section naming no connection destination at
+all, which fails closed rather than falling back to production.
 
 Resolution precedence (highest first): explicit CLI argument, environment
 variable, ``[profiles.NAME]`` value, ``[defaults]`` value, built-in default.
@@ -258,9 +260,7 @@ def connection_settings(profile: str | None, path: Path | None = None) -> tuple[
 
     Merges the ``[defaults]`` section with the matching ``[profiles.NAME]``
     section, keeping only the :class:`~certinext.settings.ConnectionSettings`
-    keys. Values of the wrong type are skipped and reported via the warnings
-    list rather than raising, so a typo never blocks a CLI from connecting (it
-    just falls back to the production default).
+    keys.
 
     Unlike the issue-cert defaults, connection keys do **not** merge key by
     key. ``sandbox``, ``base_url``, and ``token_url`` together name a single
@@ -273,6 +273,16 @@ def connection_settings(profile: str | None, path: Path | None = None) -> tuple[
     that declares no endpoint key at all still inherits the ``[defaults]``
     destination whole.
 
+    Because that overlay is atomic, a section is also required to *finish* what
+    it started: having discarded the inherited destination, it must name a host
+    of its own — a valid ``base_url``, or a valid ``sandbox`` — or this raises
+    :class:`ConfigError`. Individual bad values still degrade into warnings
+    where the section names a host regardless (``base_url = "https://x"`` with
+    ``token_url = true`` keeps the base URL and derives the token endpoint from
+    it), but a section left with no host at all is not tolerated: the endpoint
+    resolution below it falls back to *production*, so warning and continuing
+    would send a mistyped sandbox profile to the live API.
+
     Args:
         profile: Profile name, or None for the default profile only.
         path: Config file to read; defaults to :func:`config_path`.
@@ -281,7 +291,8 @@ def connection_settings(profile: str | None, path: Path | None = None) -> tuple[
         A ``(ConnectionSettings, warnings)`` tuple.
 
     Raises:
-        ConfigError: If the config file exists but cannot be parsed.
+        ConfigError: If the config file exists but cannot be parsed, or if a
+            section declares connection settings that name no destination.
     """
     doc = load_config(path)
     warnings: list[str] = []
@@ -296,11 +307,34 @@ def connection_settings(profile: str | None, path: Path | None = None) -> tuple[
             continue  # says nothing about the destination; keep the inherited one
         # This section names a destination, so it replaces the inherited one
         # wholesale instead of overlaying onto it.
-        merged = {}
+        section_warnings: list[str] = []
+        candidate: dict[str, Any] = {}
         for key in section_keys:
-            checked = _checked(ConnectionSettings, key, section[key], label, warnings)
+            checked = _checked(ConnectionSettings, key, section[key], label, section_warnings)
             if checked is not None:
-                merged[key] = checked
+                candidate[key] = checked
+        warnings.extend(section_warnings)
+        # Only base_url and sandbox choose a host; token_url just says where
+        # that host's OAuth endpoint is. A section that discarded the inherited
+        # destination and then named no host of its own leaves nothing to
+        # resolve, and the fallback below it is production -- so a typo in a
+        # profile meant for the sandbox would quietly reach the live API. Fail
+        # closed instead; an explicit --sandbox or --base-url still overrides.
+        if "base_url" not in candidate and "sandbox" not in candidate:
+            # Reuse the per-key validation detail, minus the label (already
+            # the subject of this sentence) and the "; ignoring" tail (these
+            # values are not being ignored -- they are the reason we stop).
+            details = [
+                warning.removeprefix(f"{label}: ").removesuffix("; ignoring")
+                for warning in section_warnings
+            ]
+            reason = "; ".join(details) or f"only {', '.join(sorted(section_keys))} is set"
+            raise ConfigError(
+                f"{label} names a connection destination but none of its settings "
+                f"resolve to one ({reason}). Set a valid base_url, or "
+                f"sandbox = true/false."
+            )
+        merged = candidate
     return ConnectionSettings.model_validate(merged), warnings
 
 
@@ -318,7 +352,8 @@ def connection_config(profile: str | None, path: Path | None = None) -> tuple[di
         (bool), ``base_url`` (str), and/or ``token_url`` (str).
 
     Raises:
-        ConfigError: If the config file exists but cannot be parsed.
+        ConfigError: If the config file exists but cannot be parsed, or if a
+            section declares connection settings that name no destination.
     """
     model, warnings = connection_settings(profile, path)
     return model.model_dump(exclude_none=True), warnings

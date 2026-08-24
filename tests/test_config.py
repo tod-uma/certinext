@@ -306,12 +306,77 @@ def test_connection_config_profile_without_endpoint_inherits(cfg_file: Path) -> 
     assert conn == {"sandbox": True}
 
 
-def test_connection_config_wrong_types_warn(cfg_file: Path) -> None:
-    """A non-bool sandbox and a bool base_url are skipped with warnings."""
+def test_connection_config_wrong_types_fail_closed(cfg_file: Path) -> None:
+    """A section whose every endpoint value is invalid raises, not warns.
+
+    Warning and returning ``{}`` would drop through to the *production*
+    endpoint, so a typo in a profile meant for the sandbox would reach the
+    live API. The names of the rejected keys are reported in the message.
+    """
     cfg_file.write_text('[profiles.x]\nsandbox = "yes"\nbase_url = true\n', encoding="utf-8")
+    with pytest.raises(ConfigError) as excinfo:
+        connection_config("x")
+    assert "sandbox" in str(excinfo.value)
+    assert "base_url" in str(excinfo.value)
+
+
+def test_connection_config_invalid_host_with_valid_token_url_fails_closed(
+    cfg_file: Path,
+) -> None:
+    """A valid token_url does not rescue a section whose host setting is invalid.
+
+    token_url says where a host's OAuth endpoint is; it never chooses the
+    host. Keeping it while dropping the mistyped ``sandbox`` would resolve to
+    the production base URL paired with a sandbox token endpoint.
+    """
+    cfg_file.write_text(
+        '[defaults]\nsandbox = true\n\n'
+        '[profiles.sandbox]\nsandbox = "yes"\n'
+        'token_url = "https://sandbox-api/oauth/token"\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(ConfigError):
+        connection_config("sandbox")
+
+
+def test_connection_config_token_url_alone_fails_closed(cfg_file: Path) -> None:
+    """A section naming only token_url names no host, so it fails closed.
+
+    The atomic overlay already discarded [defaults]' base_url, and token_url
+    cannot replace it -- resolution would fall back to production.
+    """
+    cfg_file.write_text(
+        '[defaults]\nbase_url = "https://qa-api"\n\n'
+        '[profiles.p]\ntoken_url = "https://qa-api/oauth/token"\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(ConfigError):
+        connection_config("p")
+
+
+def test_connection_config_partial_invalid_keeps_valid_host(cfg_file: Path) -> None:
+    """One bad value still degrades into a warning while a host survives.
+
+    The section names a host via base_url, so there is no risk of dropping
+    through to production; the invalid token_url is ignored and the token
+    endpoint gets derived from the base URL at resolution time.
+    """
+    cfg_file.write_text(
+        '[profiles.x]\nbase_url = "https://qa-api"\ntoken_url = true\n', encoding="utf-8"
+    )
     conn, warnings = connection_config("x")
-    assert conn == {}
-    assert len(warnings) == 2
+    assert conn == {"base_url": "https://qa-api"}
+    assert len(warnings) == 1
+
+
+def test_connection_config_explicit_sandbox_false_is_a_destination(cfg_file: Path) -> None:
+    """sandbox = false names production deliberately, so it does not raise."""
+    cfg_file.write_text(
+        "[defaults]\nsandbox = true\n\n[profiles.p]\nsandbox = false\n", encoding="utf-8"
+    )
+    conn, warnings = connection_config("p")
+    assert conn == {"sandbox": False}
+    assert warnings == []
 
 
 def test_config_defaults_ignores_connection_keys(cfg_file: Path) -> None:
@@ -480,6 +545,33 @@ def test_broken_config_with_explicit_base_url_still_resolves(cfg_file: Path) -> 
     # The whole point of treating --base-url as sufficient to continue: the
     # unreadable file cannot redirect *either* endpoint to production.
     assert args.token_url == "https://custom-api/oauth/token"
+
+
+def test_invalid_profile_endpoint_does_not_fall_back_to_production(cfg_file: Path) -> None:
+    """A mistyped sandbox flag fails closed instead of resolving to production.
+
+    The profile declares an endpoint key, so it discards [defaults]' sandbox
+    destination; ``"yes"`` is then rejected by the strict boolean. Before this
+    guard the resulting empty settings dropped through to the production
+    endpoint -- a typo away from the live API.
+    """
+    cfg_file.write_text(
+        '[defaults]\nsandbox = true\n\n[profiles.sandbox]\nsandbox = "yes"\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(ConfigError, match="names a connection destination"):
+        _resolved_args(profile="sandbox")
+
+
+def test_invalid_profile_endpoint_with_sandbox_flag_still_resolves(cfg_file: Path) -> None:
+    """--sandbox pins the endpoint, so an unresolvable destination is only a warning."""
+    cfg_file.write_text(
+        '[defaults]\nsandbox = true\n\n[profiles.sandbox]\nsandbox = "yes"\n',
+        encoding="utf-8",
+    )
+    args = _resolved_args(profile="sandbox", sandbox=True)
+    assert args.base_url == certinext.SANDBOX_BASE_URL
+    assert args.token_url == certinext.SANDBOX_TOKEN_URL
 
 
 def test_profile_sandbox_overrides_default_custom_endpoint(cfg_file: Path) -> None:

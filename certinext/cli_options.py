@@ -152,8 +152,10 @@ def connect(
         An authenticated :class:`~certinext.session.CertiNextSession`.
 
     Raises:
-        SystemExit: With status 2 if the config file cannot be parsed and no
-            explicit endpoint was given, rather than defaulting to production.
+        SystemExit: With status 2 if the config file cannot be parsed, or
+            names a connection destination that does not resolve to a host,
+            and no explicit endpoint was given -- rather than defaulting to
+            production.
     """
     try:
         conn = resolve_connection(
