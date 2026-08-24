@@ -28,6 +28,7 @@ import typer
 from typer.testing import CliRunner
 
 from certinext import cli_options
+from certinext._config import ConfigError
 from certinext.cli import _shared
 
 runner = CliRunner()
@@ -130,3 +131,25 @@ def test_connect_chains_resolve_and_build(monkeypatch: pytest.MonkeyPatch) -> No
     assert seen["build"] == {
         "account_number": "acct", "client_secret": "sec", "scope": "s", "prompt": False,
     }
+
+
+def test_connect_renders_config_error_as_exit_2(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A fail-closed ConfigError exits 2 with a message, not a bare traceback.
+
+    The CLI app sets ``pretty_exceptions_enable=False`` and installs no global
+    handler, so ``connect()`` is the layer that has to render this.
+    """
+    def fake_resolve(**_kwargs: Any) -> object:
+        raise ConfigError("Invalid TOML in /tmp/config.toml: boom")
+
+    monkeypatch.setattr(cli_options, "resolve_connection", fake_resolve)
+
+    with pytest.raises(SystemExit) as excinfo:
+        cli_options.connect(profile="staging")
+
+    assert excinfo.value.code == 2
+    err = capsys.readouterr().err
+    assert "Invalid TOML" in err
+    assert "production" in err

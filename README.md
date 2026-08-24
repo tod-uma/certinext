@@ -422,6 +422,13 @@ With a stored endpoint, plain `certinext domains --profile sandbox` (or
 `--sandbox` or `--base-url` still overrides the stored value for that run.
 Set these with `certinext setup defaults` (see below) or by hand-editing.
 
+If the config file exists but cannot be parsed, commands **fail with exit
+code 2 rather than falling back to the production endpoint** — a profile you
+believed pointed at sandbox must never silently resolve to production because
+of a typo elsewhere in the file. Pass `--sandbox` or `--base-url` explicitly
+to run anyway; either one pins the endpoint, so the unreadable file is
+downgraded to a warning.
+
 CERTInext runs several regions. Non-US customers can point a profile at theirs —
 for example India production:
 

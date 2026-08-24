@@ -525,9 +525,14 @@ def setup_defaults(ctx: typer.Context) -> None:
     cli_sandbox = bool(opts.sandbox)
     cli_base_url = opts.base_url
     cli_token_url = opts.token_url
-    conn = resolve_connection(
-        profile=opts.profile, sandbox=opts.sandbox, base_url=opts.base_url, token_url=opts.token_url,
-    )
+    try:
+        conn = resolve_connection(
+            profile=opts.profile, sandbox=opts.sandbox, base_url=opts.base_url, token_url=opts.token_url,
+        )
+    except ConfigError as exc:
+        # Same clean message the load_config() call below would give; without
+        # this the endpoint guard would traceback before reaching it.
+        raise SystemExit(f"Error: {exc}") from exc
 
     path = config_path()
     section_label = f"[profiles.{conn.profile}]" if conn.profile else "[defaults]"

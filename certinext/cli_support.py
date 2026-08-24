@@ -195,6 +195,13 @@ def resolve_connection(
     Returns:
         A :class:`ResolvedConnection` with concrete URLs and the effective
         sandbox flag and profile.
+
+    Raises:
+        ConfigError: If the config file exists but cannot be parsed *and*
+            neither ``base_url`` nor ``sandbox`` was given, so honouring the
+            failure would mean falling back to the production endpoint. A
+            parse failure that cannot select production is logged as a
+            warning instead.
     """
     cli_sandbox = bool(sandbox)
 
@@ -209,8 +216,14 @@ def resolve_connection(
     try:
         conn, warnings = connection_config(lookup_profile)
     except ConfigError as exc:
-        # A broken config file should not silently send traffic to production;
-        # surface it and fall back to no stored connection settings.
+        # A broken config file must not silently send traffic to production.
+        # When the caller already named the endpoint -- an explicit base_url,
+        # or the sandbox flag -- an unreadable file cannot change which API is
+        # hit, so warn and carry on with no stored settings. Otherwise the
+        # fallback below *is* production, and inferring that from a file we
+        # just failed to parse is the surprise this guards against: fail closed.
+        if base_url is None and not cli_sandbox:
+            raise
         log.warning("Ignoring connection settings", error=str(exc))
         conn, warnings = {}, []
     for warning in warnings:

@@ -37,12 +37,14 @@ The bundled CLI's rendering helpers (rich consoles and tables) are internal
 and deliberately not exported here.
 """
 
+import sys
 from pathlib import Path
 from typing import Annotated, Optional
 
 import typer
 
 import certinext
+from certinext._config import ConfigError
 from certinext.cli_support import LogFormat, LogMode, build_session, resolve_connection
 from certinext.session import CertiNextSession
 
@@ -148,10 +150,26 @@ def connect(
 
     Returns:
         An authenticated :class:`~certinext.session.CertiNextSession`.
+
+    Raises:
+        SystemExit: With status 2 if the config file cannot be parsed and no
+            explicit endpoint was given, rather than defaulting to production.
     """
-    conn = resolve_connection(
-        profile=profile, sandbox=sandbox, base_url=base_url, token_url=token_url,
-    )
+    try:
+        conn = resolve_connection(
+            profile=profile, sandbox=sandbox, base_url=base_url, token_url=token_url,
+        )
+    except ConfigError as exc:
+        # Matches issue-cert's exit 2 for a bad config, and keeps the guard in
+        # resolve_connection from surfacing as a bare traceback (the CLI app
+        # sets pretty_exceptions_enable=False and has no global handler).
+        print(f"Error: {exc}", file=sys.stderr)
+        print(
+            "Refusing to fall back to the production endpoint. "
+            "Fix the config file, or pass --sandbox / --base-url explicitly.",
+            file=sys.stderr,
+        )
+        raise SystemExit(2) from exc
     return build_session(
         conn,
         account_number=account_number,

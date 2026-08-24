@@ -397,3 +397,57 @@ def test_apply_sandbox_reads_env_profile(cfg_file: Path, monkeypatch: pytest.Mon
     args = _resolved_args()
     assert args.base_url == certinext.SANDBOX_BASE_URL
     assert args.sandbox is True
+
+
+def test_broken_config_does_not_fall_back_to_production(cfg_file: Path) -> None:
+    """An unparseable config fails closed instead of silently selecting production."""
+    cfg_file.write_text("not [valid toml", encoding="utf-8")
+    with pytest.raises(ConfigError, match="Invalid TOML"):
+        _resolved_args()
+
+
+def test_broken_config_with_explicit_profile_raises(cfg_file: Path) -> None:
+    """A named profile plus a broken config raises rather than guessing production."""
+    cfg_file.write_text("not [valid toml", encoding="utf-8")
+    with pytest.raises(ConfigError, match="Invalid TOML"):
+        _resolved_args(profile="staging")
+
+
+def test_broken_config_with_env_profile_raises(
+    cfg_file: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """CERTINEXT_PROFILE is no escape hatch: a broken config still fails closed."""
+    cfg_file.write_text("not [valid toml", encoding="utf-8")
+    monkeypatch.setenv("CERTINEXT_PROFILE", "srv")
+    with pytest.raises(ConfigError, match="Invalid TOML"):
+        _resolved_args()
+
+
+def test_broken_config_with_sandbox_flag_still_resolves(cfg_file: Path) -> None:
+    """--sandbox pins the endpoint, so a broken config cannot select production."""
+    cfg_file.write_text("not [valid toml", encoding="utf-8")
+    args = _resolved_args(sandbox=True)
+    assert args.base_url == certinext.SANDBOX_BASE_URL
+    assert args.token_url == certinext.SANDBOX_TOKEN_URL
+    assert args.sandbox is True
+
+
+def test_broken_config_with_explicit_base_url_still_resolves(cfg_file: Path) -> None:
+    """An explicit --base-url pins the endpoint, so a broken config is only a warning."""
+    cfg_file.write_text("not [valid toml", encoding="utf-8")
+    args = _resolved_args(base_url="https://custom-api")
+    assert args.base_url == "https://custom-api"
+
+
+def test_profile_without_config_section_still_resolves(cfg_file: Path) -> None:
+    """A keyring-only profile has no config section and must still reach production.
+
+    ``certinext setup keyring --profile prod`` stores credentials without
+    writing a ``[profiles.prod]`` section, so an absent section is a supported
+    configuration, not an error (see README 'Named profiles').
+    """
+    cfg_file.write_text('[defaults]\ntype = "ov"\n', encoding="utf-8")
+    args = _resolved_args(profile="prod")
+    assert args.base_url == certinext.BASE_URL
+    assert args.token_url == certinext.TOKEN_URL
+    assert args.profile == "prod"
