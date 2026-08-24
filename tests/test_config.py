@@ -348,10 +348,34 @@ def test_apply_sandbox_cli_flag(cfg_file: Path) -> None:
 
 
 def test_apply_sandbox_explicit_base_url_wins(cfg_file: Path) -> None:
-    """An explicit --base-url is kept and does not flip the sandbox flag."""
+    """An explicit --base-url is kept, derives its token URL, and stays non-sandbox."""
     args = _resolved_args(base_url="https://custom-api")
     assert args.base_url == "https://custom-api"
+    # Credentials must not go to the production token endpoint when the caller
+    # named a different deployment.
+    assert args.token_url == "https://custom-api/oauth/token"
     assert args.sandbox is False
+
+
+def test_explicit_token_url_beats_derivation(cfg_file: Path) -> None:
+    """An explicit --token-url still wins over the derived one."""
+    args = _resolved_args(base_url="https://custom-api", token_url="https://auth.example/t")
+    assert args.base_url == "https://custom-api"
+    assert args.token_url == "https://auth.example/t"
+
+
+def test_base_url_trailing_slash_derivation(cfg_file: Path) -> None:
+    """A trailing slash on --base-url does not produce a doubled separator."""
+    args = _resolved_args(base_url="https://custom-api/")
+    assert args.token_url == "https://custom-api/oauth/token"
+
+
+def test_config_base_url_derives_token_url(cfg_file: Path) -> None:
+    """A stored base_url with no token_url derives rather than using production."""
+    cfg_file.write_text('[profiles.staging]\nbase_url = "https://s-api"\n', encoding="utf-8")
+    args = _resolved_args(profile="staging")
+    assert args.base_url == "https://s-api"
+    assert args.token_url == "https://s-api/oauth/token"
 
 
 def test_apply_sandbox_profile_sandbox_true(cfg_file: Path) -> None:
@@ -433,10 +457,13 @@ def test_broken_config_with_sandbox_flag_still_resolves(cfg_file: Path) -> None:
 
 
 def test_broken_config_with_explicit_base_url_still_resolves(cfg_file: Path) -> None:
-    """An explicit --base-url pins the endpoint, so a broken config is only a warning."""
+    """An explicit --base-url pins both endpoints, so a broken config is only a warning."""
     cfg_file.write_text("not [valid toml", encoding="utf-8")
     args = _resolved_args(base_url="https://custom-api")
     assert args.base_url == "https://custom-api"
+    # The whole point of treating --base-url as sufficient to continue: the
+    # unreadable file cannot redirect *either* endpoint to production.
+    assert args.token_url == "https://custom-api/oauth/token"
 
 
 def test_profile_without_config_section_still_resolves(cfg_file: Path) -> None:
