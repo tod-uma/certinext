@@ -426,6 +426,24 @@ With a stored endpoint, plain `certinext domains --profile sandbox` (or
 `--sandbox` or `--base-url` still overrides the stored value for that run.
 Set these with `certinext setup defaults` (see below) or by hand-editing.
 
+**Endpoint settings are inherited as a group, not key by key.** Unlike the
+issue-cert defaults, `sandbox`, `base_url`, and `token_url` together name one
+destination, so a profile that sets *any* of them replaces `[defaults]`'
+endpoint entirely:
+
+```toml
+[defaults]
+base_url = "https://qa-api.certinext.io"   # a QA default…
+
+[profiles.sandbox]
+sandbox = true                             # …does NOT leak into this profile
+```
+
+`--profile sandbox` here reaches the sandbox endpoints, not QA. A profile that
+sets no endpoint key at all still inherits the `[defaults]` destination whole.
+The reported sandbox flag likewise describes where the connection actually
+points, not which section happened to contain `sandbox = true`.
+
 If the config file exists but cannot be parsed, commands **fail with exit
 code 2 rather than falling back to the production endpoint** — a profile you
 believed pointed at sandbox must never silently resolve to production because
