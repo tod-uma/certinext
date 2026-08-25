@@ -8,7 +8,7 @@
 
 Came up 2026-07-22 answering an ad hoc question — can the CertiNext API read
 users, groups, roles, and custom role permissions? Checking the
-`certinext-spec-watch` snapshots (`snapshots/prod.json` and
+`certinext-spec-snapshots` snapshots (`snapshots/prod.json` and
 `snapshots/sandbox.json`) confirmed the vendor exposes a full set of GET
 endpoints for this under `/api/v2/certinext/users/...`, but none of it is
 wrapped in the `certinext` library today — the only accessor that exists is
@@ -88,7 +88,7 @@ get example payloads, then draft `models/users.py` + a GET-only
 
 ## References
 
-- `certinext-spec-watch` snapshots: `snapshots/prod.json`,
+- `certinext-spec-snapshots` snapshots: `snapshots/prod.json`,
   `snapshots/sandbox.json` (paths under `/api/v2/certinext/users/...` and
   `/api/v2/certinext/discovery/permissions/...`) — internal spec capture, no
   public vendor API docs exist to link.

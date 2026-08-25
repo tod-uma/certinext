@@ -98,7 +98,7 @@ happen anyway.
 
 - [CertiNext API — order cancel/reject/revoke](https://us-api.certinext.io)
   (endpoints `/ssl/{orderId}/cancel`, `/reject`, `/revoke`; see the
-  vendor OpenAPI spec tracked in `certinext-spec-watch`)
+  vendor OpenAPI spec tracked in `certinext-spec-snapshots`)
 - `certinext/models/ssl_certificates.py` — `cancel()`, `reject()`,
   `revoke()` on the order model
 - `certinext-zabbix` `docs/deployment.md` — records the backlog as the
