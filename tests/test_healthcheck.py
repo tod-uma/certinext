@@ -252,7 +252,7 @@ class TestExitCode:
 def _ok_session() -> MagicMock:
     """Build a mocked session where every probe succeeds and feeds context."""
     sess = MagicMock()
-    sess.accounts.me.return_value = {"accountNumber": "5912517854"}
+    sess.accounts.me.return_value = {"accountNumber": "ACCT-XXXXXXXXXX"}
     sess.accounts.list_groups.return_value = [MagicMock()]
 
     org = MagicMock()

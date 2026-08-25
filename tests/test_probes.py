@@ -632,7 +632,7 @@ def test_probe_r21_openapi_only_order_fields() -> None:
     """R21: preVettingToken/csr-in-create/delegation/recipientEmails/tags OpenAPI-only."""
     pytest.skip(
         "requires sandbox OV order creation with/without prevetting token — deferred to a "
-        "dedicated run (also re-check the token-not-applying report for org 7956989)"
+        "dedicated run (also re-check the token-not-applying report for the prod org)"
     )
 
 
