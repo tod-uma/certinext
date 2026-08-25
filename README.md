@@ -358,7 +358,7 @@ certinext setup keyring   # prompts for client ID, secret, and prevetting token
 To pass it explicitly for a single run:
 
 ```bash
-certinext issue-cert example.com.csr --type ov --org-id 8921215 \
+certinext issue-cert example.com.csr --type ov --org-id 1234567 \
   --prevetting-token TOKEN
 ```
 
@@ -1040,7 +1040,7 @@ certinext issue-cert example.com.csr --cert-out cert.pem --chain-out chain.pem -
 certinext issue-cert example.com.csr --fullchain-out fullchain.pem --raw-chain
 
 # OV certificate with explicit org
-certinext issue-cert example.com.csr --type ov --org-id 8921215
+certinext issue-cert example.com.csr --type ov --org-id 1234567
 
 # Two-year DV certificate against the sandbox
 certinext issue-cert example.com.csr --validity 2 --sandbox
@@ -1055,7 +1055,7 @@ certinext issue-cert --order-id ORDER-ID --wait 600
 certinext issue-cert --order-id ORDER-ID --csr example.com.csr
 
 # Capture the values used on this run as defaults for future runs
-certinext issue-cert example.com.csr --type ov --org-id 8921215 --save-defaults
+certinext issue-cert example.com.csr --type ov --org-id 1234567 --save-defaults
 ```
 
 To avoid repeating requestor flags on every call, store them once with
@@ -1275,7 +1275,7 @@ certinext parent-dcv-status --sandbox --debug-log-path /var/log/certinext/debug.
 Each line of the stderr stream with `--log-format json` is a self-contained JSON object:
 
 ```json
-{"timestamp": "2026-06-03T14:00:01.234Z", "level": "info", "event": "Connecting", "account": "5912517854", "profile": "default", "url": "https://us-api.certinext.io"}
+{"timestamp": "2026-06-03T14:00:01.234Z", "level": "info", "event": "Connecting", "account": "ACCT-XXXXXXXXXX", "profile": "default", "url": "https://us-api.certinext.io"}
 {"timestamp": "2026-06-03T14:00:02.456Z", "level": "info", "event": "Fetched domains", "count": 234}
 ```
 
@@ -1747,7 +1747,7 @@ for o in orgs:
     print(o.organization_number, o.organization_name, o.locality)
 
 # Fetch a single organization by its number
-org = sess.accounts.get_organization("8921215")
+org = sess.accounts.get_organization("1234567")
 ```
 
 `Organization` also exposes detail-endpoint properties not present in the
@@ -1809,8 +1809,8 @@ validates that `organization_id` is provided for OV and EV orders:
 ```python
 # Product determined at runtime (e.g. from config)
 order = sess.ssl.create("dv", "example.com", validity_years=1)
-order = sess.ssl.create("ov", "example.com", organization_id="8921215", validity_years=1)
-order = sess.ssl.create("ev", "example.com", organization_id="8921215", validity_years=1)
+order = sess.ssl.create("ov", "example.com", organization_id="1234567", validity_years=1)
+order = sess.ssl.create("ev", "example.com", organization_id="1234567", validity_years=1)
 ```
 
 Or call the specific variant directly:
@@ -1823,10 +1823,10 @@ order = sess.ssl.create_dv("example.com", validity_years=1)
 order = sess.ssl.create_dv_wildcard("example.com", validity_years=1)
 
 # OV single-domain (requires organization_id from sess.accounts.list_organizations())
-order = sess.ssl.create_ov("example.com", organization_id="8921215", validity_years=1)
+order = sess.ssl.create_ov("example.com", organization_id="1234567", validity_years=1)
 
 # EV single-domain
-order = sess.ssl.create_ev("example.com", organization_id="8921215", validity_years=1)
+order = sess.ssl.create_ev("example.com", organization_id="1234567", validity_years=1)
 
 # UCC (multi-domain) — pass a list for DV, OV, or EV
 order = sess.ssl.create_dv_ucc(["example.com", "www.example.com"], validity_years=1)
