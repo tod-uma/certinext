@@ -31,3 +31,4 @@ a terminal state. Numbering is sequential and never reused.
 | [IDEA-010](IDEA-010-windows-ci-runner.md) | Windows CI runner leg | Proposed | #25 | 2026-08-04 |
 | [IDEA-011](IDEA-011-order-cleanup-cli.md) | `orders cleanup` CLI command for cancelling stale orders | Proposed | #26 | 2026-08-07 |
 | [IDEA-012](IDEA-012-retire-chain-normalization-default.md) | Revisit whether chain normalization should stay on by default | Proposed | #30 | 2026-08-19 |
+| [IDEA-013](IDEA-013-enforce-ruff-format.md) | Run `ruff format` and enforce it in CI | Proposed | #33 | 2026-08-26 |
