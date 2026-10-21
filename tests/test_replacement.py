@@ -25,6 +25,8 @@ import csv
 import datetime as dt
 import io
 import json
+import threading
+import time
 from pathlib import Path
 from typing import Any, Callable
 
@@ -576,6 +578,87 @@ def test_rate_limit_is_retried_once(monkeypatch: pytest.MonkeyPatch) -> None:
     assert report.rows[0].facts.error is None and report.rows[0].facts.inspection
 
 
+def test_rate_limit_retries_twice_then_records_the_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Two 429s still recover; a third gives up on that row only."""
+    routes = _routes()
+    detail = routes[f"{_API}/ssl-certificates/ORDER-00001"]
+    limited = CertiNextRateLimitError(429, "slow", retry_after=7)
+    routes[f"{_API}/ssl-certificates/ORDER-00001"] = [limited, limited, detail]
+    sess, _ = _session(monkeypatch, routes)
+    waits: list[float] = []
+    report = rp.build_report(sess, CRITERIA, inspect=True, now=NOW, sleep=waits.append)
+    assert waits == [7, 7]
+    assert report.rows[0].facts.error is None
+
+    routes[f"{_API}/ssl-certificates/ORDER-00001"] = [limited]
+    sess, _ = _session(monkeypatch, routes)
+    report = rp.build_report(sess, CRITERIA, inspect=True, now=NOW, sleep=lambda _s: None)
+    assert report.rows[0].facts.error and report.rows[0].facts.error.startswith("rate limited")
+    assert report.rows[1].facts.error is None
+
+
+def test_parallel_inspection_matches_sequential(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Several workers produce the same rows as one, and report progress for every certificate."""
+    def snapshot(workers: int) -> tuple[list[Any], list[str]]:
+        """Build an inspected report and reduce it to comparable values."""
+        sess, _ = _session(monkeypatch, _routes())
+        seen: list[str] = []
+        report = rp.build_report(
+            sess, CRITERIA, inspect=True, now=NOW, workers=workers, on_progress=lambda f: seen.append(f.order_number)
+        )
+        rows = [
+            (r.facts.order_number, r.verdict, r.facts.error, r.facts.inspection and r.facts.inspection.key_label)
+            for r in report.rows
+        ]
+        return rows, sorted(seen)
+
+    assert snapshot(4) == snapshot(1)
+
+
+def test_workers_must_be_positive(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Zero workers is a caller bug, not a silent no-op."""
+    sess, _ = _session(monkeypatch, _routes())
+    with pytest.raises(ValueError, match="workers"):
+        rp.build_report(sess, CRITERIA, inspect=True, now=NOW, workers=0)
+
+
+def test_missing_cryptography_still_aborts_with_workers(monkeypatch: pytest.MonkeyPatch) -> None:
+    """ImportError raised in a worker thread reaches the caller instead of becoming a row error."""
+    def no_crypto(_download: Any) -> Any:
+        """Stand in for an install without ``cryptography``."""
+        raise ImportError("cryptography")
+
+    monkeypatch.setattr(rp, "inspect_download", no_crypto)
+    sess, _ = _session(monkeypatch, _routes())
+    with pytest.raises(ImportError):
+        rp.build_report(sess, CRITERIA, inspect=True, now=NOW, workers=4)
+
+
+def test_backoff_holds_other_workers_until_the_pause_ends() -> None:
+    """While one worker waits out a 429, the others block before their next request."""
+    release = threading.Event()
+
+    def held_sleep(_seconds: float) -> None:
+        """Sleep until the test releases it, instead of for real."""
+        release.wait(5)
+
+    backoff = rp._Backoff(held_sleep)
+    pauser = threading.Thread(target=backoff.pause, args=(7,))
+    pauser.start()
+    for _ in range(200):
+        if not backoff._clear.is_set():
+            break
+        time.sleep(0.01)
+    waiter = threading.Thread(target=backoff.wait)
+    waiter.start()
+    waiter.join(0.2)
+    assert waiter.is_alive()
+    release.set()
+    pauser.join(5)
+    waiter.join(5)
+    assert not waiter.is_alive()
+
+
 def test_malformed_responses_are_recorded_not_raised(monkeypatch: pytest.MonkeyPatch) -> None:
     """A download failing model validation, or a non-dict order detail, lands on its row only."""
     routes = _routes()
@@ -830,6 +913,8 @@ def test_cli_help_mentions_json(capsys: pytest.CaptureFixture[str], monkeypatch:
     [
         (["--csv", "--json"], None),
         (["--output", "no-such-dir/report.json"], None),
+        (["--inspect", "--workers", "0"], None),
+        (["--inspect", "--workers", "17"], None),
         (["--disable-signal", "issuer", "--disable-signal", "key", "--disable-signal", "chain"], None),
         (["--key-type", "ECDSA"], None),
         ([], '[replacement]\nkey_types = "EC"\n'),

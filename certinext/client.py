@@ -31,6 +31,28 @@ from .exceptions import (
 _TIMEOUT = httpx.Timeout(10.0, read=60.0)
 
 
+def _bearer_token(resp: httpx.Response) -> str | None:
+    """Return the bearer token a response's request was sent with.
+
+    Lets a 401 invalidate only the token that was actually rejected, so one
+    thread's 401 doesn't discard a token another thread just fetched.
+
+    Args:
+        resp: The HTTP response.
+
+    Returns:
+        The token, or None if the response carries no request (e.g. one
+        built by hand in a test) or no bearer header.
+    """
+    try:
+        header = resp.request.headers.get("Authorization", "")
+    except RuntimeError:
+        return None
+    if not isinstance(header, str) or not header.startswith("Bearer "):
+        return None
+    return header.removeprefix("Bearer ")
+
+
 class CertiNextClient:
     """Low-level HTTP client for the CertiNext REST API.
 
@@ -138,7 +160,7 @@ class CertiNextClient:
         """
         resp = make_request()
         if resp.status_code == 401:
-            self._auth.invalidate()
+            self._auth.invalidate(_bearer_token(resp))
             resp = make_request()
         return resp
 

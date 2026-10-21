@@ -16,6 +16,9 @@
 │                                                       disagreements are detected), and adds      │
 │                                                       SANs, key size, and who ordered it. Two    │
 │                                                       requests per certificate.                  │
+│ --workers                  N [1<=x<=16]               Certificates to download at once with      │
+│                                                       --inspect; a rate limit pauses them all    │
+│                                                       [default: 4]                               │
 │ --all                                                 Also list certificates that do not need    │
 │                                                       replacing (to measure progress)            │
 │ --latest-only                                         Hide certificates superseded by a newer    │

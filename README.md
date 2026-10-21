@@ -945,6 +945,7 @@ An invalid `[replacement]` table exits 2 rather than falling back to defaults.
 
 ```
 --inspect                 Download and parse each certificate (key + chain signals, SANs, ordered by)
+--workers N               Certificates to download at once with --inspect (default 4, max 16)
 --all                     Also list certificates that do not need replacing (measure progress)
 --latest-only             Hide superseded certificates (needs --inspect; 'maybe' rows are kept)
 --originator NAME         Only this originator (ACME, CERTInext, "CERTInext API"); repeatable
@@ -959,6 +960,12 @@ An invalid `[replacement]` table exits 2 rather than falling back to defaults.
 --json                    JSON on stdout: criteria, summary, certificates, incomplete, breakdown
 -o, --output FILE         Write the table, JSON, or CSV to FILE (UTF-8) instead of stdout
 ```
+
+`--inspect` makes two requests per certificate. Done one at a time, that took
+about 55 minutes for ~574 certificates in prod, so downloads run four at a time
+by default. If the API answers 429, every worker pauses for the `Retry-After`
+delay, and each certificate gets three tries before it is recorded as an
+inspection error. Use `--workers 1` for the old sequential behaviour.
 
 `--output` is the safe way to save a report on Windows: PowerShell 5.1's `>`
 writes UTF-16, which most JSON and CSV tools reject. The path is checked before

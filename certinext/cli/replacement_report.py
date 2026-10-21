@@ -44,6 +44,12 @@ log = structlog.get_logger()
 # SANs shown in the table before collapsing the rest into "+N".
 _TABLE_SANS = 3
 
+# Parallel --inspect downloads. Sequential took ~55 minutes for ~574
+# certificates in prod (2026-10-21); the cap keeps a typo from flooding a
+# vendor API whose rate limits are undocumented.
+_DEFAULT_WORKERS = 4
+_MAX_WORKERS = 16
+
 
 class _GroupBy(str, Enum):
     """``--group-by`` choices (mirrors :data:`certinext.replacement.GroupBy`)."""
@@ -241,6 +247,10 @@ def replacement_report(
             "and who ordered it. Two requests per certificate."
         ),
     ),
+    workers: int = typer.Option(
+        _DEFAULT_WORKERS, "--workers", metavar="N", min=1, max=_MAX_WORKERS,
+        help="Certificates to download at once with --inspect; a rate limit pauses them all",
+    ),
     include_ok: bool = typer.Option(
         False, "--all",
         help="Also list certificates that do not need replacing (to measure progress)",
@@ -310,6 +320,7 @@ def replacement_report(
     log.info(
         "Building replacement report", inspect=inspect,
         signals=",".join(criteria.active_signals()),
+        workers=workers if inspect else None,
     )
     try:
         with Progress(console=err_console, disable=progress_disabled(ctx.obj.verbose)) as progress:
@@ -317,7 +328,7 @@ def replacement_report(
             report = rp.build_report(
                 sess, criteria, inspect=inspect, originators=originator, groups=group,
                 on_total=lambda n: progress.update(task, total=n),
-                on_progress=lambda _f: progress.advance(task),
+                on_progress=lambda _f: progress.advance(task), workers=workers,
             )
     except ImportError as exc:
         log.error("Cannot inspect certificates", error=str(exc))
