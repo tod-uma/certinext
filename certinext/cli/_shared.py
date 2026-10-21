@@ -34,7 +34,7 @@ JSON/PEM; diagnostics go through structlog or :data:`err_console`.
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, TextIO
 
 import typer
 from rich.console import Console
@@ -172,16 +172,22 @@ def progress_disabled(verbose: int) -> bool:
     return verbose >= 3 or not err_console.is_terminal
 
 
-def data_console() -> Console:
-    """Return a rich console for *data* output on stdout.
+def data_console(file: TextIO | None = None) -> Console:
+    """Return a rich console for *data* output on stdout or a file.
 
     On a TTY this is a normal auto-sized console (styled tables). When stdout
-    is piped or redirected, the console is unstyled and width-uncapped so
-    table content is never wrapped or truncated by rich's 80-column default.
+    is piped or redirected, or ``file`` is given, the console is unstyled and
+    width-uncapped so table content is never wrapped or truncated by rich's
+    80-column default.
+
+    Args:
+        file: An open text file to write to instead of stdout (``--output``).
 
     Returns:
-        A :class:`rich.console.Console` writing to stdout.
+        A :class:`rich.console.Console` writing to ``file`` or stdout.
     """
+    if file is not None:
+        return Console(file=file, width=_PIPE_WIDTH, no_color=True)
     if sys.stdout.isatty():
         return Console()
     return Console(width=_PIPE_WIDTH, no_color=True)

@@ -19,6 +19,7 @@ placeholder CA names; the fake API routes the same paths the real accessors
 call, so the full report/model/CLI stack runs.
 """
 
+import contextlib
 import copy
 import csv
 import datetime as dt
@@ -780,9 +781,55 @@ def test_cli_latest_only_warns_about_unknown_sans(run_cli: Callable[..., tuple[i
 
 
 @pytest.mark.parametrize(
+    ("fmt", "check"),
+    [
+        (["--json"], lambda text: json.loads(text)["summary"]["needs_replacing"] == 1),
+        (["--csv"], lambda text: [r["order_number"] for r in csv.DictReader(io.StringIO(text))] == ["ORDER-00001"]),
+        ([], lambda text: "ORDER-00001" in text and "need replacing" in text and "\x1b[" not in text),
+    ],
+)
+def test_cli_output_writes_file(
+    run_cli: Callable[..., tuple[int, str, str]], tmp_path: Path,
+    fmt: list[str], check: Callable[[str], bool],
+) -> None:
+    """--output puts the data in a UTF-8 file, leaves stdout empty, and shows the summary on stderr."""
+    target = tmp_path / "report.out"
+    code, out, err = run_cli([*fmt, "--output", str(target)], config=f'[replacement]\nissuers = ["{BAD_INT}"]\n')
+    assert code == 0
+    assert out == ""
+    assert check(target.read_text(encoding="utf-8"))
+    assert "need replacing" in err
+
+
+def test_cli_output_unopenable_falls_back_to_stdout(
+    run_cli: Callable[..., tuple[int, str, str]], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A file that cannot be opened after the report is built doesn't lose it: stdout, then exit 1."""
+    def locked(*_a: Any, **_kw: Any) -> Any:
+        """Stand in for ``open`` on a file another program holds locked."""
+        raise PermissionError("locked")
+
+    monkeypatch.setattr("certinext.cli.replacement_report.open", locked, raising=False)
+    code, out, _ = run_cli(
+        ["--json", "-o", str(tmp_path / "report.json")], config=f'[replacement]\nissuers = ["{BAD_INT}"]\n'
+    )
+    assert code == 1
+    assert json.loads(out)["summary"]["needs_replacing"] == 1
+
+
+def test_cli_help_mentions_json(capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
+    """--json is a root option, so the command's own help has to point at it."""
+    monkeypatch.setenv("COLUMNS", "200")
+    with contextlib.suppress(SystemExit):
+        cli_main(["replacement-report", "--help"])
+    assert "--json" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
     ("argv", "config"),
     [
         (["--csv", "--json"], None),
+        (["--output", "no-such-dir/report.json"], None),
         (["--disable-signal", "issuer", "--disable-signal", "key", "--disable-signal", "chain"], None),
         (["--key-type", "ECDSA"], None),
         ([], '[replacement]\nkey_types = "EC"\n'),
@@ -791,6 +838,6 @@ def test_cli_latest_only_warns_about_unknown_sans(run_cli: Callable[..., tuple[i
 def test_cli_usage_and_config_errors_exit_2(
     run_cli: Callable[..., tuple[int, str, str]], argv: list[str], config: str | None
 ) -> None:
-    """Conflicting outputs, no enabled signal, bad flags and a bad config all exit 2."""
+    """Conflicting outputs, a bad --output path, no enabled signal, bad flags and a bad config all exit 2."""
     code, _, _ = run_cli(argv, config=config)
     assert code == 2

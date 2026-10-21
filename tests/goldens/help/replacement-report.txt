@@ -6,37 +6,42 @@
  By default classifies on the issuing CA alone (instant, from the orders                            
  report). Criteria come from built-in defaults (the October 2026 eMudhra                            
  ECC distrust), the "replacement" table in config.toml, and the flags                               
- above. Read-only. Exits 1 if any certificate could not be inspected or                             
- any issued order could not be classified.                                                          
+ above. Output is a table, or JSON with --json, or CSV with --csv. Read-only.                       
+ Exits 1 if any certificate could not be inspected or any issued order                              
+ could not be classified.                                                                           
                                                                                                     
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --inspect                                           Download and parse every certificate:        │
-│                                                     evaluates the key and chain signals (so      │
-│                                                     disagreements are detected), and adds SANs,  │
-│                                                     key size, and who ordered it. Two requests   │
-│                                                     per certificate.                             │
-│ --all                                               Also list certificates that do not need      │
-│                                                     replacing (to measure progress)              │
-│ --latest-only                                       Hide certificates superseded by a newer      │
-│                                                     valid certificate covering all their SANs.   │
-│                                                     SANs need --inspect; CN-only matches are     │
-│                                                     kept and marked 'maybe'                      │
-│ --originator             NAME                       Only orders from this originator (ACME,      │
-│                                                     CERTInext, 'CERTInext API'); repeatable      │
-│ --group                  GROUP                      Only orders in this account group, by number │
-│                                                     or name; repeatable                          │
-│ --expiring-within        DAYS [x>=1]                Only certificates expiring within DAYS days  │
-│ --group-by               [originator|group|issuer]  Also print counts per originator, group, or  │
-│                                                     issuer                                       │
-│ --issuer                 CN                         Issuing-CA common name that needs replacing; │
-│                                                     repeatable, replaces config                  │
-│ --key-type               TYPE                       Key type that needs replacing (EC, RSA,      │
-│                                                     Ed25519, Ed448, DSA); repeatable, replaces   │
-│                                                     config                                       │
-│ --chain-ca               CN                         Distrusted CA common name in the served      │
-│                                                     chain; repeatable, replaces config           │
-│ --disable-signal         [issuer|key|chain]         Turn a signal off for this run; repeatable   │
-│ --csv                                               Write CSV to stdout instead of a table       │
-│ --help                                              Show this message and exit.                  │
+│ --inspect                                             Download and parse every certificate:      │
+│                                                       evaluates the key and chain signals (so    │
+│                                                       disagreements are detected), and adds      │
+│                                                       SANs, key size, and who ordered it. Two    │
+│                                                       requests per certificate.                  │
+│ --all                                                 Also list certificates that do not need    │
+│                                                       replacing (to measure progress)            │
+│ --latest-only                                         Hide certificates superseded by a newer    │
+│                                                       valid certificate covering all their SANs. │
+│                                                       SANs need --inspect; CN-only matches are   │
+│                                                       kept and marked 'maybe'                    │
+│ --originator               NAME                       Only orders from this originator (ACME,    │
+│                                                       CERTInext, 'CERTInext API'); repeatable    │
+│ --group                    GROUP                      Only orders in this account group, by      │
+│                                                       number or name; repeatable                 │
+│ --expiring-within          DAYS [x>=1]                Only certificates expiring within DAYS     │
+│                                                       days                                       │
+│ --group-by                 [originator|group|issuer]  Also print counts per originator, group,   │
+│                                                       or issuer                                  │
+│ --issuer                   CN                         Issuing-CA common name that needs          │
+│                                                       replacing; repeatable, replaces config     │
+│ --key-type                 TYPE                       Key type that needs replacing (EC, RSA,    │
+│                                                       Ed25519, Ed448, DSA); repeatable, replaces │
+│                                                       config                                     │
+│ --chain-ca                 CN                         Distrusted CA common name in the served    │
+│                                                       chain; repeatable, replaces config         │
+│ --disable-signal           [issuer|key|chain]         Turn a signal off for this run; repeatable │
+│ --csv                                                 Write CSV instead of a table (use --json   │
+│                                                       for JSON)                                  │
+│ --output           -o      FILE                       Write the table, JSON, or CSV to FILE      │
+│                                                       (UTF-8) instead of stdout                  │
+│ --help                                                Show this message and exit.                │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 

@@ -957,7 +957,14 @@ An invalid `[replacement]` table exits 2 rather than falling back to defaults.
 --disable-signal SIGNAL   Turn off issuer, key, or chain for this run; repeatable
 --csv                     CSV on stdout (summary on stderr)
 --json                    JSON on stdout: criteria, summary, certificates, incomplete, breakdown
+-o, --output FILE         Write the table, JSON, or CSV to FILE (UTF-8) instead of stdout
 ```
+
+`--output` is the safe way to save a report on Windows: PowerShell 5.1's `>`
+writes UTF-16, which most JSON and CSV tools reject. The path is checked before
+the report is built. If the file still cannot be opened at the end (for
+example, a CSV left open in Excel), the report goes to stdout instead and the
+command exits 1, so a long `--inspect` run is not lost.
 
 The table is sorted by expiry, soonest first, and ends with a summary such as
 `297 of 573 valid certificates need replacing; 19 conflicts to review`. Exit codes are 0 on
@@ -986,7 +993,8 @@ certinext replacement-report --inspect --all --latest-only --group-by issuer
 # A later event: classify on a different intermediate, ignore key type
 certinext replacement-report --issuer "Example Intermediate CA" --disable-signal key
 
-certinext replacement-report --inspect --csv > replace.csv
+certinext replacement-report --inspect --csv -o replace.csv
+certinext replacement-report --inspect --json -o replace.json
 ```
 
 ---
