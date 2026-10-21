@@ -67,13 +67,16 @@ the OS keyring via ``certinext-setup-keyring``.
 import os
 import sys
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import tomlkit
 import tomlkit.exceptions
 from pydantic import BaseModel, ValidationError
 
 from certinext.settings import ConnectionSettings, IssuanceDefaults, family_keys
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from certinext.replacement import ReplacementCriteria
 
 if sys.version_info >= (3, 11):
     import tomllib
@@ -145,6 +148,46 @@ def load_config(path: Path | None = None) -> dict[str, Any]:
         return doc
     except (tomllib.TOMLDecodeError, UnicodeDecodeError) as exc:
         raise ConfigError(f"Invalid TOML in {path}: {exc}") from exc
+
+
+def replacement_criteria(path: Path | None = None) -> "ReplacementCriteria":
+    """Return the replacement criteria from the ``[replacement]`` table.
+
+    The table is top-level (not per profile) and sits outside the
+    ``[defaults]``/``[profiles.NAME]`` families, so it never trips their
+    unknown-key warnings. Unlike those families, it fails closed: a bad
+    value raises instead of being skipped, because silently dropping a
+    criterion would under-report certificates that need replacing.
+
+    .. code-block:: toml
+
+        [replacement]
+        issuers   = ["InCommon Intermediate CA - OVG3C"]
+        key_types = ["EC"]
+        chain_cas = ["emSign ECC Root CA - G3"]
+
+    Args:
+        path: Config file to read; defaults to :func:`config_path`.
+
+    Returns:
+        The configured :class:`~certinext.replacement.ReplacementCriteria`,
+        or the built-in defaults when the table is absent.
+
+    Raises:
+        ConfigError: If the file cannot be parsed or the table is invalid.
+    """
+    from certinext.replacement import ReplacementCriteria
+
+    doc = load_config(path)
+    try:
+        return ReplacementCriteria.from_config(doc)
+    except ValidationError as exc:
+        detail = "; ".join(
+            f"{'.'.join(str(p) for p in err['loc'])}: {err['msg']}" for err in exc.errors()
+        )
+        raise ConfigError(f"[replacement] in {path or config_path()}: {detail}") from exc
+    except ValueError as exc:
+        raise ConfigError(f"{exc} in {path or config_path()}") from exc
 
 
 def _sections(doc: dict[str, Any], profile: str | None) -> list[tuple[str, Any]]:

@@ -39,6 +39,7 @@ _HELP_CASES: dict[str, list[str]] = {
     "list-certificates": ["list-certificates"],
     "parent-dcv-status": ["parent-dcv-status"],
     "pending-dcv": ["pending-dcv"],
+    "replacement-report": ["replacement-report"],
     "setup": ["setup"],
     "setup-defaults": ["setup", "defaults"],
     "setup-keyring": ["setup", "keyring"],
