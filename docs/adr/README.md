@@ -32,5 +32,6 @@ Numbering is sequential and never reused.
 | [0016](0016-sanitize-quotes-in-a-processor-not-per-call-site.md) | Strip double quotes in a logfmt processor, not per call site | accepted |
 | [0017](0017-connection-destinations-fail-closed.md) | Connection destination settings fail closed; issuance defaults warn and continue | accepted |
 | [0018](0018-classify-replacement-on-configurable-signals.md) | Classify replacement need on configurable issuer, key, and chain signals; flag disagreement | accepted |
+| [0019](0019-command-local-opt-in-inspection-cache.md) | Cache certificate downloads per command, opt-in, never volatile state | accepted |
 
 See also: [docs/wishlist/](../wishlist/) for deferred ideas not yet committed to.

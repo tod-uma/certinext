@@ -391,7 +391,7 @@ def test_latest_only_keeps_possibly_superseded() -> None:
     san_new = _with_sans("ORDER-00004", 5, ["x.example.edu"])
     rows = [cn_old, cn_new, san_old, san_new]
     rp.mark_superseded(rows)
-    report = rp.ReplacementReport(criteria=CRITERIA, rows=rows, inspected=True, generated_at=NOW)
+    report = rp.ReplacementReport(criteria=CRITERIA, rows=rows, inspected=True, started_at=NOW)
     kept = [r.facts.order_number for r in report.population(latest_only=True)]
     assert kept == ["ORDER-00001", "ORDER-00002", "ORDER-00004"]
     summary = report.summarize(rows)
@@ -738,6 +738,232 @@ def test_summary_and_breakdown(monkeypatch: pytest.MonkeyPatch) -> None:
     assert len(report.select(include_ok=True)) == 2
 
 
+def test_report_records_start_and_end_times(monkeypatch: pytest.MonkeyPatch) -> None:
+    """started_at is the reference "now"; ended_at is taken after classification."""
+    later = NOW + dt.timedelta(minutes=20)
+    monkeypatch.setattr(rp, "_utcnow", lambda: later)
+    sess, _ = _session(monkeypatch, _routes())
+    report = rp.build_report(sess, CRITERIA, now=NOW)
+    assert (report.started_at, report.ended_at) == (NOW, later)
+    assert report.cache is None
+
+
+# ---------------------------------------------------------------------------
+# Inspection cache
+# ---------------------------------------------------------------------------
+
+
+def _ssl_calls(api: _FakeApi) -> list[str]:
+    """Return the per-certificate requests a fake API saw.
+
+    Args:
+        api: The fake API.
+
+    Returns:
+        Paths under ``ssl-certificates``.
+    """
+    return [c for c in api.calls if "ssl-certificates" in c]
+
+
+def _entries(directory: Path) -> list[Path]:
+    """Return the cache entry files in ``directory``.
+
+    Args:
+        directory: The cache directory.
+
+    Returns:
+        Entry files, sorted.
+    """
+    return sorted(directory.glob("*.json")) if directory.is_dir() else []
+
+
+def _snapshot(report: rp.ReplacementReport) -> list[Any]:
+    """Reduce a report to comparable per-row values.
+
+    Args:
+        report: The report.
+
+    Returns:
+        ``(order, verdict, key, sans, chain, ordered_by)`` per row.
+    """
+    out = []
+    for r in report.rows:
+        i = r.facts.inspection
+        out.append((
+            r.facts.order_number, r.verdict, i and i.key_label, i and i.sans, i and i.chain_cas,
+            r.facts.ordered_by_name,
+        ))
+    return out
+
+
+def test_warm_cache_makes_no_certificate_calls(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """A second run reads every certificate from the cache and classifies identically."""
+    routes = _routes()
+    sess, api = _session(monkeypatch, copy.deepcopy(routes))
+    cold = rp.build_report(sess, CRITERIA, inspect=True, now=NOW, cache=rp.InspectionCache(tmp_path))
+    assert len(_ssl_calls(api)) == 4
+    assert cold.cache and (cold.cache.hits, cold.cache.misses, cold.cache.writes) == (0, 2, 2)
+    assert len(_entries(tmp_path)) == 2
+
+    sess, api = _session(monkeypatch, copy.deepcopy(routes))
+    warm = rp.build_report(sess, CRITERIA, inspect=True, now=NOW, cache=rp.InspectionCache(tmp_path), workers=4)
+    assert _ssl_calls(api) == []
+    assert any("reports/orders" in c for c in api.calls)  # order status stays live
+    assert warm.cache and (warm.cache.hits, warm.cache.misses, warm.cache.writes) == (2, 0, 0)
+    assert all(r.facts.from_cache for r in warm.rows)
+    assert _snapshot(warm) == _snapshot(cold)
+
+
+def test_cache_is_ignored_without_inspection(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Issuer-only runs neither read nor write the cache."""
+    sess, _ = _session(monkeypatch, _routes())
+    report = rp.build_report(sess, CRITERIA, now=NOW, cache=rp.InspectionCache(tmp_path))
+    assert report.cache is None
+    assert _entries(tmp_path) == []
+
+
+def test_expired_entries_are_refetched_and_pruned(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Entries older than max age are misses, and prune() deletes them."""
+    t0 = dt.datetime(2026, 10, 1, tzinfo=dt.timezone.utc)
+    sess, _ = _session(monkeypatch, _routes())
+    rp.build_report(sess, CRITERIA, inspect=True, now=NOW, cache=rp.InspectionCache(tmp_path, clock=lambda: t0))
+    assert len(_entries(tmp_path)) == 2
+
+    old = rp.InspectionCache(tmp_path, clock=lambda: t0 + dt.timedelta(days=8))
+    assert old.get("ORDER-00001", "SERIAL-1") is None
+    fresh = rp.InspectionCache(tmp_path, clock=lambda: t0 + dt.timedelta(days=6))
+    assert fresh.get("ORDER-00001", "SERIAL-1") is not None
+    assert old.prune() == 2
+    assert _entries(tmp_path) == []
+
+
+def test_refresh_ignores_entries_but_rewrites_them(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """--refresh-cache downloads everything again and stores the new copies."""
+    sess, _ = _session(monkeypatch, _routes())
+    rp.build_report(sess, CRITERIA, inspect=True, now=NOW, cache=rp.InspectionCache(tmp_path))
+    sess, api = _session(monkeypatch, _routes())
+    report = rp.build_report(sess, CRITERIA, inspect=True, now=NOW, cache=rp.InspectionCache(tmp_path, refresh=True))
+    assert len(_ssl_calls(api)) == 4
+    assert report.cache and (report.cache.hits, report.cache.writes, report.cache.refreshed) == (0, 2, True)
+
+
+def test_failures_and_unkeyable_rows_are_not_cached(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """API errors, rate-limit give-ups, unparseable or chainless downloads, and serial-less rows leave no entry."""
+    routes = _routes()
+    routes[f"{_API}/ssl-certificates/ORDER-00001/certificate"]["chainPem"] = None
+    routes[f"{_API}/ssl-certificates/ORDER-00002"] = CertiNextAPIError(500, "boom")
+    sess, _ = _session(monkeypatch, routes)
+    rp.build_report(sess, CRITERIA, inspect=True, now=NOW, cache=rp.InspectionCache(tmp_path))
+    assert _entries(tmp_path) == []
+
+    routes = _routes()
+    routes[f"{_API}/ssl-certificates/ORDER-00001"] = [CertiNextRateLimitError(429, "slow", retry_after=1)]
+    routes[f"{_API}/ssl-certificates/ORDER-00002/certificate"]["certificatePem"] = "not a certificate"
+    sess, _ = _session(monkeypatch, routes)
+    rp.build_report(sess, CRITERIA, inspect=True, now=NOW, sleep=lambda _s: None, cache=rp.InspectionCache(tmp_path))
+    assert _entries(tmp_path) == []
+
+    routes = _routes()
+    for row in routes[f"{_API}/reports/orders"]["content"]:
+        row["certificateSerialNumber"] = None
+    sess, _ = _session(monkeypatch, routes)
+    report = rp.build_report(sess, CRITERIA, inspect=True, now=NOW, cache=rp.InspectionCache(tmp_path))
+    assert _entries(tmp_path) == []
+    assert report.cache and report.cache.misses == 2 and report.rows[0].facts.error is None
+
+
+def test_new_serial_is_a_miss(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """A reissue or rekey (same order, new serial) is downloaded, never served stale."""
+    sess, _ = _session(monkeypatch, _routes())
+    rp.build_report(sess, CRITERIA, inspect=True, now=NOW, cache=rp.InspectionCache(tmp_path))
+    routes = _routes()
+    routes[f"{_API}/reports/orders"]["content"][0]["certificateSerialNumber"] = "SERIAL-1-REKEY"
+    sess, api = _session(monkeypatch, routes)
+    report = rp.build_report(sess, CRITERIA, inspect=True, now=NOW, cache=rp.InspectionCache(tmp_path))
+    assert _ssl_calls(api) == [
+        f"{_API}/ssl-certificates/ORDER-00001", f"{_API}/ssl-certificates/ORDER-00001/certificate",
+    ]
+    assert report.cache and report.cache.hits == 1
+
+
+@pytest.mark.parametrize("damage", ["garbage", "bad-pem", "other-cert"])
+def test_damaged_entry_is_a_miss_not_an_error(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, damage: str) -> None:
+    """Unreadable JSON, a payload that no longer parses, or a mismatched entry is downloaded afresh."""
+    sess, _ = _session(monkeypatch, _routes())
+    rp.build_report(sess, CRITERIA, inspect=True, now=NOW, cache=rp.InspectionCache(tmp_path))
+    cache = rp.InspectionCache(tmp_path)
+    path = cache._path("ORDER-00001", "SERIAL-1")
+    entry = json.loads(path.read_text(encoding="utf-8"))
+    if damage == "garbage":
+        path.write_text("{not json", encoding="utf-8")
+    elif damage == "bad-pem":
+        entry["download"]["certificatePem"] = "-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----\n"
+        path.write_text(json.dumps(entry), encoding="utf-8")
+    else:
+        entry["serial"] = "SERIAL-9"
+        path.write_text(json.dumps(entry), encoding="utf-8")
+
+    sess, api = _session(monkeypatch, _routes())
+    report = rp.build_report(sess, CRITERIA, inspect=True, now=NOW, cache=cache)
+    assert len(_ssl_calls(api)) == 2
+    assert report.rows[0].facts.error is None and not report.rows[0].facts.from_cache
+    assert cache.get("ORDER-00001", "SERIAL-1") is not None  # rewritten
+
+
+def test_unwritable_cache_is_not_fatal(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """A cache path that cannot be created costs only the saving, not the report."""
+    blocker = tmp_path / "file"
+    blocker.write_text("x", encoding="utf-8")
+    sess, _ = _session(monkeypatch, _routes())
+    report = rp.build_report(sess, CRITERIA, inspect=True, now=NOW, cache=rp.InspectionCache(blocker / "cache"))
+    assert report.summarize(report.rows)["errors"] == 0
+    assert report.cache and report.cache.writes == 0
+
+
+def test_unlistable_cache_dir_is_not_fatal(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """A cache directory that exists but cannot be listed skips pruning, not the report."""
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir()
+    real_iterdir = Path.iterdir
+
+    def denied(self: Path) -> Any:
+        """Refuse to list the cache directory; list anything else normally."""
+        if self == cache_dir:
+            raise PermissionError(13, "Permission denied", str(self))
+        return real_iterdir(self)
+
+    monkeypatch.setattr(Path, "iterdir", denied)
+    sess, _ = _session(monkeypatch, _routes())
+    report = rp.build_report(sess, CRITERIA, inspect=True, now=NOW, cache=rp.InspectionCache(cache_dir))
+    assert report.summarize(report.rows)["errors"] == 0
+    assert report.cache and report.cache.writes > 0
+
+
+def test_concurrent_puts_leave_only_whole_entries(tmp_path: Path) -> None:
+    """Many threads writing (including the same key) never leave a partial file behind."""
+    cache = rp.InspectionCache(tmp_path)
+    payload = _download(ec.generate_private_key(ec.SECP256R1()), bad=True)
+
+    def writer(n: int) -> None:
+        """Write a mix of shared and per-thread keys."""
+        for i in range(20):
+            cache.put("ORDER-SHARED", "S", payload, {"name": f"t{n}", "email": None})
+            cache.put(f"ORDER-{n}", f"S{i}", payload, {"name": None, "email": None})
+
+    threads = [threading.Thread(target=writer, args=(n,)) for n in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(10)
+    files = _entries(tmp_path)
+    assert len(files) == 8 * 20 + 1
+    assert all(json.loads(f.read_text(encoding="utf-8"))["version"] == 1 for f in files)
+    assert not list(tmp_path.glob("*.tmp"))
+    # Distinct keys never contend. On Windows a same-key write can still lose
+    # to a replace in flight after retries, which costs only that write.
+    assert cache.writes >= 8 * 20 + 1
+
+
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
@@ -750,12 +976,14 @@ def run_cli(
     """Run ``certinext replacement-report`` against the fake API.
 
     Pins "now", points ``CERTINEXT_CONFIG`` at a temp file (with optional
-    contents), and patches the command's session.
+    contents), points the per-user cache directory into ``tmp_path``, and
+    patches the command's session.
 
     Returns:
         A ``run(argv, routes=None, config=None) -> (exit, stdout, stderr)`` callable.
     """
     monkeypatch.setattr(rp, "_utcnow", lambda: NOW)
+    monkeypatch.setattr("certinext.cli.replacement_report.cache_dir", lambda: tmp_path / "user-cache")
 
     def run(argv: list[str], routes: dict[str, Any] | None = None, config: str | None = None) -> tuple[int, str, str]:
         """Invoke the command.
@@ -918,11 +1146,111 @@ def test_cli_help_mentions_json(capsys: pytest.CaptureFixture[str], monkeypatch:
         (["--disable-signal", "issuer", "--disable-signal", "key", "--disable-signal", "chain"], None),
         (["--key-type", "ECDSA"], None),
         ([], '[replacement]\nkey_types = "EC"\n'),
+        (["--cache"], None),
+        (["--refresh-cache"], None),
+        (["--inspect", "--no-cache", "--refresh-cache"], None),
+        (["--inspect", "--no-cache", "--cache-dir", "cache"], None),
     ],
 )
 def test_cli_usage_and_config_errors_exit_2(
     run_cli: Callable[..., tuple[int, str, str]], argv: list[str], config: str | None
 ) -> None:
-    """Conflicting outputs, a bad --output path, no enabled signal, bad flags and a bad config all exit 2."""
+    """Conflicting outputs, a bad --output path, no enabled signal, bad flags and a bad config all exit 2.
+
+    Also cache flags without --inspect, and --no-cache combined with a flag that implies --cache.
+    """
     code, _, _ = run_cli(argv, config=config)
+    assert code == 2
+
+
+class _Tty(io.StringIO):
+    """A stdin stand-in that claims to be a terminal."""
+
+    def isatty(self) -> bool:
+        """Report a terminal."""
+        return True
+
+
+def test_cli_json_has_start_end_and_cache_fields(run_cli: Callable[..., tuple[int, str, str]]) -> None:
+    """generated_at is kept (as the end time) beside started_at and ended_at; the cache block says off."""
+    code, out, _ = run_cli(["--json", "--inspect"])
+    assert code == 0
+    doc = json.loads(out)
+    assert doc["started_at"] == NOW.isoformat()
+    assert doc["generated_at"] == doc["ended_at"] >= doc["started_at"]
+    assert doc["cache"] == {"enabled": False}
+
+
+def test_cli_cache_off_without_a_terminal(run_cli: Callable[..., tuple[int, str, str]], tmp_path: Path) -> None:
+    """With neither --cache nor --no-cache and no terminal, the run stays live and never prompts."""
+    code, _, err = run_cli(["--json", "--inspect"])
+    assert code == 0
+    assert "[y/N]" not in err
+    assert not (tmp_path / "user-cache").exists()
+
+
+@pytest.mark.parametrize(("answer", "enabled"), [("y\n", True), ("yes\n", True), ("\n", False), ("", False)])
+def test_cli_prompts_for_the_cache_on_a_terminal(
+    run_cli: Callable[..., tuple[int, str, str]], monkeypatch: pytest.MonkeyPatch,
+    answer: str, enabled: bool,
+) -> None:
+    """On a terminal the user is asked; only an explicit yes turns it on (Enter and EOF mean no)."""
+    monkeypatch.setattr("sys.stdin", _Tty(answer))
+    code, out, err = run_cli(["--json", "--inspect"])
+    assert code == 0
+    assert "[y/N]" in err and "[y/N]" not in out
+    assert json.loads(out)["cache"]["enabled"] is enabled
+
+
+def test_cli_cache_flags_skip_the_prompt(
+    run_cli: Callable[..., tuple[int, str, str]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """--cache and --no-cache answer the question, so a terminal is never asked."""
+    monkeypatch.setattr("sys.stdin", _Tty(""))
+    for flag, enabled in (("--cache", True), ("--no-cache", False)):
+        code, out, err = run_cli(["--json", "--inspect", flag])
+        assert code == 0 and "[y/N]" not in err
+        assert json.loads(out)["cache"]["enabled"] is enabled
+
+
+def test_cli_cache_dir_and_summary(run_cli: Callable[..., tuple[int, str, str]], tmp_path: Path) -> None:
+    """--cache-dir implies --cache, keeps production entries apart, and the summary shows cache use."""
+    target = tmp_path / "mine"
+    code, _, _ = run_cli(["--inspect", "--all", "--cache-dir", str(target)])
+    assert code == 0
+    assert len(_entries(target / "production")) == 2
+    code, out, _ = run_cli(["--inspect", "--all", "--cache-dir", str(target)])
+    assert code == 0
+    assert "2 of 2 inspections from cache (up to 7 days old)" in out
+
+    code, out, _ = run_cli(["--json", "--inspect", "--refresh-cache", "--cache-dir", str(target)])
+    cache = json.loads(out)["cache"]
+    assert (cache["hits"], cache["writes"], cache["refreshed"]) == (0, 2, True)
+    assert cache["dir"] == str(target / "production")
+
+
+def test_cli_default_cache_dir_splits_sandbox(
+    run_cli: Callable[..., tuple[int, str, str]], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Sandbox entries go to their own directory, so they can never answer for production."""
+    original = _session
+
+    def sandbox_session(mp: pytest.MonkeyPatch, routes: dict[str, Any]) -> tuple[CertiNextSession, _FakeApi]:
+        """Like :func:`_session`, flagged as sandbox."""
+        sess, api = original(mp, routes)
+        sess.sandbox = True
+        return sess, api
+
+    monkeypatch.setitem(globals(), "_session", sandbox_session)
+    code, _, _ = run_cli(["--inspect", "--cache"])
+    assert code == 0
+    base = tmp_path / "user-cache" / "replacement-inspect"
+    assert len(_entries(base / "sandbox")) == 2 and not (base / "production").exists()
+
+
+def test_cli_cache_dir_that_is_a_file_exits_2(run_cli: Callable[..., tuple[int, str, str]], tmp_path: Path) -> None:
+    """A --cache-dir naming a file is rejected before the report is built."""
+    blocker = tmp_path / "file"
+    blocker.write_text("x", encoding="utf-8")
+    code, _, _ = run_cli(["--inspect", "--cache-dir", str(blocker)])
     assert code == 2

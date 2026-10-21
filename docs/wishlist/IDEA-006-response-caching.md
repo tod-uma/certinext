@@ -2,7 +2,16 @@
 
 - **Status:** Proposed (coordinating issue: #12)
 - **Created:** 2026-07-02
-- **Updated:** 2026-07-02
+- **Updated:** 2026-10-21
+
+> **2026-10-21:** a narrow, command-local cache now exists, and this idea stays
+> parked. `replacement-report --inspect --cache` (1.3.0rc5) stores certificate
+> downloads, keyed by order number and serial, for 7 days. It is opt-in per run.
+> It never caches order status (the orders report stays live) or errors, and it
+> is not a library or HTTP-layer cache. The consumer that "measurably suffered"
+> was a 20-minute inspection run repeated while working through the eMudhra ECC
+> distrust. See [the plan](../plans/replacement-report-cache.md) and
+> [ADR 0019](../adr/0019-command-local-opt-in-inspection-cache.md).
 
 ## Context
 

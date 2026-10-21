@@ -65,6 +65,7 @@ import structlog
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from certinext._chain import split_pem_certificates
+from certinext._inspection_cache import InspectionCache
 from certinext.exceptions import CertiNextAPIError, CertiNextRateLimitError
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -310,6 +311,8 @@ class CertificateFacts:
         ordered_by_name: Who placed the order (order detail), if inspected.
         ordered_by_email: Their email address, if inspected.
         error: Why inspection failed, if it did.
+        from_cache: Whether the inspection fields came from an
+            :class:`InspectionCache` entry rather than a live download.
     """
 
     order_number: str
@@ -326,6 +329,7 @@ class CertificateFacts:
     ordered_by_name: str | None = None
     ordered_by_email: str | None = None
     error: str | None = None
+    from_cache: bool = False
 
     @property
     def sans_known(self) -> bool:
@@ -457,6 +461,41 @@ class IncompleteRecord:
     reason: str
 
 
+@dataclass
+class CacheStats:
+    """How a run used the :class:`InspectionCache`.
+
+    Attributes:
+        directory: The cache directory.
+        refreshed: Whether existing entries were ignored and rewritten.
+        max_age: The oldest entry that was trusted.
+        hits: Certificates inspected from the cache.
+        misses: Certificates downloaded live (absent, expired, refreshing,
+            unparseable entry, or no serial number to key on).
+        writes: Entries written.
+    """
+
+    directory: str
+    refreshed: bool
+    max_age: dt.timedelta
+    hits: int
+    misses: int
+    writes: int
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return a JSON-ready dict.
+
+        Returns:
+            The fields plus ``enabled: True``, with ``max_age`` as
+            ``max_age_days``.
+        """
+        return {
+            "enabled": True, "dir": self.directory, "refreshed": self.refreshed,
+            "max_age_days": self.max_age / dt.timedelta(days=1),
+            "hits": self.hits, "misses": self.misses, "writes": self.writes,
+        }
+
+
 GroupBy = Literal["originator", "group", "issuer"]
 """Dimensions :meth:`ReplacementReport.breakdown` can group by."""
 
@@ -469,17 +508,23 @@ class ReplacementReport:
         criteria: The criteria the rows were classified with.
         rows: Every valid certificate, soonest expiry first.
         inspected: Whether certificates were downloaded and parsed.
-        generated_at: The reference "now" used for validity and days left.
+        started_at: When the run started. Also the reference "now" for
+            validity and days left, since the orders report is read then.
         incomplete: Issued orders that could not be classified because the
             orders report omitted their order number or expiry. Non-empty
             means the inventory is not complete.
+        ended_at: When every certificate had been classified (``None`` for
+            a report built by hand).
+        cache: How the inspection cache was used, or ``None`` if it was not.
     """
 
     criteria: ReplacementCriteria
     rows: list[ReportRow]
     inspected: bool
-    generated_at: dt.datetime
+    started_at: dt.datetime
     incomplete: list[IncompleteRecord] = field(default_factory=list)
+    ended_at: dt.datetime | None = None
+    cache: CacheStats | None = None
 
     def population(
         self, *, latest_only: bool = False, expiring_within: int | None = None
@@ -497,7 +542,7 @@ class ReplacementReport:
         if latest_only:
             rows = [r for r in rows if not r.superseded]
         if expiring_within is not None:
-            rows = [r for r in rows if r.days_left(self.generated_at) < expiring_within]
+            rows = [r for r in rows if r.days_left(self.started_at) < expiring_within]
         return rows
 
     def select(
@@ -839,7 +884,61 @@ class _Backoff:
                     self._clear.set()
 
 
-def _inspect_into(sess: "CertiNextSession", facts: CertificateFacts, backoff: _Backoff) -> None:
+def _apply_ordered_by(facts: CertificateFacts, who: Any) -> None:
+    """Record who placed the order on ``facts``.
+
+    Args:
+        facts: The facts to fill in (mutated).
+        who: The order detail's ``orderedBy``/``requestor`` object.
+    """
+    if isinstance(who, dict):
+        facts.ordered_by_name = who.get("name") or None
+        facts.ordered_by_email = who.get("email") or None
+
+
+def _inspect_from_cache(facts: CertificateFacts, cache: InspectionCache) -> bool:
+    """Fill ``facts`` from a cache entry, if there is a usable one.
+
+    The cached payload is re-validated and re-parsed, so parser fixes apply
+    to it. An entry that no longer parses is a miss, not an error: the live
+    download decides.
+
+    Args:
+        facts: The facts to fill in (mutated only on a hit).
+        cache: The inspection cache.
+
+    Returns:
+        True on a hit.
+
+    Raises:
+        ImportError: If ``cryptography`` is missing.
+    """
+    from certinext.models.ssl_certificates import CertificateDownload
+
+    if not facts.serial_number:
+        return False
+    entry = cache.get(facts.order_number, facts.serial_number)
+    if entry is None:
+        return False
+    try:
+        inspection = inspect_download(CertificateDownload.model_validate(entry.download))
+    except ValueError as exc:  # includes pydantic.ValidationError
+        log.debug("Cached download no longer parses; downloading", order=facts.order_number, error=str(exc))
+        return False
+    if not inspection.chain_cas:
+        return False
+    _apply_ordered_by(facts, entry.ordered_by)
+    facts.inspection = inspection
+    facts.from_cache = True
+    return True
+
+
+def _inspect_into(
+    sess: "CertiNextSession",
+    facts: CertificateFacts,
+    backoff: _Backoff,
+    cache: InspectionCache | None = None,
+) -> None:
     """Download, parse, and record one certificate's details on ``facts``.
 
     Retries after a 429, pausing every worker meanwhile. Any API, transport,
@@ -849,14 +948,20 @@ def _inspect_into(sess: "CertiNextSession", facts: CertificateFacts, backoff: _B
     recorded as an error too, since the chain signal goes unevaluated.
     Safe to run from several threads at once, one ``facts`` per call.
 
+    With a ``cache``, a usable entry replaces both requests, and a clean
+    live result (no error of any kind) is stored for next time.
+
     Args:
         sess: An authenticated session.
         facts: The facts to fill in (mutated).
         backoff: The rate-limit gate shared by all workers.
+        cache: Inspection cache to read from and write to, if any.
 
     Raises:
         ImportError: If ``cryptography`` is missing (fatal for every row).
     """
+    if cache is not None and _inspect_from_cache(facts, cache):
+        return
     order: "SslOrder | None" = None
     download: "CertificateDownload | None" = None
     for attempt in range(1, _RATE_LIMIT_ATTEMPTS + 1):
@@ -882,10 +987,7 @@ def _inspect_into(sess: "CertiNextSession", facts: CertificateFacts, backoff: _B
         return
 
     detail = order.as_dict()
-    who = detail.get("orderedBy") or detail.get("requestor") or {}
-    if isinstance(who, dict):
-        facts.ordered_by_name = who.get("name") or None
-        facts.ordered_by_email = who.get("email") or None
+    _apply_ordered_by(facts, detail.get("orderedBy") or detail.get("requestor") or {})
     try:
         facts.inspection = inspect_download(download)
     except ValueError as exc:
@@ -893,6 +995,12 @@ def _inspect_into(sess: "CertiNextSession", facts: CertificateFacts, backoff: _B
         return
     if not facts.inspection.chain_cas:
         facts.error = "download served no chain; chain signal not evaluated"
+        return
+    if cache is not None and facts.serial_number:
+        cache.put(
+            facts.order_number, facts.serial_number, download.as_dict(),
+            {"name": facts.ordered_by_name, "email": facts.ordered_by_email},
+        )
 
 
 def build_report(
@@ -907,6 +1015,7 @@ def build_report(
     on_total: Callable[[int], None] | None = None,
     sleep: Callable[[float], None] = time.sleep,
     workers: int = 1,
+    cache: InspectionCache | None = None,
 ) -> ReplacementReport:
     """Inventory valid certificates and classify each against the criteria.
 
@@ -931,6 +1040,9 @@ def build_report(
         on_total: Called once with the number of certificates to inspect.
         sleep: Delay function used for rate-limit backoff.
         workers: Certificates to inspect at once. A 429 pauses them all.
+        cache: Reuse downloads up to the cache's max age, and save fresh
+            ones. Only used with ``inspect``. Order status is never cached:
+            the orders report is always read live.
 
     Returns:
         The classified :class:`ReplacementReport`.
@@ -944,6 +1056,7 @@ def build_report(
     if workers < 1:
         raise ValueError(f"workers must be at least 1, got {workers}")
     now = now or _utcnow()
+    clock_start = time.monotonic()
     try:
         group_names = {
             g.group_number: g.group_name for g in sess.accounts.list_groups()
@@ -997,9 +1110,13 @@ def build_report(
         if on_total:
             on_total(len(facts))
         backoff = _Backoff(sleep)
+        if cache is not None:
+            pruned = cache.prune()
+            if pruned:
+                log.info("Pruned inspection cache", removed=pruned, dir=str(cache.directory))
         pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="inspect")
         try:
-            futures = {pool.submit(_inspect_into, sess, f, backoff): f for f in facts}
+            futures = {pool.submit(_inspect_into, sess, f, backoff, cache): f for f in facts}
             pending = set(futures)
             while pending:
                 # A timed wait, so Ctrl+C reaches this thread on Windows too.
@@ -1012,11 +1129,25 @@ def build_report(
             # On Ctrl+C or a fatal error, drop the queue instead of waiting for it.
             pool.shutdown(wait=True, cancel_futures=True)
 
+    stats: CacheStats | None = None
+    if inspect and cache is not None:
+        hits = sum(1 for f in facts if f.from_cache)
+        stats = CacheStats(
+            directory=str(cache.directory), refreshed=cache.refresh, max_age=cache.max_age,
+            hits=hits, misses=len(facts) - hits, writes=cache.writes,
+        )
+        log.info(
+            "Inspection cache", dir=stats.directory, hits=stats.hits, misses=stats.misses,
+            writes=stats.writes, refreshed=stats.refreshed,
+        )
+
     rows = [ReportRow(facts=f, classification=classify(f, criteria)) for f in facts]
     mark_superseded(rows)
     rows.sort(key=lambda r: (r.facts.valid_to, r.facts.order_number))
+    log.info("Report built", duration_seconds=round(time.monotonic() - clock_start, 1))
     return ReplacementReport(
-        criteria=criteria, rows=rows, inspected=inspect, generated_at=now, incomplete=incomplete,
+        criteria=criteria, rows=rows, inspected=inspect, started_at=now, incomplete=incomplete,
+        ended_at=_utcnow(), cache=stats,
     )
 
 
@@ -1025,11 +1156,13 @@ __all__ = [
     "DEFAULT_ISSUERS",
     "DEFAULT_KEY_TYPES",
     "SIGNALS",
+    "CacheStats",
     "CertificateFacts",
     "Classification",
     "GroupBy",
     "IncompleteRecord",
     "Inspection",
+    "InspectionCache",
     "KeyType",
     "ReplacementCriteria",
     "ReplacementReport",

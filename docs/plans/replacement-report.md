@@ -1,12 +1,13 @@
 ---
-status: in-progress
+status: done
 depends-on: []
-implements-adr: []
+implements-adr: [0018]
 ---
 
 # Plan: `certinext replacement-report` — find valid certs that chain to a distrusted root
 
-**Status:** in progress: Phases 0–1 done 2026-10-21; Phase 2 on branch `feat/replacement-report`.
+**Status:** done 2026-10-21: shipped in `v1.3.0rc3` (MR !131), sped up in `v1.3.0rc4` (MRs
+!132/!133). Follow-on work: [replacement-report-cache.md](replacement-report-cache.md).
 This repo copy supersedes the private plan-mode draft it was moved from.
 
 ## Context
@@ -345,6 +346,8 @@ This is a count reconciliation across one day, not a row-by-row join against the
 
 ## Follow-ups (separate work, not this branch)
 
+- **Inspection cache and run timestamps:** [replacement-report-cache.md](replacement-report-cache.md)
+  (`1.3.0rc5`).
 - **#34:** fix revoke/reissue reason casing.
 - **Recorded 2026-10-21:** the decision is now [ADR 0018](../adr/0018-classify-replacement-on-configurable-signals.md).
   The two items below are parked as wishlist ideas
