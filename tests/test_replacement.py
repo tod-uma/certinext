@@ -920,6 +920,25 @@ def test_unwritable_cache_is_not_fatal(monkeypatch: pytest.MonkeyPatch, tmp_path
     assert report.cache and report.cache.writes == 0
 
 
+def test_unlistable_cache_dir_is_not_fatal(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """A cache directory that exists but cannot be listed skips pruning, not the report."""
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir()
+    real_iterdir = Path.iterdir
+
+    def denied(self: Path) -> Any:
+        """Refuse to list the cache directory; list anything else normally."""
+        if self == cache_dir:
+            raise PermissionError(13, "Permission denied", str(self))
+        return real_iterdir(self)
+
+    monkeypatch.setattr(Path, "iterdir", denied)
+    sess, _ = _session(monkeypatch, _routes())
+    report = rp.build_report(sess, CRITERIA, inspect=True, now=NOW, cache=rp.InspectionCache(cache_dir))
+    assert report.summarize(report.rows)["errors"] == 0
+    assert report.cache and report.cache.writes > 0
+
+
 def test_concurrent_puts_leave_only_whole_entries(tmp_path: Path) -> None:
     """Many threads writing (including the same key) never leave a partial file behind."""
     cache = rp.InspectionCache(tmp_path)

@@ -279,30 +279,40 @@ class InspectionCache:
     def prune(self) -> int:
         """Delete expired and unreadable entries plus stale temp files.
 
+        Never raises: a directory that cannot be checked or listed is logged
+        and left alone, since pruning only saves disk space.
+
         Returns:
             How many files were deleted.
         """
-        if not self.directory.is_dir():
-            return 0
         removed = 0
-        for path in self.directory.iterdir():
-            if path.suffix == ".tmp":
-                with contextlib.suppress(OSError):
-                    if time.time() - path.stat().st_mtime > _STALE_TEMP_SECONDS:
+        try:
+            # Both calls can raise: is_dir() lets PermissionError through
+            # before Python 3.14, and listing an unreadable directory fails.
+            if not self.directory.is_dir():
+                return 0
+            for path in self.directory.iterdir():
+                if path.suffix == ".tmp":
+                    with contextlib.suppress(OSError):
+                        if time.time() - path.stat().st_mtime > _STALE_TEMP_SECONDS:
+                            path.unlink()
+                            removed += 1
+                    continue
+                if path.suffix != ".json":
+                    continue
+                try:
+                    fetched_at = dt.datetime.fromisoformat(
+                        json.loads(path.read_text(encoding="utf-8"))["fetched_at"]
+                    )
+                    keep = fetched_at.tzinfo is not None and self._fresh(fetched_at)
+                except (OSError, ValueError, KeyError, TypeError):
+                    keep = False
+                if not keep:
+                    with contextlib.suppress(OSError):
                         path.unlink()
                         removed += 1
-                continue
-            if path.suffix != ".json":
-                continue
-            try:
-                fetched_at = dt.datetime.fromisoformat(
-                    json.loads(path.read_text(encoding="utf-8"))["fetched_at"]
-                )
-                keep = fetched_at.tzinfo is not None and self._fresh(fetched_at)
-            except (OSError, ValueError, KeyError, TypeError):
-                keep = False
-            if not keep:
-                with contextlib.suppress(OSError):
-                    path.unlink()
-                    removed += 1
+        except OSError as exc:
+            log.warning(
+                "Cannot prune inspection cache; continuing", path=str(self.directory), error=str(exc),
+            )
         return removed
