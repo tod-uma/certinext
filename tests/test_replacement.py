@@ -19,11 +19,14 @@ placeholder CA names; the fake API routes the same paths the real accessors
 call, so the full report/model/CLI stack runs.
 """
 
+import contextlib
 import copy
 import csv
 import datetime as dt
 import io
 import json
+import threading
+import time
 from pathlib import Path
 from typing import Any, Callable
 
@@ -575,6 +578,87 @@ def test_rate_limit_is_retried_once(monkeypatch: pytest.MonkeyPatch) -> None:
     assert report.rows[0].facts.error is None and report.rows[0].facts.inspection
 
 
+def test_rate_limit_retries_twice_then_records_the_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Two 429s still recover; a third gives up on that row only."""
+    routes = _routes()
+    detail = routes[f"{_API}/ssl-certificates/ORDER-00001"]
+    limited = CertiNextRateLimitError(429, "slow", retry_after=7)
+    routes[f"{_API}/ssl-certificates/ORDER-00001"] = [limited, limited, detail]
+    sess, _ = _session(monkeypatch, routes)
+    waits: list[float] = []
+    report = rp.build_report(sess, CRITERIA, inspect=True, now=NOW, sleep=waits.append)
+    assert waits == [7, 7]
+    assert report.rows[0].facts.error is None
+
+    routes[f"{_API}/ssl-certificates/ORDER-00001"] = [limited]
+    sess, _ = _session(monkeypatch, routes)
+    report = rp.build_report(sess, CRITERIA, inspect=True, now=NOW, sleep=lambda _s: None)
+    assert report.rows[0].facts.error and report.rows[0].facts.error.startswith("rate limited")
+    assert report.rows[1].facts.error is None
+
+
+def test_parallel_inspection_matches_sequential(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Several workers produce the same rows as one, and report progress for every certificate."""
+    def snapshot(workers: int) -> tuple[list[Any], list[str]]:
+        """Build an inspected report and reduce it to comparable values."""
+        sess, _ = _session(monkeypatch, _routes())
+        seen: list[str] = []
+        report = rp.build_report(
+            sess, CRITERIA, inspect=True, now=NOW, workers=workers, on_progress=lambda f: seen.append(f.order_number)
+        )
+        rows = [
+            (r.facts.order_number, r.verdict, r.facts.error, r.facts.inspection and r.facts.inspection.key_label)
+            for r in report.rows
+        ]
+        return rows, sorted(seen)
+
+    assert snapshot(4) == snapshot(1)
+
+
+def test_workers_must_be_positive(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Zero workers is a caller bug, not a silent no-op."""
+    sess, _ = _session(monkeypatch, _routes())
+    with pytest.raises(ValueError, match="workers"):
+        rp.build_report(sess, CRITERIA, inspect=True, now=NOW, workers=0)
+
+
+def test_missing_cryptography_still_aborts_with_workers(monkeypatch: pytest.MonkeyPatch) -> None:
+    """ImportError raised in a worker thread reaches the caller instead of becoming a row error."""
+    def no_crypto(_download: Any) -> Any:
+        """Stand in for an install without ``cryptography``."""
+        raise ImportError("cryptography")
+
+    monkeypatch.setattr(rp, "inspect_download", no_crypto)
+    sess, _ = _session(monkeypatch, _routes())
+    with pytest.raises(ImportError):
+        rp.build_report(sess, CRITERIA, inspect=True, now=NOW, workers=4)
+
+
+def test_backoff_holds_other_workers_until_the_pause_ends() -> None:
+    """While one worker waits out a 429, the others block before their next request."""
+    release = threading.Event()
+
+    def held_sleep(_seconds: float) -> None:
+        """Sleep until the test releases it, instead of for real."""
+        release.wait(5)
+
+    backoff = rp._Backoff(held_sleep)
+    pauser = threading.Thread(target=backoff.pause, args=(7,))
+    pauser.start()
+    for _ in range(200):
+        if not backoff._clear.is_set():
+            break
+        time.sleep(0.01)
+    waiter = threading.Thread(target=backoff.wait)
+    waiter.start()
+    waiter.join(0.2)
+    assert waiter.is_alive()
+    release.set()
+    pauser.join(5)
+    waiter.join(5)
+    assert not waiter.is_alive()
+
+
 def test_malformed_responses_are_recorded_not_raised(monkeypatch: pytest.MonkeyPatch) -> None:
     """A download failing model validation, or a non-dict order detail, lands on its row only."""
     routes = _routes()
@@ -780,9 +864,57 @@ def test_cli_latest_only_warns_about_unknown_sans(run_cli: Callable[..., tuple[i
 
 
 @pytest.mark.parametrize(
+    ("fmt", "check"),
+    [
+        (["--json"], lambda text: json.loads(text)["summary"]["needs_replacing"] == 1),
+        (["--csv"], lambda text: [r["order_number"] for r in csv.DictReader(io.StringIO(text))] == ["ORDER-00001"]),
+        ([], lambda text: "ORDER-00001" in text and "need replacing" in text and "\x1b[" not in text),
+    ],
+)
+def test_cli_output_writes_file(
+    run_cli: Callable[..., tuple[int, str, str]], tmp_path: Path,
+    fmt: list[str], check: Callable[[str], bool],
+) -> None:
+    """--output puts the data in a UTF-8 file, leaves stdout empty, and shows the summary on stderr."""
+    target = tmp_path / "report.out"
+    code, out, err = run_cli([*fmt, "--output", str(target)], config=f'[replacement]\nissuers = ["{BAD_INT}"]\n')
+    assert code == 0
+    assert out == ""
+    assert check(target.read_text(encoding="utf-8"))
+    assert "need replacing" in err
+
+
+def test_cli_output_unopenable_falls_back_to_stdout(
+    run_cli: Callable[..., tuple[int, str, str]], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A file that cannot be opened after the report is built doesn't lose it: stdout, then exit 1."""
+    def locked(*_a: Any, **_kw: Any) -> Any:
+        """Stand in for ``open`` on a file another program holds locked."""
+        raise PermissionError("locked")
+
+    monkeypatch.setattr("certinext.cli.replacement_report.open", locked, raising=False)
+    code, out, _ = run_cli(
+        ["--json", "-o", str(tmp_path / "report.json")], config=f'[replacement]\nissuers = ["{BAD_INT}"]\n'
+    )
+    assert code == 1
+    assert json.loads(out)["summary"]["needs_replacing"] == 1
+
+
+def test_cli_help_mentions_json(capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
+    """--json is a root option, so the command's own help has to point at it."""
+    monkeypatch.setenv("COLUMNS", "200")
+    with contextlib.suppress(SystemExit):
+        cli_main(["replacement-report", "--help"])
+    assert "--json" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
     ("argv", "config"),
     [
         (["--csv", "--json"], None),
+        (["--output", "no-such-dir/report.json"], None),
+        (["--inspect", "--workers", "0"], None),
+        (["--inspect", "--workers", "17"], None),
         (["--disable-signal", "issuer", "--disable-signal", "key", "--disable-signal", "chain"], None),
         (["--key-type", "ECDSA"], None),
         ([], '[replacement]\nkey_types = "EC"\n'),
@@ -791,6 +923,6 @@ def test_cli_latest_only_warns_about_unknown_sans(run_cli: Callable[..., tuple[i
 def test_cli_usage_and_config_errors_exit_2(
     run_cli: Callable[..., tuple[int, str, str]], argv: list[str], config: str | None
 ) -> None:
-    """Conflicting outputs, no enabled signal, bad flags and a bad config all exit 2."""
+    """Conflicting outputs, a bad --output path, no enabled signal, bad flags and a bad config all exit 2."""
     code, _, _ = run_cli(argv, config=config)
     assert code == 2

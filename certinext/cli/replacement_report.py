@@ -16,16 +16,18 @@
 
 Thin CLI over :mod:`certinext.replacement`: resolves the criteria (built-in
 defaults, then ``[replacement]`` in ``config.toml``, then flags), builds the
-report, and renders it as a table, JSON, or CSV. Data goes to stdout;
-progress and logs go to stderr.
+report, and renders it as a table, JSON, or CSV. Data goes to stdout, or to
+the ``--output`` file; progress and logs go to stderr.
 """
 
+import contextlib
 import csv
 import json
 import sys
 from dataclasses import asdict
 from enum import Enum
-from typing import Any, Optional
+from pathlib import Path
+from typing import Any, Optional, TextIO
 
 import structlog
 import typer
@@ -41,6 +43,12 @@ log = structlog.get_logger()
 
 # SANs shown in the table before collapsing the rest into "+N".
 _TABLE_SANS = 3
+
+# Parallel --inspect downloads. Sequential took ~55 minutes for ~574
+# certificates in prod (2026-10-21); the cap keeps a typo from flooding a
+# vendor API whose rate limits are undocumented.
+_DEFAULT_WORKERS = 4
+_MAX_WORKERS = 16
 
 
 class _GroupBy(str, Enum):
@@ -188,6 +196,46 @@ def _csv_value(value: Any) -> Any:
     return "" if value is None else value
 
 
+def _check_output(path: Path | None) -> None:
+    """Reject an ``--output`` path that cannot work, before the slow part.
+
+    Args:
+        path: The ``--output`` value, or None for stdout.
+
+    Raises:
+        typer.BadParameter: If the path is a directory or its parent
+            directory does not exist.
+    """
+    if path is None:
+        return
+    if path.is_dir():
+        raise typer.BadParameter(f"{path} is a directory", param_hint="--output")
+    if not path.resolve().parent.is_dir():
+        raise typer.BadParameter(f"directory {path.resolve().parent} does not exist", param_hint="--output")
+
+
+def _open_output(path: Path | None) -> TextIO | None:
+    """Open the ``--output`` file, falling back to stdout if that fails.
+
+    The report may have taken an hour to build, so a file that cannot be
+    opened (locked by Excel, permissions) is logged rather than fatal; the
+    caller writes to stdout instead and exits 1.
+
+    Args:
+        path: The ``--output`` value, or None for stdout.
+
+    Returns:
+        The open file (UTF-8, LF line endings), or None to use stdout.
+    """
+    if path is None:
+        return None
+    try:
+        return open(path, "w", encoding="utf-8", newline="")
+    except OSError as exc:
+        log.error("Cannot write output file; writing the report to stdout instead", path=str(path), error=str(exc))
+        return None
+
+
 @app.command()
 def replacement_report(
     ctx: typer.Context,
@@ -198,6 +246,10 @@ def replacement_report(
             "signals (so disagreements are detected), and adds SANs, key size, "
             "and who ordered it. Two requests per certificate."
         ),
+    ),
+    workers: int = typer.Option(
+        _DEFAULT_WORKERS, "--workers", metavar="N", min=1, max=_MAX_WORKERS,
+        help="Certificates to download at once with --inspect; a rate limit pauses them all",
     ),
     include_ok: bool = typer.Option(
         False, "--all",
@@ -243,7 +295,11 @@ def replacement_report(
         help="Turn a signal off for this run; repeatable",
     ),
     output_csv: bool = typer.Option(
-        False, "--csv", help="Write CSV to stdout instead of a table",
+        False, "--csv", help="Write CSV instead of a table (use --json for JSON)",
+    ),
+    output: Optional[Path] = typer.Option(
+        None, "--output", "-o", metavar="FILE",
+        help="Write the table, JSON, or CSV to FILE (UTF-8) instead of stdout",
     ),
 ) -> None:
     """List currently valid certificates that need replacing after a CA distrust.
@@ -251,17 +307,20 @@ def replacement_report(
     By default classifies on the issuing CA alone (instant, from the orders
     report). Criteria come from built-in defaults (the October 2026 eMudhra
     ECC distrust), the "replacement" table in config.toml, and the flags
-    above. Read-only. Exits 1 if any certificate could not be inspected or
-    any issued order could not be classified.
+    above. Output is a table, or JSON with --json, or CSV with --csv. Read-only.
+    Exits 1 if any certificate could not be inspected or any issued order
+    could not be classified.
     """
     if output_csv and ctx.obj.output_json:
         raise typer.BadParameter("--csv and --json are mutually exclusive")
+    _check_output(output)
     criteria = _criteria(issuer, key_type, chain_ca, disable_signal)
     sess = session(ctx)
 
     log.info(
         "Building replacement report", inspect=inspect,
         signals=",".join(criteria.active_signals()),
+        workers=workers if inspect else None,
     )
     try:
         with Progress(console=err_console, disable=progress_disabled(ctx.obj.verbose)) as progress:
@@ -269,7 +328,7 @@ def replacement_report(
             report = rp.build_report(
                 sess, criteria, inspect=inspect, originators=originator, groups=group,
                 on_total=lambda n: progress.update(task, total=n),
-                on_progress=lambda _f: progress.advance(task),
+                on_progress=lambda _f: progress.advance(task), workers=workers,
             )
     except ImportError as exc:
         log.error("Cannot inspect certificates", error=str(exc))
@@ -289,38 +348,47 @@ def replacement_report(
             file=sys.stderr,
         )
 
-    if ctx.obj.output_json:
-        doc: dict[str, Any] = {
-            "generated_at": report.generated_at.isoformat(),
-            "inspected": report.inspected,
-            "criteria": criteria.model_dump(),
-            "summary": summary,
-            "certificates": [r.to_dict(report.generated_at) for r in rows],
-            "incomplete": [asdict(i) for i in report.incomplete],
-        }
-        if breakdown is not None:
-            doc["breakdown"] = breakdown
-        print(json.dumps(doc, indent=2))
-    elif output_csv:
-        dicts = [r.to_dict(report.generated_at) for r in rows]
-        if dicts:
-            writer = csv.DictWriter(sys.stdout, fieldnames=list(dicts[0]), lineterminator="\n")
-            writer.writeheader()
-            writer.writerows({k: _csv_value(v) for k, v in d.items()} for d in dicts)
-        if breakdown:
-            err_console.print(rows_table(breakdown))
-        print(_summary_line(summary, report), file=sys.stderr)
-    else:
-        if rows:
-            show_errors = any(r.facts.error for r in rows)
-            data_console().print(rows_table([_table_row(r, report, show_errors) for r in rows]))
-            print()
+    fh = _open_output(output)
+    with fh or contextlib.nullcontext(sys.stdout) as out:
+        if ctx.obj.output_json:
+            doc: dict[str, Any] = {
+                "generated_at": report.generated_at.isoformat(),
+                "inspected": report.inspected,
+                "criteria": criteria.model_dump(),
+                "summary": summary,
+                "certificates": [r.to_dict(report.generated_at) for r in rows],
+                "incomplete": [asdict(i) for i in report.incomplete],
+            }
+            if breakdown is not None:
+                doc["breakdown"] = breakdown
+            print(json.dumps(doc, indent=2), file=out)
+        elif output_csv:
+            dicts = [r.to_dict(report.generated_at) for r in rows]
+            if dicts:
+                writer = csv.DictWriter(out, fieldnames=list(dicts[0]), lineterminator="\n")
+                writer.writeheader()
+                writer.writerows({k: _csv_value(v) for k, v in d.items()} for d in dicts)
+            if breakdown:
+                err_console.print(rows_table(breakdown))
         else:
-            print("(no certificates match)\n")
-        if breakdown:
-            data_console().print(rows_table(breakdown))
-            print()
-        print(_summary_line(summary, report))
+            console = data_console(fh)
+            if rows:
+                show_errors = any(r.facts.error for r in rows)
+                console.print(rows_table([_table_row(r, report, show_errors) for r in rows]))
+                print(file=out)
+            else:
+                print("(no certificates match)\n", file=out)
+            if breakdown:
+                console.print(rows_table(breakdown))
+                print(file=out)
+            print(_summary_line(summary, report), file=out)
 
-    if summary["errors"] or summary["incomplete"]:
+    # The summary always reaches the terminal: CSV has no room for it, and
+    # with --output the data went to a file.
+    if output_csv or fh:
+        print(_summary_line(summary, report), file=sys.stderr)
+    if fh:
+        log.info("Report written", path=str(output))
+
+    if (output and not fh) or summary["errors"] or summary["incomplete"]:
         raise SystemExit(1)

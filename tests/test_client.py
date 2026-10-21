@@ -17,6 +17,7 @@
 from typing import Any, cast
 from unittest.mock import MagicMock
 
+import httpx
 import pytest
 
 from certinext.client import CertiNextClient
@@ -256,6 +257,17 @@ class TestTokenRefreshOn401:
         assert mock_session.get.call_count == 2
         cast(MagicMock, client._auth.invalidate).assert_called_once()
         assert result == {"orderId": "abc"}
+
+    def test_401_invalidates_only_the_rejected_token(self) -> None:
+        """The token passed to invalidate() is the one the rejected request carried."""
+        client, mock_session = _make_client()
+        rejected = httpx.Response(
+            401, json={"error": "ACCESS_TOKEN_REVOKED"},
+            request=httpx.Request("GET", "https://example.test/x", headers={"Authorization": "Bearer t-old"}),
+        )
+        mock_session.get.side_effect = [rejected, _ok_response({"orderId": "abc"})]
+        client.get("/x")
+        cast(MagicMock, client._auth.invalidate).assert_called_once_with("t-old")
 
     def test_get_raises_if_retry_also_401(self) -> None:
         """get() propagates CertiNextAPIError when the retry also returns 401."""

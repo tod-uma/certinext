@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import threading
 import time
 from typing import Optional
 
@@ -48,6 +49,7 @@ class OAuth2ClientCredentials:
         self.scope = scope
         self._access_token: Optional[str] = None
         self._expires_at: float = 0.0
+        self._lock = threading.Lock()
 
     def get_token(self) -> str:
         """Return a valid bearer token, fetching a new one if necessary.
@@ -58,16 +60,28 @@ class OAuth2ClientCredentials:
         Raises:
             RuntimeError: If the token endpoint returns an error or non-JSON response.
         """
-        if self._access_token and time.monotonic() < self._expires_at - 60:
+        # One lock around check-and-fetch: threads sharing a session (parallel
+        # replacement-report downloads) must not each fetch a token at expiry.
+        with self._lock:
+            if self._access_token and time.monotonic() < self._expires_at - 60:
+                return self._access_token
+            self._fetch_token()
+            assert self._access_token is not None
             return self._access_token
-        self._fetch_token()
-        assert self._access_token is not None
-        return self._access_token
 
-    def invalidate(self) -> None:
-        """Discard the cached token, forcing a fresh fetch on the next :meth:`get_token` call."""
-        self._access_token = None
-        self._expires_at = 0.0
+    def invalidate(self, stale: str | None = None) -> None:
+        """Discard the cached token, forcing a fresh fetch on the next :meth:`get_token` call.
+
+        Args:
+            stale: The token that was rejected. If another thread has
+                already replaced it, the newer token is kept. None always
+                discards.
+        """
+        with self._lock:
+            if stale is not None and stale != self._access_token:
+                return
+            self._access_token = None
+            self._expires_at = 0.0
 
     def _fetch_token(self) -> None:
         """Request a new token from the token endpoint and cache it.

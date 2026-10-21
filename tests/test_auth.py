@@ -14,7 +14,9 @@
 
 """Tests for certinext.auth.OAuth2ClientCredentials."""
 
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -165,3 +167,35 @@ class TestInvalidate:
             auth.get_token()
         auth.invalidate()
         assert auth._access_token is None
+
+    def test_invalidate_ignores_an_already_replaced_token(self) -> None:
+        """A 401 for an old token doesn't discard the newer one another thread fetched."""
+        auth = _make_auth()
+        with patch("certinext.auth.httpx.post", return_value=_mock_token_response("new-token")):
+            auth.get_token()
+        auth.invalidate("old-token")
+        assert auth._access_token == "new-token"
+        auth.invalidate("new-token")
+        assert auth._access_token is None
+
+
+def test_concurrent_get_token_fetches_once() -> None:
+    """Threads sharing a session wait for one token fetch instead of each making their own."""
+    auth = _make_auth()
+    start = threading.Barrier(8)
+
+    def slow_post(*_a: object, **_kw: object) -> MagicMock:
+        """Hold the fetch open long enough for the other threads to pile up."""
+        time.sleep(0.05)
+        return _mock_token_response()
+
+    def worker() -> str:
+        """Start together, then ask for a token."""
+        start.wait()
+        return auth.get_token()
+
+    with patch("certinext.auth.httpx.post", side_effect=slow_post) as mock_post:
+        with ThreadPoolExecutor(8) as pool:
+            tokens = list(pool.map(lambda _: worker(), range(8)))
+    assert set(tokens) == {"test-bearer-token-abc123"}
+    mock_post.assert_called_once()

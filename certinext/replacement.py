@@ -52,8 +52,10 @@ Example::
 """
 
 import datetime as dt
+import threading
 import time
 from collections import Counter, defaultdict
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Callable, Literal, get_args
@@ -91,6 +93,11 @@ DEFAULT_CHAIN_CAS: tuple[str, ...] = ("emSign ECC Root CA - G3",)
 
 # Wait used when a 429 carries no Retry-After header.
 _DEFAULT_RETRY_AFTER = 5.0
+
+# Tries per certificate when rate limited. More than one retry because
+# parallel workers make a second 429 likelier, and each lost row means a
+# rerun of the whole report.
+_RATE_LIMIT_ATTEMPTS = 3
 
 # Friendly names for the curves CertiNext issues on; anything else shows the
 # curve's own name.
@@ -791,39 +798,80 @@ def _facts_from_record(record: "OrderRecord", group_names: dict[str, str]) -> Ce
     )
 
 
-def _inspect_into(
-    sess: "CertiNextSession", facts: CertificateFacts, sleep: Callable[[float], None]
-) -> None:
+class _Backoff:
+    """Pause every inspection worker while any one of them waits out a 429.
+
+    Without this, parallel workers would keep sending requests while one of
+    them sleeps off a rate limit, earning more 429s. Requests already in
+    flight are not recalled.
+    """
+
+    def __init__(self, sleep: Callable[[float], None]) -> None:
+        """
+        Args:
+            sleep: Delay function (``time.sleep``, or a fake in tests).
+        """
+        self._sleep = sleep
+        self._lock = threading.Lock()
+        self._pausing = 0
+        self._clear = threading.Event()
+        self._clear.set()
+
+    def wait(self) -> None:
+        """Block while any worker is waiting out a rate limit."""
+        self._clear.wait()
+
+    def pause(self, seconds: float) -> None:
+        """Hold every worker for ``seconds``; overlapping pauses all finish first.
+
+        Args:
+            seconds: How long to wait (the 429's Retry-After).
+        """
+        with self._lock:
+            self._pausing += 1
+            self._clear.clear()
+        try:
+            self._sleep(seconds)
+        finally:
+            with self._lock:
+                self._pausing -= 1
+                if not self._pausing:
+                    self._clear.set()
+
+
+def _inspect_into(sess: "CertiNextSession", facts: CertificateFacts, backoff: _Backoff) -> None:
     """Download, parse, and record one certificate's details on ``facts``.
 
-    Retries once after a 429. Any API, transport, response-shape, or parse
-    failure is recorded on :attr:`CertificateFacts.error` rather than raised,
-    so one bad order never aborts a full inventory. A download that serves no
-    chain is recorded as an error too, since the chain signal goes
-    unevaluated.
+    Retries after a 429, pausing every worker meanwhile. Any API, transport,
+    response-shape, or parse failure is recorded on
+    :attr:`CertificateFacts.error` rather than raised, so one bad order
+    never aborts a full inventory. A download that serves no chain is
+    recorded as an error too, since the chain signal goes unevaluated.
+    Safe to run from several threads at once, one ``facts`` per call.
 
     Args:
         sess: An authenticated session.
         facts: The facts to fill in (mutated).
-        sleep: Called with the Retry-After delay before the retry.
+        backoff: The rate-limit gate shared by all workers.
 
     Raises:
         ImportError: If ``cryptography`` is missing (fatal for every row).
     """
     order: "SslOrder | None" = None
     download: "CertificateDownload | None" = None
-    for attempt in (1, 2):
+    for attempt in range(1, _RATE_LIMIT_ATTEMPTS + 1):
+        backoff.wait()
         try:
             order = sess.ssl.get(facts.order_number)
             download = order.download_certificate()
             break
         except CertiNextRateLimitError as exc:
-            if attempt == 2:
+            if attempt == _RATE_LIMIT_ATTEMPTS:
                 facts.error = f"rate limited: {exc}"
                 return
             delay = exc.retry_after or _DEFAULT_RETRY_AFTER
             log.warning("Rate limited; retrying", order=facts.order_number, wait_seconds=delay)
-            sleep(delay)
+            backoff.pause(delay)
         except (CertiNextAPIError, httpx.HTTPError) as exc:
             facts.error = str(exc) or type(exc).__name__
             return
@@ -858,6 +906,7 @@ def build_report(
     on_progress: Callable[[CertificateFacts], None] | None = None,
     on_total: Callable[[int], None] | None = None,
     sleep: Callable[[float], None] = time.sleep,
+    workers: int = 1,
 ) -> ReplacementReport:
     """Inventory valid certificates and classify each against the criteria.
 
@@ -876,18 +925,24 @@ def build_report(
         originators: Keep only these originators (case-insensitive).
         groups: Keep only these groups, by number or name (case-insensitive).
         now: Reference time; defaults to the current UTC time.
-        on_progress: Called after each certificate is inspected.
+        on_progress: Called after each certificate is inspected, always from
+            the calling thread. With several workers the order is completion
+            order, not report order.
         on_total: Called once with the number of certificates to inspect.
         sleep: Delay function used for rate-limit backoff.
+        workers: Certificates to inspect at once. A 429 pauses them all.
 
     Returns:
         The classified :class:`ReplacementReport`.
 
     Raises:
+        ValueError: If ``workers`` is less than 1.
         ImportError: If ``inspect`` is set and ``cryptography`` is missing.
         CertiNextAPIError: If the orders report itself cannot be read, or if
             ``groups`` is set and the group names cannot be resolved.
     """
+    if workers < 1:
+        raise ValueError(f"workers must be at least 1, got {workers}")
     now = now or _utcnow()
     try:
         group_names = {
@@ -941,10 +996,21 @@ def build_report(
     if inspect:
         if on_total:
             on_total(len(facts))
-        for f in facts:
-            _inspect_into(sess, f, sleep)
-            if on_progress:
-                on_progress(f)
+        backoff = _Backoff(sleep)
+        pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="inspect")
+        try:
+            futures = {pool.submit(_inspect_into, sess, f, backoff): f for f in facts}
+            pending = set(futures)
+            while pending:
+                # A timed wait, so Ctrl+C reaches this thread on Windows too.
+                done, pending = wait(pending, timeout=0.5, return_when=FIRST_COMPLETED)
+                for future in (f for f in futures if f in done):  # submission order, not set order
+                    future.result()  # re-raise ImportError, the one fatal case
+                    if on_progress:
+                        on_progress(futures[future])
+        finally:
+            # On Ctrl+C or a fatal error, drop the queue instead of waiting for it.
+            pool.shutdown(wait=True, cancel_futures=True)
 
     rows = [ReportRow(facts=f, classification=classify(f, criteria)) for f in facts]
     mark_superseded(rows)
