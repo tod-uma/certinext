@@ -35,9 +35,11 @@ from pydantic import ValidationError
 from rich.progress import Progress
 
 from certinext import replacement as rp
-from certinext._config import ConfigError, replacement_criteria
+from certinext._config import ConfigError, cache_dir, replacement_criteria
+from certinext._inspection_cache import DEFAULT_MAX_AGE, InspectionCache
 from certinext.cli._app import app
 from certinext.cli._shared import data_console, err_console, progress_disabled, rows_table, session
+from certinext.cli_support import prompt_stderr
 
 log = structlog.get_logger()
 
@@ -49,6 +51,10 @@ _TABLE_SANS = 3
 # vendor API whose rate limits are undocumented.
 _DEFAULT_WORKERS = 4
 _MAX_WORKERS = 16
+
+# Subdirectory of the per-user cache dir; --cache-dir replaces both.
+_CACHE_SUBDIR = "replacement-inspect"
+_MAX_AGE_DAYS = DEFAULT_MAX_AGE.days
 
 
 class _GroupBy(str, Enum):
@@ -106,6 +112,78 @@ def _criteria(
     return criteria
 
 
+def _resolve_cache(
+    inspect: bool, cache: bool | None, refresh: bool, directory: Path | None
+) -> bool:
+    """Decide whether this run uses the inspection cache.
+
+    ``--refresh-cache`` and ``--cache-dir`` imply ``--cache``. With none of
+    the cache flags, ask on a terminal (Enter means no: reusing week-old
+    downloads should be a choice) and stay off otherwise, so scheduled runs
+    keep reading live.
+
+    Args:
+        inspect: Whether ``--inspect`` was given.
+        cache: ``--cache`` (True), ``--no-cache`` (False), or neither (None).
+        refresh: Whether ``--refresh-cache`` was given.
+        directory: The ``--cache-dir`` value, if any.
+
+    Returns:
+        Whether to use the cache.
+
+    Raises:
+        typer.BadParameter: On a cache flag without ``--inspect``, or
+            ``--no-cache`` with ``--refresh-cache``/``--cache-dir``.
+    """
+    implied = refresh or directory is not None
+    if cache is False:
+        if implied:
+            raise typer.BadParameter(
+                "--no-cache cannot be combined with --refresh-cache or --cache-dir",
+                param_hint="--no-cache",
+            )
+        return False
+    if not inspect:
+        if cache or implied:
+            raise typer.BadParameter(
+                "the cache holds certificate downloads, so it needs --inspect",
+                param_hint="--cache",
+            )
+        return False
+    if cache or implied:
+        return True
+    if not sys.stdin.isatty():
+        log.info("Inspection cache off (non-interactive); pass --cache to use it")
+        return False
+    try:
+        answer = prompt_stderr(
+            f"Use cached inspections up to {_MAX_AGE_DAYS} days old (faster, may be stale)? [y/N]: "
+        )
+    except EOFError:
+        print(file=sys.stderr)
+        return False
+    return answer.strip().lower() in ("y", "yes")
+
+
+def _build_cache(sess: Any, refresh: bool, directory: Path | None) -> InspectionCache:
+    """Create the inspection cache for this run.
+
+    Production and sandbox entries live in separate subdirectories, so one
+    can never answer for the other.
+
+    Args:
+        sess: The session (for :attr:`CertiNextSession.sandbox`).
+        refresh: Whether ``--refresh-cache`` was given.
+        directory: The ``--cache-dir`` value, or None for the default.
+
+    Returns:
+        The cache.
+    """
+    base = directory if directory is not None else cache_dir() / _CACHE_SUBDIR
+    env = "sandbox" if getattr(sess, "sandbox", False) else "production"
+    return InspectionCache(base.expanduser() / env, refresh=refresh)
+
+
 def _sans_cell(sans: list[str] | None) -> str:
     """Render SANs compactly for the table.
 
@@ -140,7 +218,7 @@ def _table_row(row: rp.ReportRow, report: rp.ReplacementReport, show_errors: boo
     out.update({
         "issuer": f.issuer,
         "valid_to": f.valid_to.date().isoformat(),
-        "days": row.days_left(report.generated_at),
+        "days": row.days_left(report.started_at),
         "order": f.order_number,
         "origin": f.originator,
         "group": f.group_name or f.group_number,
@@ -163,7 +241,8 @@ def _summary_line(summary: dict[str, int], report: rp.ReplacementReport) -> str:
 
     Returns:
         e.g. ``"297 of 573 valid certificates need replacing; 19 conflicts
-        to review"``, plus a note on signals that were not evaluated.
+        to review"``, plus a note on signals that were not evaluated and,
+        when the cache was used, how many inspections came from it.
     """
     parts = [
         f"{summary['needs_replacing']} of {summary['valid']} valid certificates need replacing",
@@ -175,6 +254,12 @@ def _summary_line(summary: dict[str, int], report: rp.ReplacementReport) -> str:
         parts.append(f"{summary['errors']} inspection errors")
     if summary["incomplete"]:
         parts.append(f"{summary['incomplete']} issued orders could not be classified")
+    if report.cache:
+        c = report.cache
+        parts.append(
+            f"{c.hits} of {c.hits + c.misses} inspections from cache "
+            f"(up to {c.max_age.days} days old{'; refreshed' if c.refreshed else ''})"
+        )
     line = "; ".join(parts)
     skipped = [s for s in report.criteria.active_signals() if s != "issuer"]
     if not report.inspected and skipped:
@@ -251,6 +336,22 @@ def replacement_report(
         _DEFAULT_WORKERS, "--workers", metavar="N", min=1, max=_MAX_WORKERS,
         help="Certificates to download at once with --inspect; a rate limit pauses them all",
     ),
+    use_cache: Optional[bool] = typer.Option(
+        None, "--cache/--no-cache",
+        help=(
+            f"With --inspect, reuse certificate downloads up to {_MAX_AGE_DAYS} days old and save "
+            "new ones; order status is always read live. With neither flag, asks on a terminal "
+            "and stays off otherwise"
+        ),
+    ),
+    refresh_cache: bool = typer.Option(
+        False, "--refresh-cache",
+        help="Re-download every certificate and rewrite the cache (implies --cache)",
+    ),
+    cache_directory: Optional[Path] = typer.Option(
+        None, "--cache-dir", metavar="DIR",
+        help="Keep the cache in DIR instead of the per-user cache directory (implies --cache)",
+    ),
     include_ok: bool = typer.Option(
         False, "--all",
         help="Also list certificates that do not need replacing (to measure progress)",
@@ -308,19 +409,27 @@ def replacement_report(
     report). Criteria come from built-in defaults (the October 2026 eMudhra
     ECC distrust), the "replacement" table in config.toml, and the flags
     above. Output is a table, or JSON with --json, or CSV with --csv. Read-only.
+    --inspect can reuse a per-user cache of earlier downloads (--cache); the
+    summary says how many inspections came from it.
     Exits 1 if any certificate could not be inspected or any issued order
     could not be classified.
     """
     if output_csv and ctx.obj.output_json:
         raise typer.BadParameter("--csv and --json are mutually exclusive")
     _check_output(output)
+    if cache_directory is not None and cache_directory.expanduser().is_file():
+        raise typer.BadParameter(f"{cache_directory} is a file", param_hint="--cache-dir")
     criteria = _criteria(issuer, key_type, chain_ca, disable_signal)
+    # Before session(): a credential prompt must not interleave with this one.
+    caching = _resolve_cache(inspect, use_cache, refresh_cache, cache_directory)
     sess = session(ctx)
+    cache = _build_cache(sess, refresh_cache, cache_directory) if caching else None
 
     log.info(
         "Building replacement report", inspect=inspect,
         signals=",".join(criteria.active_signals()),
         workers=workers if inspect else None,
+        cache=str(cache.directory) if cache else None,
     )
     try:
         with Progress(console=err_console, disable=progress_disabled(ctx.obj.verbose)) as progress:
@@ -328,7 +437,7 @@ def replacement_report(
             report = rp.build_report(
                 sess, criteria, inspect=inspect, originators=originator, groups=group,
                 on_total=lambda n: progress.update(task, total=n),
-                on_progress=lambda _f: progress.advance(task), workers=workers,
+                on_progress=lambda _f: progress.advance(task), workers=workers, cache=cache,
             )
     except ImportError as exc:
         log.error("Cannot inspect certificates", error=str(exc))
@@ -351,19 +460,24 @@ def replacement_report(
     fh = _open_output(output)
     with fh or contextlib.nullcontext(sys.stdout) as out:
         if ctx.obj.output_json:
+            ended = (report.ended_at or report.started_at).isoformat()
             doc: dict[str, Any] = {
-                "generated_at": report.generated_at.isoformat(),
+                # generated_at predates started_at/ended_at; kept as the end time.
+                "generated_at": ended,
+                "started_at": report.started_at.isoformat(),
+                "ended_at": ended,
                 "inspected": report.inspected,
                 "criteria": criteria.model_dump(),
+                "cache": report.cache.to_dict() if report.cache else {"enabled": False},
                 "summary": summary,
-                "certificates": [r.to_dict(report.generated_at) for r in rows],
+                "certificates": [r.to_dict(report.started_at) for r in rows],
                 "incomplete": [asdict(i) for i in report.incomplete],
             }
             if breakdown is not None:
                 doc["breakdown"] = breakdown
             print(json.dumps(doc, indent=2), file=out)
         elif output_csv:
-            dicts = [r.to_dict(report.generated_at) for r in rows]
+            dicts = [r.to_dict(report.started_at) for r in rows]
             if dicts:
                 writer = csv.DictWriter(out, fieldnames=list(dicts[0]), lineterminator="\n")
                 writer.writeheader()

@@ -123,6 +123,24 @@ def config_path() -> Path:
     return base / "certinext" / "config.toml"
 
 
+def cache_dir() -> Path:
+    """Return the per-user certinext cache directory.
+
+    ``%LOCALAPPDATA%\\certinext\\cache`` on Windows (local, not roaming: a
+    cache should not follow the user between machines) and
+    ``$XDG_CACHE_HOME/certinext`` (defaulting to ``~/.cache/certinext``)
+    elsewhere. Callers add their own subdirectory.
+
+    Returns:
+        Absolute path to the cache directory (which may not exist yet).
+    """
+    if sys.platform == "win32":
+        base = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local")
+        return base / "certinext" / "cache"
+    base = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache")
+    return base / "certinext"
+
+
 def load_config(path: Path | None = None) -> dict[str, Any]:
     """Parse the config file and return its raw contents.
 

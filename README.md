@@ -946,6 +946,9 @@ An invalid `[replacement]` table exits 2 rather than falling back to defaults.
 ```
 --inspect                 Download and parse each certificate (key + chain signals, SANs, ordered by)
 --workers N               Certificates to download at once with --inspect (default 4, max 16)
+--cache / --no-cache      Reuse --inspect downloads up to 7 days old (asks on a terminal if neither)
+--refresh-cache           Re-download everything and rewrite the cache (implies --cache)
+--cache-dir DIR           Keep the cache in DIR (implies --cache)
 --all                     Also list certificates that do not need replacing (measure progress)
 --latest-only             Hide superseded certificates (needs --inspect; 'maybe' rows are kept)
 --originator NAME         Only this originator (ACME, CERTInext, "CERTInext API"); repeatable
@@ -957,7 +960,7 @@ An invalid `[replacement]` table exits 2 rather than falling back to defaults.
 --chain-ca CN             Distrusted CA name in the chain; repeatable, replaces config
 --disable-signal SIGNAL   Turn off issuer, key, or chain for this run; repeatable
 --csv                     CSV on stdout (summary on stderr)
---json                    JSON on stdout: criteria, summary, certificates, incomplete, breakdown
+--json                    JSON on stdout: times, criteria, cache, summary, certificates, incomplete, breakdown
 -o, --output FILE         Write the table, JSON, or CSV to FILE (UTF-8) instead of stdout
 ```
 
@@ -966,6 +969,32 @@ about 55 minutes for ~574 certificates in prod, so downloads run four at a time
 by default. If the API answers 429, every worker pauses for the `Retry-After`
 delay, and each certificate gets three tries before it is recorded as an
 inspection error. Use `--workers 1` for the old sequential behaviour.
+
+#### Reusing downloads between runs
+
+Even in parallel, a full `--inspect` takes about 20 minutes, and a certificate's
+contents rarely change between runs. `--cache` keeps each download on disk and
+reuses it for up to 7 days, so a repeat run takes about a minute. It is opt-in:
+
+- With neither `--cache` nor `--no-cache`, the command asks on a terminal
+  (Enter means no). In a scheduled job or a pipe it stays off without asking.
+- Entries are keyed on order number **and** serial number, so a reissue or
+  rekey is always downloaded fresh. The orders report, and so every order's
+  status, is still read live each run: a revoked or expired certificate drops
+  out immediately.
+- Errors are never cached: failed or rate-limited requests, unparseable
+  certificates, and downloads with no chain. The cache stores the raw
+  download, which is parsed again each run.
+- The summary line says how many inspections came from the cache, and
+  `--json` has a `cache` block (`hits`, `misses`, `dir`, ...).
+- `--refresh-cache` ignores what is there, downloads everything, and saves it.
+
+The cache holds who placed each order (names and emails), so it lives in a
+per-user directory: `%LOCALAPPDATA%\certinext\cache\replacement-inspect` on
+Windows, `$XDG_CACHE_HOME/certinext/replacement-inspect` (default
+`~/.cache/certinext/...`) elsewhere. `--cache-dir DIR` puts it somewhere else.
+Production and sandbox entries go in separate `production`/`sandbox`
+subdirectories. Delete the directory to clear it.
 
 `--output` is the safe way to save a report on Windows: PowerShell 5.1's `>`
 writes UTF-16, which most JSON and CSV tools reject. The path is checked before
@@ -981,6 +1010,11 @@ download with no chain), or when an issued order has no order number or expiry
 date. Those orders are logged and listed under `incomplete` in `--json` rather
 than dropped. A `--group` filter fails outright if group names cannot be
 looked up, rather than silently matching on numbers alone.
+
+`--json` records when the run started (`started_at`, also the "now" used for
+validity and `days_left`) and when it finished (`ended_at`). `generated_at` is
+kept for existing readers and equals `ended_at`; before 1.3.0rc5 it was the
+start time.
 
 #### Examples
 
@@ -1002,6 +1036,10 @@ certinext replacement-report --issuer "Example Intermediate CA" --disable-signal
 
 certinext replacement-report --inspect --csv -o replace.csv
 certinext replacement-report --inspect --json -o replace.json
+
+# Work through the list: the first run fills the cache, later ones take about a minute
+certinext replacement-report --inspect --latest-only --cache
+certinext replacement-report --inspect --latest-only --cache --cache-dir D:\certinext-cache
 ```
 
 ---
@@ -1874,7 +1912,17 @@ report = build_report(sess, criteria, inspect=True, workers=4)  # 4 downloads at
 for row in report.select(latest_only=True):
     print(row.verdict.value, row.facts.common_name, row.facts.valid_to)
 print(report.summarize(report.population()))
+print(report.started_at, report.ended_at)                # started_at is also the validity "now"
+
+from pathlib import Path
+from certinext.replacement import InspectionCache
+
+cache = InspectionCache(Path("cache"), refresh=False)    # reuse downloads up to 7 days old
+report = build_report(sess, criteria, inspect=True, cache=cache)
+print(report.cache.hits, report.cache.misses)            # None when no cache was passed
 ```
+
+`ReplacementReport.generated_at` was renamed to `started_at` in 1.3.0rc5.
 
 ---
 
@@ -2245,6 +2293,7 @@ certinext/
     _config.py                     # stored issue-cert defaults (config.toml load/merge/save; writes via tomlkit)
     _keyring.py                    # shared keyring helpers (keyring_service, keyring_get, keyring_available)
     _chain.py                      # certificate-chain re-sorting (leaf-first signing order; GitLab #4)
+    _inspection_cache.py           # opt-in on-disk cache of replacement-report --inspect downloads
     settings.py                    # pydantic-settings models: IssuanceDefaults, ConnectionSettings,
                                   #   CertiNextSettings (init → keyring → env precedence)
     accounts.py                    # AccountInfo, Group, Organization, AccountAccessor
