@@ -316,15 +316,35 @@ fully works with `--inspect`, so the Splunk reconciliation above now needs it. T
 the stderr warning keep the CN signal visible instead of discarding it.
 </details>
 
-**R1 is open (no code change):** `status=issued` is the only check that a certificate is still
-valid, and order status is independent of certificate status. To close it, count rows in the
-2026-10-20 Manage Orders export where Expires On is in the future, order status isn't Issued, and
-the certificate isn't revoked. Zero means the filter is sound; anything else means it needs
-widening. Also check what status an original order takes after a reissue (#27).
+**R1 is closed by evidence (no code change).** The concern: `status=issued` is the only check that
+a certificate is still valid, and order status is independent of certificate status. The
+2026-10-20 Manage Orders export (963 orders, aggregates only) shows no certificate with a future
+expiry in a state the filter could miss:
+
+| Expires on | Order status (portal) | Certificate status (portal) | Rows |
+|---|---|---|---|
+| future | Order Fulfilled | Certificate Downloaded | 300 |
+| future | Order Accepted | Certificate Generated | 250 |
+| future | Order Fulfilled | Certificate Generated | 16 |
+| future | Order Fulfilled | Certificate Revoked | 3 |
+| past | Order Fulfilled / Accepted | Certificate Expired | 276 |
+| past | Order Fulfilled | Certificate Downloaded | 1 |
+| none | Auto Save / Accepted / Cancelled | Pending, Approved, or Rejected | 117 |
+
+- The 566 future, non-revoked rows match the API's 573 valid the next morning; the gap fits
+  ACME issuance overnight. API `issued` must therefore include the portal's "Order Accepted +
+  Certificate Generated" (250 rows), or it would count about 316.
+- The one expired "Downloaded" row matches the API's 574 issued minus 573 valid.
+- Every row with no expiry is pre-issuance or cancelled, so B1 likely finds nothing in
+  production today.
+- All 31 reissue-suffixed orders, and the one original they came from, are expired or cancelled.
+  No currently valid certificate comes from a reissue, so the reissue question (#27) doesn't
+  affect this report today.
+
+This is a count reconciliation across one day, not a row-by-row join against the API.
 
 ## Follow-ups (separate work, not this branch)
 
-- **R1 export check** (see External review above).
 - **#34:** fix revoke/reissue reason casing.
 - **Recorded 2026-10-21:** the decision is now [ADR 0018](../adr/0018-classify-replacement-on-configurable-signals.md).
   The two items below are parked as wishlist ideas
