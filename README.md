@@ -1869,6 +1869,8 @@ from certinext.replacement import ReplacementCriteria, build_report
 criteria = ReplacementCriteria()                         # eMudhra ECC distrust defaults
 criteria = criteria.with_overrides(disable=["key"])      # per-run changes
 report = build_report(sess, criteria, inspect=True)      # read-only; inspect downloads each cert
+report = build_report(sess, criteria, inspect=True, workers=4)  # 4 downloads at once (default 1);
+                                                         # a 429 pauses every worker
 for row in report.select(latest_only=True):
     print(row.verdict.value, row.facts.common_name, row.facts.valid_to)
 print(report.summarize(report.population()))
