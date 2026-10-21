@@ -1,4 +1,6 @@
 {
   "venvPath": ".",
-  "venv": ".venv"
+  "venv": ".venv",
+  "include": ["certinext", "tests", "examples"],
+  "typeCheckingMode": "standard"
 }

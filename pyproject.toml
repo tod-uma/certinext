@@ -96,10 +96,10 @@ select = [
     "W",   # pycodestyle warnings
 ]
 
-[tool.pyright]
-include = ["certinext", "tests", "examples"]
-pythonVersion = "3.10"
-typeCheckingMode = "standard"
+# pyright settings live in pyrightconfig.json: when it exists, pyright ignores
+# [tool.pyright] here entirely. pythonVersion is deliberately unset (pyright
+# uses the venv's): checking as 3.10 would need tomli installed to resolve
+# the 3.10-only import in certinext/_config.py.
 
 [tool.mypy]
 python_version = "3.10"
