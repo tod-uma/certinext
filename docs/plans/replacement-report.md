@@ -285,6 +285,11 @@ nothing user-facing landed since rc2). The first commit is this plan.
 ## Follow-ups (separate work, not this branch)
 
 - **#34:** fix revoke/reissue reason casing.
+- **Recorded 2026-10-21:** the decision is now [ADR 0018](../adr/0018-classify-replacement-on-configurable-signals.md).
+  The two items below are parked as wishlist ideas
+  ([IDEA-014](../wishlist/IDEA-014-clm-certificate-report-access.md),
+  [IDEA-015](../wishlist/IDEA-015-list-certificates-status-values.md)), so as not to bother
+  the vendor mid-incident.
 - **Vendor question:** ask whether the API account can get CLM `reports/certificates` / `v3/orders`
   permission, which would give a server-side key-algorithm filter.
 - **Existing bug:** `list-certificates --status` help advertises `pending-dcv`/`pending-csr`, which

@@ -32,3 +32,5 @@ a terminal state. Numbering is sequential and never reused.
 | [IDEA-011](IDEA-011-order-cleanup-cli.md) | `orders cleanup` CLI command for cancelling stale orders | Proposed | #26 | 2026-08-07 |
 | [IDEA-012](IDEA-012-retire-chain-normalization-default.md) | Revisit whether chain normalization should stay on by default | Proposed | #30 | 2026-08-19 |
 | [IDEA-013](IDEA-013-enforce-ruff-format.md) | Run `ruff format` and enforce it in CI | Proposed | #33 | 2026-08-26 |
+| [IDEA-014](IDEA-014-clm-certificate-report-access.md) | Request CLM certificate-report API access for server-side key filtering | Proposed | #35 | 2026-10-21 |
+| [IDEA-015](IDEA-015-list-certificates-status-values.md) | `list-certificates --status` help advertises values that return 422 | Proposed | #36 | 2026-10-21 |
