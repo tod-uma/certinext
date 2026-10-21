@@ -138,6 +138,28 @@ class OrderRecord(CertiNextModel):
             "the field is safe to key alerting logic on."
         ),
     )
+    issuer_ca: str | None = Field(
+        default=None,
+        alias="issuerCA",
+        description=(
+            "Common name of the intermediate CA that issued the certificate, "
+            "e.g. ``InCommon Intermediate CA - OVG2C``. Empty on rows whose "
+            "certificate has not been issued yet."
+        ),
+    )
+    certificate_serial_number: str | None = Field(
+        default=None,
+        alias="certificateSerialNumber",
+        description="Serial number of the issued certificate, when there is one.",
+    )
+    group_number: str | None = Field(
+        default=None,
+        alias="groupNumber",
+        description=(
+            "Account sub-group the order belongs to; resolve to a name with "
+            ":meth:`AccountAccessor.list_groups`."
+        ),
+    )
 
     @model_validator(mode="before")
     @classmethod
