@@ -1,7 +1,7 @@
 ---
 status: in-progress
 depends-on: [replacement-report]
-implements-adr: []
+implements-adr: [0019]
 ---
 
 # Plan: opt-in inspection cache and run timestamps for `replacement-report`
@@ -139,7 +139,8 @@ off). Per-row: `CertificateFacts.from_cache` (library only; not added to the CSV
    `_resolve_cache()`, `_build_cache()`, the summary-line and JSON additions.
 5. Tests in `tests/test_replacement.py`; help golden regenerated.
 6. Docs: README (CLI section "Reusing downloads between runs", JSON timestamps, library example,
-   module tree), IDEA-006 note, this plan. **Not done:** ADR (suggested; Tod to decide).
+   module tree), IDEA-006 note, this plan, and
+   [ADR 0019](../adr/0019-command-local-opt-in-inspection-cache.md).
 
 ## Verification
 

@@ -10,7 +10,8 @@
 > It never caches order status (the orders report stays live) or errors, and it
 > is not a library or HTTP-layer cache. The consumer that "measurably suffered"
 > was a 20-minute inspection run repeated while working through the eMudhra ECC
-> distrust. See [the plan](../plans/replacement-report-cache.md).
+> distrust. See [the plan](../plans/replacement-report-cache.md) and
+> [ADR 0019](../adr/0019-command-local-opt-in-inspection-cache.md).
 
 ## Context
 
