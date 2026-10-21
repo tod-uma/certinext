@@ -79,10 +79,21 @@ Prod and sandbox both show **SUBSTANTIVE** drift against the 2026-09-22 snapshot
 
 ## Decisions
 
-**1. Classify on configurable signals: issuer, key type, chain CA.** A cert needs replacing if it is
-valid **and any evaluated signal matches**. If the evaluated signals disagree, its verdict is
-`CONFLICT`: it is listed, flagged, and counted separately. One signal is never silently preferred
-over another.
+**1. Classify on configurable signals: issuer, key type, chain CA.** A cert is `REPLACE` when
+it is valid and **every evaluated signal matches**. If the evaluated signals disagree, its
+verdict is `CONFLICT`: it is listed and flagged, and counted **separately from the headline**
+("N need replacing; M conflicts to review"). One signal is never silently preferred over
+another.
+
+<details><summary>Why conflicts are not in the headline (decided after the live --inspect run)</summary>
+
+The full prod inspection found 19 EC-key certificates issued by **OVG2C**, which chain to the
+trusted `emSign Root CA - G1`. All were ordered between 2026-05-29 and 2026-07-14, so this is
+not a re-root; CertiNext has always issued some EC keys through the RSA-rooted intermediate.
+Counting them as "need replacing" made the headline 316 against a true 297. The user chose a
+separate count and kept all three default signals, since the conflicts are useful information:
+a key-type-only view such as the Splunk dashboard would wrongly count them as unmigrated.
+</details>
 
 <details><summary>Why three signals, and why "chain"</summary>
 
@@ -278,6 +289,23 @@ nothing user-facing landed since rc2). The first commit is this plan.
   permission, which would give a server-side key-algorithm filter.
 - **Existing bug:** `list-certificates --status` help advertises `pending-dcv`/`pending-csr`, which
   return 422. File an issue.
+
+## Verification results (2026-10-21, read-only prod)
+
+- Tests: 984 passed, 13 skipped. ruff, mypy and pyright are clean.
+- Default (issuer only): **297 of 573** need replacing. By originator: ACME 213, portal 82,
+  API 2, matching the planning probe exactly.
+- `--originator ACME --latest-only --expiring-within 31 --all --group-by issuer`:
+  **86 OVG3C / 21 OVG2C**, against Splunk's 87 / 20.
+- `--inspect`, across all 573 certificates:
+  - 0 errors.
+  - The leaf issuer equals the report's `issuerCA` on 573/573.
+  - Chains end at `emSign ECC Root CA - G3` for 297 and `emSign Root CA - G1` for 276.
+  - Every OVG3C leaf is EC.
+  - **19 conflicts**, all EC keys under OVG2C (see Decision 1).
+  - `ordered_by` and SANs are populated on every row.
+- `--group-by group` resolves group names; the short-lived ACME group stands out without
+  hardcoding.
 
 ## Verification
 

@@ -897,12 +897,13 @@ Each certificate is checked against three **signals**:
 | `key` | `EC` | leaf public key, parsed locally | yes |
 | `chain` | `emSign ECC Root CA - G3` | CA names in the chain the API serves | yes |
 
-A certificate needs replacing when any evaluated signal matches. If evaluated
-signals **disagree**, the verdict is `conflict` (it is listed and counted
-separately, never silently resolved). That is what it looks like when a CA
-re-roots its issuance: for example, a new EC certificate whose chain no longer
-reaches the distrusted root. Verdicts are `replace`, `conflict`, `ok`, and
-`unknown` (nothing could be evaluated).
+A certificate needs replacing when every evaluated signal matches. If evaluated
+signals **disagree**, the verdict is `conflict`: it is listed and counted
+separately for review, never silently resolved. Expect some. EC keys have been
+issued under the RSA-rooted `OVG2C` intermediate, so their key type matches
+while their chain is trusted. A CA re-rooting ECC issuance would look the same.
+Verdicts are `replace`, `conflict`, `ok`, and `unknown` (nothing could be
+evaluated).
 
 The CertiNext API exposes no key-type field, so without `--inspect` only the
 issuer is checked (instant, one report read). `--inspect` downloads each
@@ -956,7 +957,7 @@ An invalid `[replacement]` table exits 2 rather than falling back to defaults.
 ```
 
 The table is sorted by expiry, soonest first, and ends with a summary such as
-`297 of 573 valid certificates need replacing (0 conflicts)`. Exit codes are 0 on
+`297 of 573 valid certificates need replacing; 19 conflicts to review`. Exit codes are 0 on
 success, 1 if any certificate could not be inspected (the report is incomplete),
 and 2 for a usage or config error.
 

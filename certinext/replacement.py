@@ -29,10 +29,12 @@ valid certificates from the orders report and classifies each one against
   distrusted root?" test, and keeps working if the CA re-roots an
   intermediate.
 
-A certificate needs replacing when any evaluated signal matches. When the
+A certificate needs replacing when every evaluated signal matches. When the
 evaluated signals disagree the verdict is :attr:`Verdict.CONFLICT` rather than
-a silent pick — that disagreement is exactly what a CA re-rooting its
-issuance looks like.
+a silent pick, listed and counted separately for review. That disagreement
+is what a CA re-rooting its issuance looks like, and also what an EC key
+issued under an RSA-rooted intermediate looks like (key type matches, chain
+is trusted) — such certificates exist, so key type alone is not trusted.
 
 The defaults describe the October 2026 eMudhra ECC distrust (Mozilla bug
 2083449: ``emSign ECC Root CA - G3`` removed from NSS, which untrusts ECDSA
@@ -247,10 +249,13 @@ class Verdict(str, Enum):
     def needs_replacing(self) -> bool:
         """Whether this verdict counts toward "needs replacing".
 
-        A conflict counts: it matched at least one signal, and hiding it
-        would be the silent pick this module exists to avoid.
+        Only :attr:`REPLACE` does. A conflict is counted separately ("to
+        review") rather than folded in: in practice certificates exist whose
+        key type matches but whose chain is trusted (an EC key issued under
+        an RSA-rooted intermediate), and counting those would overstate the
+        work. Conflicts are still listed by default, never hidden.
         """
-        return self in (Verdict.REPLACE, Verdict.CONFLICT)
+        return self is Verdict.REPLACE
 
 
 @dataclass

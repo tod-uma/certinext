@@ -226,12 +226,23 @@ def test_no_signal_matches_is_ok() -> None:
     assert c.evaluated == ["issuer", "key", "chain"]
 
 
-def test_reroot_disagreement_is_conflict() -> None:
-    """An EC leaf on the good chain (a CA re-root) is flagged, not silently picked."""
+def test_ec_key_on_trusted_chain_is_conflict() -> None:
+    """An EC leaf on the good chain is flagged for review, not counted as replace.
+
+    Mirrors real data: EC keys issued under an RSA-rooted intermediate exist,
+    so key type alone would overstate what needs replacing.
+    """
     c = rp.classify(_inspected(ec.generate_private_key(ec.SECP256R1()), bad=False), CRITERIA)
     assert c.verdict is rp.Verdict.CONFLICT
     assert c.matched == ["key"]
-    assert c.verdict.needs_replacing
+    assert not c.verdict.needs_replacing
+
+
+def test_rsa_key_on_distrusted_chain_is_conflict() -> None:
+    """The reverse disagreement (RSA leaf, distrusted chain) is a conflict too."""
+    c = rp.classify(_inspected(rsa.generate_private_key(65537, 2048), bad=True), CRITERIA)
+    assert c.verdict is rp.Verdict.CONFLICT
+    assert c.matched == ["issuer", "chain"]
 
 
 def test_uninspected_uses_issuer_only() -> None:
@@ -516,6 +527,16 @@ def test_rate_limit_is_retried_once(monkeypatch: pytest.MonkeyPatch) -> None:
     assert report.rows[0].facts.error is None and report.rows[0].facts.inspection
 
 
+def test_conflicts_counted_separately_from_replace() -> None:
+    """The headline count excludes conflicts; they get their own figure."""
+    rows = [
+        _row(_inspected(ec.generate_private_key(ec.SECP256R1()), bad=True)),
+        _row(_inspected(ec.generate_private_key(ec.SECP256R1()), bad=False)),
+    ]
+    summary = rp.ReplacementReport.summarize(rows)
+    assert (summary["needs_replacing"], summary["replace"], summary["conflict"]) == (1, 1, 1)
+
+
 def test_summary_and_breakdown(monkeypatch: pytest.MonkeyPatch) -> None:
     """Summary counts verdicts; breakdown groups them without hardcoded names."""
     sess, _ = _session(monkeypatch, _routes())
@@ -594,8 +615,8 @@ def test_cli_table_uses_configured_criteria(run_cli: Callable[..., tuple[int, st
     code, out, _ = run_cli([], config=f'[replacement]\nissuers = ["{BAD_INT}"]\n')
     assert code == 0
     assert "ORDER-00001" in out and "ORDER-00002" not in out
-    assert "1 of 2 valid certificates need replacing (0 conflicts)" in out
-    assert "not inspected (use --inspect)" in out
+    assert "1 of 2 valid certificates need replacing; 0 conflicts to review" in out
+    assert "not inspected; use --inspect" in out
 
 
 def test_cli_flag_overrides_config(run_cli: Callable[..., tuple[int, str, str]]) -> None:

@@ -152,21 +152,21 @@ def _summary_line(summary: dict[str, int], report: rp.ReplacementReport) -> str:
         report: The report (for criteria and inspection state).
 
     Returns:
-        e.g. ``"297 of 573 valid certificates need replacing (0 conflicts)"``,
-        plus a note on signals that were not evaluated.
+        e.g. ``"297 of 573 valid certificates need replacing; 19 conflicts
+        to review"``, plus a note on signals that were not evaluated.
     """
-    line = (
-        f"{summary['needs_replacing']} of {summary['valid']} valid certificates need "
-        f"replacing ({summary['conflict']} conflicts"
-    )
+    parts = [
+        f"{summary['needs_replacing']} of {summary['valid']} valid certificates need replacing",
+        f"{summary['conflict']} conflicts to review",
+    ]
     if summary["unknown"]:
-        line += f", {summary['unknown']} unknown"
+        parts.append(f"{summary['unknown']} unknown")
     if summary["errors"]:
-        line += f", {summary['errors']} inspection errors"
-    line += ")"
+        parts.append(f"{summary['errors']} inspection errors")
+    line = "; ".join(parts)
     skipped = [s for s in report.criteria.active_signals() if s != "issuer"]
     if not report.inspected and skipped:
-        line += f"; {'/'.join(skipped)} not inspected (use --inspect)"
+        line += f" ({'/'.join(skipped)} not inspected; use --inspect)"
     return line
 
 
