@@ -906,15 +906,18 @@ Verdicts are `replace`, `conflict`, `ok`, and `unknown` (nothing could be
 evaluated).
 
 The CertiNext API exposes no key-type field, so without `--inspect` only the
-issuer is checked (instant, one report read). `--inspect` downloads each
+issuer is checked (instant: the orders report plus one group-name lookup). `--inspect` downloads each
 certificate (two requests per certificate) to evaluate the key and chain
 signals, and adds SANs, key size, and who placed the order. `--inspect` needs
 the `csr` extra, which the CLI install above already includes.
 
-Older certificates whose names are all covered by a newer valid certificate are
+Older certificates whose SANs are all covered by a newer valid certificate are
 marked `superseded` (shown by default, since an older copy may still be
 deployed somewhere). `--latest-only` hides them. Renewals that were never
-revoked are the usual cause.
+revoked are the usual cause. SANs are only known with `--inspect`. Without it,
+or when a certificate's inspection failed, a newer certificate with the same
+common name only marks the older one `maybe`: its extra SANs, if any, might not
+be covered. `--latest-only` keeps `maybe` rows and prints a warning on stderr.
 
 The `origin` column is CertiNext's own `originator`: `ACME`, `CERTInext` (portal),
 or `CERTInext API`. `--group-by group` counts certificates per account group, which
@@ -943,7 +946,7 @@ An invalid `[replacement]` table exits 2 rather than falling back to defaults.
 ```
 --inspect                 Download and parse each certificate (key + chain signals, SANs, ordered by)
 --all                     Also list certificates that do not need replacing (measure progress)
---latest-only             Hide superseded certificates
+--latest-only             Hide superseded certificates (needs --inspect; 'maybe' rows are kept)
 --originator NAME         Only this originator (ACME, CERTInext, "CERTInext API"); repeatable
 --group GROUP             Only this account group, by number or name; repeatable
 --expiring-within DAYS    Only certificates expiring within DAYS days
@@ -953,13 +956,17 @@ An invalid `[replacement]` table exits 2 rather than falling back to defaults.
 --chain-ca CN             Distrusted CA name in the chain; repeatable, replaces config
 --disable-signal SIGNAL   Turn off issuer, key, or chain for this run; repeatable
 --csv                     CSV on stdout (summary on stderr)
---json                    JSON on stdout: criteria, summary, certificates, breakdown
+--json                    JSON on stdout: criteria, summary, certificates, incomplete, breakdown
 ```
 
 The table is sorted by expiry, soonest first, and ends with a summary such as
 `297 of 573 valid certificates need replacing; 19 conflicts to review`. Exit codes are 0 on
-success, 1 if any certificate could not be inspected (the report is incomplete),
-and 2 for a usage or config error.
+success, 1 if the report is incomplete, and 2 for a usage or config error. The
+report is incomplete when a certificate could not be inspected (including a
+download with no chain), or when an issued order has no order number or expiry
+date. Those orders are logged and listed under `incomplete` in `--json` rather
+than dropped. A `--group` filter fails outright if group names cannot be
+looked up, rather than silently matching on numbers alone.
 
 #### Examples
 
@@ -974,7 +981,7 @@ certinext replacement-report --inspect
 certinext replacement-report --originator CERTInext --originator "CERTInext API" --inspect
 
 # Migration progress: newest copy per name, broken down by issuer
-certinext replacement-report --all --latest-only --group-by issuer
+certinext replacement-report --inspect --all --latest-only --group-by issuer
 
 # A later event: classify on a different intermediate, ignore key type
 certinext replacement-report --issuer "Example Intermediate CA" --disable-signal key

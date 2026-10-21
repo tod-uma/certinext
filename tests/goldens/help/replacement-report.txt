@@ -6,7 +6,8 @@
  By default classifies on the issuing CA alone (instant, from the orders                            
  report). Criteria come from built-in defaults (the October 2026 eMudhra                            
  ECC distrust), the "replacement" table in config.toml, and the flags                               
- above. Read-only. Exits 1 if any certificate could not be inspected.                               
+ above. Read-only. Exits 1 if any certificate could not be inspected or                             
+ any issued order could not be classified.                                                          
                                                                                                     
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --inspect                                           Download and parse every certificate:        │
@@ -17,7 +18,9 @@
 │ --all                                               Also list certificates that do not need      │
 │                                                     replacing (to measure progress)              │
 │ --latest-only                                       Hide certificates superseded by a newer      │
-│                                                     valid certificate for the same names         │
+│                                                     valid certificate covering all their SANs.   │
+│                                                     SANs need --inspect; CN-only matches are     │
+│                                                     kept and marked 'maybe'                      │
 │ --originator             NAME                       Only orders from this originator (ACME,      │
 │                                                     CERTInext, 'CERTInext API'); repeatable      │
 │ --group                  GROUP                      Only orders in this account group, by number │

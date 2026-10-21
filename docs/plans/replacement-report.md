@@ -282,8 +282,49 @@ nothing user-facing landed since rc2). The first commit is this plan.
    - Suggest an ADR, "classify replacement need on configurable issuer/key/chain signals", since the
      pattern outlives this incident.
 
+## External review (GPT-6 Sol Light, Codex VS Code extension, 2026-10-21)
+
+Pre-merge review of `d7aefbd`, briefed for false negatives (the brief and raw findings are in the
+git-excluded `.review/`). All six findings held up against the source. Fixed on this branch:
+
+- **B1 — issued rows missing an order number or expiry were dropped silently.** They are now
+  logged, listed in `ReplacementReport.incomplete` (and `--json`), and make the run exit 1.
+  Production showed 574 issued and 573 valid, so this is probably zero rows today (not verified).
+- **B2 — an empty `chainPem` evaluated the chain signal as *False*,** which turned an affected
+  certificate into `conflict` and dropped it from the headline count. An empty chain now leaves
+  the signal unevaluated and records a row error.
+- **B3 — a malformed download aborted the whole run** (pydantic `ValidationError` escaped the
+  per-row handler). The review missed a second path: `ssl.get()` raises a plain `ValueError` on a
+  non-dict response. Both are now row errors. One sub-claim was wrong: a non-string `chainPem`
+  member does *not* always raise, because numbers are coerced to strings.
+- **B4 — `--latest-only` could hide a certificate whose SANs were unknown** (CN-only fallback).
+  `superseded` now needs known SANs. A CN-only match sets `possibly_superseded` instead (shown as
+  `maybe`), which `--latest-only` keeps, with a warning on stderr.
+- **R2 — a failed group lookup emptied a `--group <name>` filter and still exited 0.** The brief had
+  called this fallback cosmetic, which was wrong for filtering. With a group filter, the lookup
+  error is now raised.
+- README "one report read" corrected (it omitted the group-list GET).
+- Also found while fixing: `x509.DuplicateExtension` is not a `ValueError`, so it could escape
+  `inspect_download`. It is now converted.
+
+<details>
+<summary>Why B4 keeps CN-only matches instead of hiding them</summary>
+
+A common name alone can hide extra SANs the newer certificate lacks, and hiding a valid affected
+certificate is the false negative this command exists to prevent. The cost: `--latest-only` only
+fully works with `--inspect`, so the Splunk reconciliation above now needs it. The `maybe` flag and
+the stderr warning keep the CN signal visible instead of discarding it.
+</details>
+
+**R1 is open (no code change):** `status=issued` is the only check that a certificate is still
+valid, and order status is independent of certificate status. To close it, count rows in the
+2026-10-20 Manage Orders export where Expires On is in the future, order status isn't Issued, and
+the certificate isn't revoked. Zero means the filter is sound; anything else means it needs
+widening. Also check what status an original order takes after a reissue (#27).
+
 ## Follow-ups (separate work, not this branch)
 
+- **R1 export check** (see External review above).
 - **#34:** fix revoke/reissue reason casing.
 - **Recorded 2026-10-21:** the decision is now [ADR 0018](../adr/0018-classify-replacement-on-configurable-signals.md).
   The two items below are parked as wishlist ideas
@@ -320,8 +361,9 @@ nothing user-facing landed since rc2). The first commit is this plan.
      since 2026-10-21).
    - `certinext replacement-report --inspect`: expect **0 CONFLICT**, with key and issuer agreeing on
      every row.
-   - `certinext replacement-report --originator ACME --latest-only --expiring-within 31 --all --group-by issuer`:
-     should land near Splunk's ECC/RSA split (86/21 vs 87/20 at planning time).
+   - `certinext replacement-report --originator ACME --inspect --latest-only --expiring-within 31 --all --group-by issuer`:
+     should land near Splunk's ECC/RSA split (86/21 vs 87/20 at planning time). This needs
+     `--inspect` since the external review (B4): without SANs, CN matches are only `maybe` and are kept.
    - `--originator CERTInext --originator "CERTInext API"`: the portal/API gap list the proxy log
      can't see.
    - `--group-by group`: confirm that the short-lived ACME group stands out with no hardcoding.

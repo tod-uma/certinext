@@ -265,6 +265,16 @@ def test_disabled_signal_is_not_evaluated() -> None:
     assert c.evaluated == ["issuer", "chain"]
 
 
+def test_missing_chain_leaves_chain_unevaluated() -> None:
+    """No served chain is missing evidence: an affected leaf stays 'replace', not 'conflict'."""
+    payload = _download(ec.generate_private_key(ec.SECP256R1()), bad=True)
+    payload["chainPem"] = []
+    insp = rp.inspect_download(CertificateDownload.model_validate(payload))
+    c = rp.classify(_facts(inspection=insp), CRITERIA)
+    assert c.verdict is rp.Verdict.REPLACE
+    assert c.unevaluated == ["chain"]
+
+
 # ---------------------------------------------------------------------------
 # Criteria layering
 # ---------------------------------------------------------------------------
@@ -334,27 +344,65 @@ def _row(facts: rp.CertificateFacts) -> rp.ReportRow:
     return rp.ReportRow(facts=facts, classification=rp.classify(facts, CRITERIA))
 
 
-def test_newer_same_name_supersedes_older() -> None:
-    """Only the older of two certificates for the same name is superseded."""
+def _with_sans(order: str, days_ago: int, sans: list[str]) -> rp.ReportRow:
+    """Build an inspected row with the given SANs.
+
+    Args:
+        order: Order number.
+        days_ago: Order age in days (decides recency).
+        sans: The leaf's SANs.
+
+    Returns:
+        The row.
+    """
+    insp = rp.Inspection("RSA", 2048, "RSA 2048", sans, GOOD_INT, [GOOD_INT, GOOD_ROOT])
+    return _row(_facts(
+        order_number=order, common_name=sans[0], order_date=NOW - dt.timedelta(days=days_ago), inspection=insp,
+    ))
+
+
+def test_cn_only_match_is_only_possibly_superseded() -> None:
+    """Without known SANs a newer same-CN certificate cannot prove coverage, so it is flagged 'maybe'."""
     old = _row(_facts(order_number="ORDER-00001", order_date=NOW - dt.timedelta(days=60)))
     new = _row(_facts(order_number="ORDER-00002", order_date=NOW - dt.timedelta(days=5)))
     other = _row(_facts(order_number="ORDER-00003", common_name="other.example.edu"))
     rp.mark_superseded([old, new, other])
-    assert (old.superseded, new.superseded, other.superseded) == (True, False, False)
+    assert (old.superseded, new.superseded, other.superseded) == (False, False, False)
+    assert (old.possibly_superseded, new.possibly_superseded, other.possibly_superseded) == (True, False, False)
+
+
+def test_failed_inspection_is_not_superseded_by_inspected_newer() -> None:
+    """An older row whose inspection failed may carry SANs the newer one lacks: 'maybe', not superseded."""
+    old = _row(_facts(order_number="ORDER-00001", common_name="a.example.edu",
+                      order_date=NOW - dt.timedelta(days=60), error="boom"))
+    new = _with_sans("ORDER-00002", 5, ["a.example.edu", "c.example.edu"])
+    rp.mark_superseded([old, new])
+    assert not old.superseded and old.possibly_superseded
+
+
+def test_latest_only_keeps_possibly_superseded() -> None:
+    """--latest-only hides confirmed superseded rows but keeps CN-only matches, and counts both."""
+    cn_old = _row(_facts(order_number="ORDER-00001", order_date=NOW - dt.timedelta(days=60)))
+    cn_new = _row(_facts(order_number="ORDER-00002", order_date=NOW - dt.timedelta(days=5)))
+    san_old = _with_sans("ORDER-00003", 60, ["x.example.edu"])
+    san_new = _with_sans("ORDER-00004", 5, ["x.example.edu"])
+    rows = [cn_old, cn_new, san_old, san_new]
+    rp.mark_superseded(rows)
+    report = rp.ReplacementReport(criteria=CRITERIA, rows=rows, inspected=True, generated_at=NOW)
+    kept = [r.facts.order_number for r in report.population(latest_only=True)]
+    assert kept == ["ORDER-00001", "ORDER-00002", "ORDER-00004"]
+    summary = report.summarize(rows)
+    assert (summary["superseded"], summary["possibly_superseded"]) == (1, 1)
 
 
 def test_superseded_needs_every_name_covered() -> None:
     """A newer certificate covering only some of the older one's SANs does not supersede it."""
-    def with_sans(order: str, days_ago: int, sans: list[str]) -> rp.ReportRow:
-        insp = rp.Inspection("RSA", 2048, "RSA 2048", sans, GOOD_INT, [GOOD_INT, GOOD_ROOT])
-        return _row(_facts(order_number=order, order_date=NOW - dt.timedelta(days=days_ago), inspection=insp))
-
-    old = with_sans("ORDER-00001", 60, ["a.example.edu", "b.example.edu"])
-    partial = with_sans("ORDER-00002", 5, ["a.example.edu"])
+    old = _with_sans("ORDER-00001", 60, ["a.example.edu", "b.example.edu"])
+    partial = _with_sans("ORDER-00002", 5, ["a.example.edu"])
     rp.mark_superseded([old, partial])
     assert not old.superseded
 
-    full = with_sans("ORDER-00003", 1, ["a.example.edu", "b.example.edu", "c.example.edu"])
+    full = _with_sans("ORDER-00003", 1, ["a.example.edu", "b.example.edu", "c.example.edu"])
     rp.mark_superseded([old, partial, full])
     assert old.superseded and partial.superseded and not full.superseded
 
@@ -527,6 +575,63 @@ def test_rate_limit_is_retried_once(monkeypatch: pytest.MonkeyPatch) -> None:
     assert report.rows[0].facts.error is None and report.rows[0].facts.inspection
 
 
+def test_malformed_responses_are_recorded_not_raised(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A download failing model validation, or a non-dict order detail, lands on its row only."""
+    routes = _routes()
+    bad = routes[f"{_API}/ssl-certificates/ORDER-00001/certificate"]
+    bad["certificatePem"] = [bad["certificatePem"]]  # a list where a string belongs
+    sess, _ = _session(monkeypatch, routes)
+    report = rp.build_report(sess, CRITERIA, inspect=True, now=NOW)
+    assert report.rows[0].facts.error and report.rows[0].facts.error.startswith("unexpected response")
+    assert report.rows[1].facts.error is None and report.rows[1].facts.inspection
+
+    routes = _routes()
+    routes[f"{_API}/ssl-certificates/ORDER-00002"] = "not a dict"
+    sess, _ = _session(monkeypatch, routes)
+    report = rp.build_report(sess, CRITERIA, inspect=True, now=NOW)
+    assert report.rows[1].facts.error and "Unexpected response type" in report.rows[1].facts.error
+
+
+def test_download_without_chain_is_an_inspection_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A download with a leaf but no chain is inspected, but flagged so the run is incomplete."""
+    routes = _routes()
+    routes[f"{_API}/ssl-certificates/ORDER-00001/certificate"]["chainPem"] = None
+    sess, _ = _session(monkeypatch, routes)
+    row = rp.build_report(sess, CRITERIA, inspect=True, now=NOW).rows[0]
+    assert row.facts.inspection and row.facts.error and "no chain" in row.facts.error
+    assert row.verdict is rp.Verdict.REPLACE
+    assert row.classification.unevaluated == ["chain"]
+
+
+def test_issued_rows_missing_fields_are_listed_not_dropped(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Issued rows with no expiry or order number go to ``incomplete``; expired ones are still skipped."""
+    routes = _routes()
+    report_rows = routes[f"{_API}/reports/orders"]["content"]
+    report_rows += [
+        _order_row(4, certificateExpiryDate=None),
+        _order_row(5, orderNumber=None),
+        _order_row(6, orderNumber=None, certificateExpiryDate="2026-01-01T00:00:00"),
+    ]
+    sess, _ = _session(monkeypatch, routes)
+    report = rp.build_report(sess, CRITERIA, now=NOW)
+    assert [r.facts.order_number for r in report.rows] == ["ORDER-00001", "ORDER-00002"]
+    assert [(i.order_number, i.common_name, i.reason) for i in report.incomplete] == [
+        ("ORDER-00004", "host4.example.edu", "no certificate expiry date"),
+        (None, "host5.example.edu", "no order number"),
+    ]
+
+
+def test_group_filter_fails_when_group_names_cannot_be_resolved(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A group filter with no name lookup would silently drop named groups, so it raises instead."""
+    routes = _routes()
+    routes[f"{_API}/groups"] = CertiNextAPIError(500, "boom")
+    sess, _ = _session(monkeypatch, routes)
+    with pytest.raises(CertiNextAPIError):
+        rp.build_report(sess, CRITERIA, now=NOW, groups=["portal"])
+    report = rp.build_report(sess, CRITERIA, now=NOW)
+    assert len(report.rows) == 2 and report.rows[0].facts.group_name is None
+
+
 def test_conflicts_counted_separately_from_replace() -> None:
     """The headline count excludes conflicts; they get their own figure."""
     rows = [
@@ -645,6 +750,33 @@ def test_cli_inspection_error_exits_1(run_cli: Callable[..., tuple[int, str, str
     code, out, _ = run_cli(["--inspect", "--all"], routes=routes)
     assert code == 1
     assert "inspection errors" in out
+
+
+def test_cli_incomplete_orders_exit_1(run_cli: Callable[..., tuple[int, str, str]]) -> None:
+    """An issued order that could not be classified is listed in JSON and makes the run exit 1."""
+    routes = _routes()
+    routes[f"{_API}/reports/orders"]["content"].append(_order_row(4, certificateExpiryDate=None))
+    code, out, _ = run_cli(["--json"], routes=routes)
+    assert code == 1
+    doc = json.loads(out)
+    assert doc["summary"]["incomplete"] == 1
+    assert doc["incomplete"][0]["order_number"] == "ORDER-00004"
+
+    code, out, _ = run_cli([], routes=routes)
+    assert code == 1
+    assert "1 issued orders could not be classified" in out
+
+
+def test_cli_latest_only_warns_about_unknown_sans(run_cli: Callable[..., tuple[int, str, str]]) -> None:
+    """Uninspected --latest-only keeps CN-only matches, marks them 'maybe', and warns on stderr."""
+    routes = _routes()
+    routes[f"{_API}/reports/orders"]["content"].append(
+        _order_row(4, domainName="host1.example.edu", orderDate="2026-10-15T00:00:00")
+    )
+    code, out, err = run_cli(["--latest-only", "--all"], routes=routes)
+    assert code == 0
+    assert "ORDER-00001" in out and "maybe" in out
+    assert "--latest-only kept them" in err and "--latest-only kept them" not in out
 
 
 @pytest.mark.parametrize(

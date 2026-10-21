@@ -54,7 +54,7 @@ Example::
 import datetime as dt
 import time
 from collections import Counter, defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Callable, Literal, get_args
 
@@ -320,14 +320,20 @@ class CertificateFacts:
     ordered_by_email: str | None = None
     error: str | None = None
 
+    @property
+    def sans_known(self) -> bool:
+        """Whether the leaf's SANs are known (it was inspected and has some)."""
+        return bool(self.inspection and self.inspection.sans)
+
     def names(self) -> frozenset[str]:
         """Return the lower-cased name set used to detect superseded copies.
 
         Returns:
-            The leaf's SANs when inspected, else the common name alone (empty
-            if there is none).
+            The leaf's SANs when :attr:`sans_known`, else the common name alone
+            (empty if there is none). The fallback understates the names on
+            any certificate with extra SANs.
         """
-        if self.inspection and self.inspection.sans:
+        if self.sans_known and self.inspection:
             return frozenset(n.lower() for n in self.inspection.sans)
         return frozenset({self.common_name.lower()}) if self.common_name else frozenset()
 
@@ -357,12 +363,17 @@ class ReportRow:
     Attributes:
         facts: The certificate's :class:`CertificateFacts`.
         classification: How it scored against the criteria.
-        superseded: Whether a newer valid certificate covers all its names.
+        superseded: Whether a newer valid certificate covers all its SANs.
+        possibly_superseded: A newer valid certificate shares its common
+            name, but its SANs are unknown (not inspected, or inspection
+            failed), so coverage cannot be confirmed. Never hidden by
+            ``latest_only``.
     """
 
     facts: CertificateFacts
     classification: Classification
     superseded: bool = False
+    possibly_superseded: bool = False
 
     @property
     def verdict(self) -> Verdict:
@@ -412,10 +423,31 @@ class ReportRow:
             "product_code": f.product_code,
             "serial_number": f.serial_number,
             "superseded": self.superseded,
+            "possibly_superseded": self.possibly_superseded,
             "ordered_by_name": f.ordered_by_name,
             "ordered_by_email": f.ordered_by_email,
             "error": f.error,
         }
+
+
+@dataclass
+class IncompleteRecord:
+    """An issued order the report could not classify.
+
+    Listed rather than dropped: a missing expiry or order number says nothing
+    about whether the certificate is still valid or chains to a distrusted CA.
+
+    Attributes:
+        order_number: CertiNext order number, if reported.
+        common_name: Primary domain from the orders report.
+        serial_number: Certificate serial number, if reported.
+        reason: Which required field was missing.
+    """
+
+    order_number: str | None
+    common_name: str | None
+    serial_number: str | None
+    reason: str
 
 
 GroupBy = Literal["originator", "group", "issuer"]
@@ -431,12 +463,16 @@ class ReplacementReport:
         rows: Every valid certificate, soonest expiry first.
         inspected: Whether certificates were downloaded and parsed.
         generated_at: The reference "now" used for validity and days left.
+        incomplete: Issued orders that could not be classified because the
+            orders report omitted their order number or expiry. Non-empty
+            means the inventory is not complete.
     """
 
     criteria: ReplacementCriteria
     rows: list[ReportRow]
     inspected: bool
     generated_at: dt.datetime
+    incomplete: list[IncompleteRecord] = field(default_factory=list)
 
     def population(
         self, *, latest_only: bool = False, expiring_within: int | None = None
@@ -489,7 +525,8 @@ class ReplacementReport:
 
         Returns:
             Counts keyed ``valid``, ``needs_replacing``, one key per
-            :class:`Verdict` value, ``superseded``, and ``errors``.
+            :class:`Verdict` value, ``superseded``, ``possibly_superseded``,
+            and ``errors``.
         """
         verdicts = Counter(r.verdict for r in rows)
         summary = {
@@ -498,6 +535,7 @@ class ReplacementReport:
         }
         summary.update({v.value: verdicts.get(v, 0) for v in Verdict})
         summary["superseded"] = sum(1 for r in rows if r.superseded)
+        summary["possibly_superseded"] = sum(1 for r in rows if r.possibly_superseded)
         summary["errors"] = sum(1 for r in rows if r.facts.error)
         return summary
 
@@ -532,7 +570,7 @@ class ReplacementReport:
         ]
         out.sort(key=lambda d: (-d["valid"], d[by]))
         for item in out:
-            del item["superseded"], item["errors"]
+            del item["superseded"], item["possibly_superseded"], item["errors"]
         return out
 
 
@@ -607,7 +645,8 @@ def inspect_download(download: "CertificateDownload") -> Inspection:
     Raises:
         ImportError: If the ``cryptography`` package is not installed
             (``pip install certinext[csr]``).
-        ValueError: If the download holds no parseable leaf certificate.
+        ValueError: If the download holds no parseable leaf certificate, or
+            a certificate in it cannot be parsed.
     """
     try:
         from cryptography import x509
@@ -630,6 +669,8 @@ def inspect_download(download: "CertificateDownload") -> Inspection:
         ).value.get_values_for_type(x509.DNSName)
     except x509.ExtensionNotFound:
         sans = []
+    except x509.DuplicateExtension as exc:  # not a ValueError, so convert it
+        raise ValueError(f"leaf has a duplicate extension: {exc}") from exc
 
     chain_cas: list[str] = []
     for item in download.chain_pem:
@@ -648,7 +689,9 @@ def classify(facts: CertificateFacts, criteria: ReplacementCriteria) -> Classifi
     """Score one certificate against the criteria.
 
     The issuer signal uses the leaf's own issuer when inspected, else the
-    orders report's ``issuerCA``. Key and chain signals need inspection.
+    orders report's ``issuerCA``. Key and chain signals need inspection; the
+    chain signal also needs the download to have served a chain, since an
+    absent chain is missing evidence, not a non-matching one.
 
     Args:
         facts: What is known about the certificate.
@@ -668,7 +711,7 @@ def classify(facts: CertificateFacts, criteria: ReplacementCriteria) -> Classifi
             results["issuer"] = issuer.casefold() in {i.casefold() for i in criteria.issuers}
     if "key" in active and insp:
         results["key"] = insp.key_type in criteria.key_types
-    if "chain" in active and insp:
+    if "chain" in active and insp and insp.chain_cas:
         wanted = {c.casefold() for c in criteria.chain_cas}
         results["chain"] = any(ca.casefold() in wanted for ca in insp.chain_cas)
 
@@ -689,8 +732,11 @@ def classify(facts: CertificateFacts, criteria: ReplacementCriteria) -> Classifi
 def mark_superseded(rows: list[ReportRow]) -> None:
     """Flag rows whose names are all covered by a newer valid certificate.
 
-    "Newer" compares ``(order_date, valid_to)``. A row with no names is never
-    superseded. Flags are set in place.
+    "Newer" compares ``(order_date, valid_to)``. Only a row whose SANs are
+    known can be marked ``superseded``: a common name alone may hide extra
+    SANs the newer certificate lacks. A CN-only match sets
+    ``possibly_superseded`` instead. A row with no names is never flagged.
+    Flags are set in place.
 
     Args:
         rows: The report rows to flag.
@@ -710,10 +756,14 @@ def mark_superseded(rows: list[ReportRow]) -> None:
             continue
         mine = recency(row)
         first = next(iter(names))
-        row.superseded = any(
+        covered = any(
             other is not row and recency(other) > mine and names <= other.facts.names()
             for other in by_name[first]
         )
+        if row.facts.sans_known:
+            row.superseded = covered
+        else:
+            row.possibly_superseded = covered
 
 
 def _facts_from_record(record: "OrderRecord", group_names: dict[str, str]) -> CertificateFacts:
@@ -746,9 +796,11 @@ def _inspect_into(
 ) -> None:
     """Download, parse, and record one certificate's details on ``facts``.
 
-    Retries once after a 429. Any API, transport, or parse failure is
-    recorded on :attr:`CertificateFacts.error` rather than raised, so one bad
-    order never aborts a full inventory.
+    Retries once after a 429. Any API, transport, response-shape, or parse
+    failure is recorded on :attr:`CertificateFacts.error` rather than raised,
+    so one bad order never aborts a full inventory. A download that serves no
+    chain is recorded as an error too, since the chain signal goes
+    unevaluated.
 
     Args:
         sess: An authenticated session.
@@ -775,6 +827,9 @@ def _inspect_into(
         except (CertiNextAPIError, httpx.HTTPError) as exc:
             facts.error = str(exc) or type(exc).__name__
             return
+        except ValueError as exc:  # includes pydantic.ValidationError on a malformed payload
+            facts.error = f"unexpected response: {(str(exc).splitlines() or [type(exc).__name__])[0]}"
+            return
     if order is None or download is None:  # pragma: no cover - the loop breaks or returns
         return
 
@@ -787,6 +842,9 @@ def _inspect_into(
         facts.inspection = inspect_download(download)
     except ValueError as exc:
         facts.error = f"unparseable certificate: {exc}"
+        return
+    if not facts.inspection.chain_cas:
+        facts.error = "download served no chain; chain signal not evaluated"
 
 
 def build_report(
@@ -805,7 +863,9 @@ def build_report(
 
     Read-only: issues only GET requests. "Valid" means the orders report
     lists it under ``status=issued`` (which excludes revoked, expired, and
-    cancelled orders) and its expiry is still in the future.
+    cancelled orders) and its expiry is still in the future. Issued rows
+    missing an order number or expiry are listed in
+    :attr:`ReplacementReport.incomplete` rather than dropped.
 
     Args:
         sess: An authenticated session.
@@ -825,7 +885,8 @@ def build_report(
 
     Raises:
         ImportError: If ``inspect`` is set and ``cryptography`` is missing.
-        CertiNextAPIError: If the orders report itself cannot be read.
+        CertiNextAPIError: If the orders report itself cannot be read, or if
+            ``groups`` is set and the group names cannot be resolved.
     """
     now = now or _utcnow()
     try:
@@ -834,25 +895,48 @@ def build_report(
             if g.group_number and g.group_name
         }
     except (CertiNextAPIError, httpx.HTTPError) as exc:
+        if groups:
+            # Matching on numbers alone would silently drop a group requested by name.
+            raise
         log.warning("Could not resolve group names; showing numbers", error=str(exc))
         group_names = {}
 
     records = sess.orders.get_list(status="issued")
-    facts = [
-        _facts_from_record(r, group_names)
-        for r in records
-        if r.order_number and r.certificate_expiry_date and r.certificate_expiry_date > now
-    ]
+    issued_rows = len(records)
     if originators:
         wanted = {o.casefold() for o in originators}
-        facts = [f for f in facts if (f.originator or "").casefold() in wanted]
+        records = [r for r in records if (r.originator or "").casefold() in wanted]
     if groups:
         wanted = {g.casefold() for g in groups}
-        facts = [
-            f for f in facts
-            if (f.group_number or "").casefold() in wanted or (f.group_name or "").casefold() in wanted
+        records = [
+            r for r in records
+            if (r.group_number or "").casefold() in wanted
+            or group_names.get(r.group_number or "", "").casefold() in wanted
         ]
-    log.info("Valid certificates found", count=len(facts), issued_rows=len(records))
+
+    facts: list[CertificateFacts] = []
+    incomplete: list[IncompleteRecord] = []
+    for r in records:
+        if r.certificate_expiry_date and r.certificate_expiry_date <= now:
+            continue  # expired
+        missing = [
+            label for label, value in
+            (("order number", r.order_number), ("certificate expiry date", r.certificate_expiry_date))
+            if not value
+        ]
+        if missing:
+            reason = f"no {' or '.join(missing)}"
+            log.warning(
+                "Issued order could not be classified", order=r.order_number,
+                common_name=r.common_name, serial=r.certificate_serial_number, reason=reason,
+            )
+            incomplete.append(IncompleteRecord(
+                order_number=r.order_number, common_name=r.common_name,
+                serial_number=r.certificate_serial_number, reason=reason,
+            ))
+            continue
+        facts.append(_facts_from_record(r, group_names))
+    log.info("Valid certificates found", count=len(facts), incomplete=len(incomplete), issued_rows=issued_rows)
 
     if inspect:
         if on_total:
@@ -865,7 +949,9 @@ def build_report(
     rows = [ReportRow(facts=f, classification=classify(f, criteria)) for f in facts]
     mark_superseded(rows)
     rows.sort(key=lambda r: (r.facts.valid_to, r.facts.order_number))
-    return ReplacementReport(criteria=criteria, rows=rows, inspected=inspect, generated_at=now)
+    return ReplacementReport(
+        criteria=criteria, rows=rows, inspected=inspect, generated_at=now, incomplete=incomplete,
+    )
 
 
 __all__ = [
@@ -876,6 +962,7 @@ __all__ = [
     "CertificateFacts",
     "Classification",
     "GroupBy",
+    "IncompleteRecord",
     "Inspection",
     "KeyType",
     "ReplacementCriteria",

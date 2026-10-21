@@ -23,6 +23,7 @@ progress and logs go to stderr.
 import csv
 import json
 import sys
+from dataclasses import asdict
 from enum import Enum
 from typing import Any, Optional
 
@@ -135,7 +136,7 @@ def _table_row(row: rp.ReportRow, report: rp.ReplacementReport, show_errors: boo
         "order": f.order_number,
         "origin": f.originator,
         "group": f.group_name or f.group_number,
-        "superseded": "yes" if row.superseded else "",
+        "superseded": "yes" if row.superseded else "maybe" if row.possibly_superseded else "",
     })
     if report.inspected:
         out["ordered_by"] = f.ordered_by_name
@@ -148,7 +149,8 @@ def _summary_line(summary: dict[str, int], report: rp.ReplacementReport) -> str:
     """Render the one-line summary.
 
     Args:
-        summary: Output of :meth:`ReplacementReport.summarize`.
+        summary: Output of :meth:`ReplacementReport.summarize`, plus an
+            ``incomplete`` count.
         report: The report (for criteria and inspection state).
 
     Returns:
@@ -163,6 +165,8 @@ def _summary_line(summary: dict[str, int], report: rp.ReplacementReport) -> str:
         parts.append(f"{summary['unknown']} unknown")
     if summary["errors"]:
         parts.append(f"{summary['errors']} inspection errors")
+    if summary["incomplete"]:
+        parts.append(f"{summary['incomplete']} issued orders could not be classified")
     line = "; ".join(parts)
     skipped = [s for s in report.criteria.active_signals() if s != "issuer"]
     if not report.inspected and skipped:
@@ -201,7 +205,10 @@ def replacement_report(
     ),
     latest_only: bool = typer.Option(
         False, "--latest-only",
-        help="Hide certificates superseded by a newer valid certificate for the same names",
+        help=(
+            "Hide certificates superseded by a newer valid certificate covering all their SANs. "
+            "SANs need --inspect; CN-only matches are kept and marked 'maybe'"
+        ),
     ),
     originator: Optional[list[str]] = typer.Option(
         None, "--originator", metavar="NAME",
@@ -244,7 +251,8 @@ def replacement_report(
     By default classifies on the issuing CA alone (instant, from the orders
     report). Criteria come from built-in defaults (the October 2026 eMudhra
     ECC distrust), the "replacement" table in config.toml, and the flags
-    above. Read-only. Exits 1 if any certificate could not be inspected.
+    above. Read-only. Exits 1 if any certificate could not be inspected or
+    any issued order could not be classified.
     """
     if output_csv and ctx.obj.output_json:
         raise typer.BadParameter("--csv and --json are mutually exclusive")
@@ -270,7 +278,16 @@ def replacement_report(
     population = report.population(latest_only=latest_only, expiring_within=expiring_within)
     rows = report.select(include_ok=include_ok, latest_only=latest_only, expiring_within=expiring_within)
     summary = report.summarize(population)
+    summary["incomplete"] = len(report.incomplete)
     breakdown = report.breakdown(population, group_by.value) if group_by else None
+
+    if latest_only and summary["possibly_superseded"]:
+        print(
+            f"Warning: {summary['possibly_superseded']} certificates share a common name with a "
+            "newer certificate, but their SANs are unknown, so --latest-only kept them "
+            "(marked 'maybe'). Use --inspect to check SAN coverage.",
+            file=sys.stderr,
+        )
 
     if ctx.obj.output_json:
         doc: dict[str, Any] = {
@@ -279,6 +296,7 @@ def replacement_report(
             "criteria": criteria.model_dump(),
             "summary": summary,
             "certificates": [r.to_dict(report.generated_at) for r in rows],
+            "incomplete": [asdict(i) for i in report.incomplete],
         }
         if breakdown is not None:
             doc["breakdown"] = breakdown
@@ -304,5 +322,5 @@ def replacement_report(
             print()
         print(_summary_line(summary, report))
 
-    if summary["errors"]:
+    if summary["errors"] or summary["incomplete"]:
         raise SystemExit(1)
