@@ -877,6 +877,112 @@ certinext list-certificates --sandbox --json
 
 ---
 
+### certinext replacement-report
+
+`certinext replacement-report` lists every **currently valid** certificate that
+still needs replacing after a CA loses browser trust. It is read-only.
+
+The defaults describe the October 2026 eMudhra ECC distrust: Mozilla removed
+`emSign ECC Root CA - G3` from NSS ([bug 2083449](https://bugzilla.mozilla.org/show_bug.cgi?id=2083449)),
+which untrusts ECDSA certificates issued by `InCommon Intermediate CA - OVG3C`.
+
+"Valid" means the orders report lists the order as `issued` (which excludes
+revoked, expired and cancelled orders) and its expiry is still in the future.
+
+Each certificate is checked against three **signals**:
+
+| Signal | Default | Source | Needs `--inspect` |
+|---|---|---|---|
+| `issuer` | `InCommon Intermediate CA - OVG3C` | orders report `issuerCA` | no |
+| `key` | `EC` | leaf public key, parsed locally | yes |
+| `chain` | `emSign ECC Root CA - G3` | CA names in the chain the API serves | yes |
+
+A certificate needs replacing when any evaluated signal matches. If evaluated
+signals **disagree**, the verdict is `conflict` (it is listed and counted
+separately, never silently resolved). That is what it looks like when a CA
+re-roots its issuance: for example, a new EC certificate whose chain no longer
+reaches the distrusted root. Verdicts are `replace`, `conflict`, `ok`, and
+`unknown` (nothing could be evaluated).
+
+The CertiNext API exposes no key-type field, so without `--inspect` only the
+issuer is checked (instant, one report read). `--inspect` downloads each
+certificate (two requests per certificate) to evaluate the key and chain
+signals, and adds SANs, key size, and who placed the order. `--inspect` needs
+the `csr` extra, which the CLI install above already includes.
+
+Older certificates whose names are all covered by a newer valid certificate are
+marked `superseded` (shown by default, since an older copy may still be
+deployed somewhere). `--latest-only` hides them. Renewals that were never
+revoked are the usual cause.
+
+The `origin` column is CertiNext's own `originator`: `ACME`, `CERTInext` (portal),
+or `CERTInext API`. `--group-by group` counts certificates per account group, which
+shows which groups hold automated issuance without hardcoding any group numbers.
+
+#### Changing the criteria
+
+Override the defaults in `config.toml` (the same file as [issue-cert defaults](#storing-issue-cert-defaults-optional):
+`%APPDATA%\certinext\config.toml` on Windows, `~/.config/certinext/config.toml`
+elsewhere, or `$CERTINEXT_CONFIG`).
+A key you set replaces that signal's default list; an empty list turns the signal off:
+
+```toml
+[replacement]
+issuers   = ["InCommon Intermediate CA - OVG3C"]   # issuing-CA common names, case-insensitive
+key_types = ["EC"]                                  # EC | RSA | Ed25519 | Ed448 | DSA
+chain_cas = ["emSign ECC Root CA - G3"]             # distrusted CA names anywhere in the chain
+```
+
+Flags override the file for one run: `--issuer`, `--key-type` and `--chain-ca`
+(repeatable, each replaces that list) and `--disable-signal issuer|key|chain`.
+An invalid `[replacement]` table exits 2 rather than falling back to defaults.
+
+#### Arguments
+
+```
+--inspect                 Download and parse each certificate (key + chain signals, SANs, ordered by)
+--all                     Also list certificates that do not need replacing (measure progress)
+--latest-only             Hide superseded certificates
+--originator NAME         Only this originator (ACME, CERTInext, "CERTInext API"); repeatable
+--group GROUP             Only this account group, by number or name; repeatable
+--expiring-within DAYS    Only certificates expiring within DAYS days
+--group-by FIELD          Also print counts per originator, group, or issuer
+--issuer CN               Issuing-CA name that needs replacing; repeatable, replaces config
+--key-type TYPE           Key type that needs replacing; repeatable, replaces config
+--chain-ca CN             Distrusted CA name in the chain; repeatable, replaces config
+--disable-signal SIGNAL   Turn off issuer, key, or chain for this run; repeatable
+--csv                     CSV on stdout (summary on stderr)
+--json                    JSON on stdout: criteria, summary, certificates, breakdown
+```
+
+The table is sorted by expiry, soonest first, and ends with a summary such as
+`297 of 573 valid certificates need replacing (0 conflicts)`. Exit codes are 0 on
+success, 1 if any certificate could not be inspected (the report is incomplete),
+and 2 for a usage or config error.
+
+#### Examples
+
+```bash
+# What still needs replacing (issuer only, instant)
+certinext replacement-report
+
+# Full audit: every signal, flag any disagreement
+certinext replacement-report --inspect
+
+# Orders the ACME proxy log never sees: portal and API orders
+certinext replacement-report --originator CERTInext --originator "CERTInext API" --inspect
+
+# Migration progress: newest copy per name, broken down by issuer
+certinext replacement-report --all --latest-only --group-by issuer
+
+# A later event: classify on a different intermediate, ignore key type
+certinext replacement-report --issuer "Example Intermediate CA" --disable-signal key
+
+certinext replacement-report --inspect --csv > replace.csv
+```
+
+---
+
 ### certinext pending-dcv
 
 `certinext pending-dcv` lists every active domain that has not yet completed
@@ -1720,11 +1826,29 @@ recent = sess.orders.get_list(status="issued", since=date(2026, 7, 1), until=dat
 | `order_date` | `datetime \| None` | Order creation timestamp, UTC-aware (no offset on the wire, unlike every other CertiNext timestamp, but the vendor confirmed UTC); see [GitLab issue #20](https://gitlab.its.maine.edu/sysadmin/python-libs/certinext/-/issues/20) |
 | `certificate_expiry_date` | `datetime \| None` | Certificate expiry timestamp, UTC-aware, for the same reason as `order_date` |
 | `originator` | `str \| None` | System/channel that created the order (observed: `ACME`, `CERTInext`, `CERTInext API`) |
+| `issuer_ca` | `str \| None` | Common name of the issuing intermediate CA (empty until issued) |
+| `certificate_serial_number` | `str \| None` | Serial number of the issued certificate |
+| `group_number` | `str \| None` | Account sub-group; resolve to a name with `sess.accounts.list_groups()` |
 
 ```python
 o.as_dict()   # raw API response dict
 o.to_row()    # flat dict[str, str] for tabular display
 repr(o)       # OrderRecord(order_number='ORD-001', common_name='example.org', ...)
+```
+
+#### Finding certificates that need replacing
+
+`certinext.replacement` is the library behind `certinext replacement-report`:
+
+```python
+from certinext.replacement import ReplacementCriteria, build_report
+
+criteria = ReplacementCriteria()                         # eMudhra ECC distrust defaults
+criteria = criteria.with_overrides(disable=["key"])      # per-run changes
+report = build_report(sess, criteria, inspect=True)      # read-only; inspect downloads each cert
+for row in report.select(latest_only=True):
+    print(row.verdict.value, row.facts.common_name, row.facts.valid_to)
+print(report.summarize(report.population()))
 ```
 
 ---
@@ -2087,8 +2211,8 @@ certinext/
         _shared.py                 #   shared Annotated option types, table/pairs rendering
         accounts.py, domains.py, domain_cert_count.py, healthcheck.py,
         issue_cert.py, ledger.py, list_certificates.py,
-        parent_dcv_status.py, pending_dcv.py, setup_defaults.py,
-        setup_keyring.py           #   one module per subcommand
+        parent_dcv_status.py, pending_dcv.py, replacement_report.py,
+        setup_defaults.py, setup_keyring.py  #   one module per subcommand
     models/                       # pydantic response models (ADR 0003/0005)
         __init__.py, _base.py      #   CertiNextModel base, lenient_enum, coerce_flag
         accounts.py, catalog.py, domains.py, ledger.py, orders.py,
@@ -2109,6 +2233,7 @@ certinext/
     healthcheck.py                 # read-only probe engine for `certinext healthcheck`
     ledger.py                      # LedgerRecord and LedgerAccessor
     orders.py                      # OrderRecord and OrderAccessor
+    replacement.py                 # replacement criteria, classification, report for `certinext replacement-report`
     session.py                     # CertiNextSession (accounts, catalog, domain, ledger, orders, ssl)
     ssl_certificates.py            # SslOrder, DcvChallenge, CertificateDownload, SslAccessor, OrderWorkflow
                                   #   SslAccessor.create() — DV/OV/EV dispatcher
