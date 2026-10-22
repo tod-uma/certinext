@@ -386,6 +386,18 @@ def _check_existing_and_prompt(
     return None
 
 
+_CREATE_ORDER_HINTS: dict[str, str] = {
+    # Whether the check matches the CSR bytes or its key is unknown, and it can
+    # fire for orders the API does not list. A new key is the safe choice.
+    "EMS-1099": (
+        "this CSR was already submitted on an earlier certificate order - "
+        "generate a fresh CSR and retry; a new private key is not required "
+        "but is recommended"
+    ),
+}
+"""Next-step advice for ``EMS-xxx`` codes the order-create call can return."""
+
+
 def _create_order(
     sess: CertiNextSession,
     values: OrderDefaults,
@@ -473,7 +485,9 @@ def _create_order(
                 product_code=values.product,
             )
     except CertiNextAPIError as exc:
-        fatal_api_error(exc, "Error creating order")
+        fatal_api_error(
+            exc, "Error creating order", hint=_CREATE_ORDER_HINTS.get(exc.ems_code or "")
+        )
 
 
 def _stem_from_domain(domain: str | None) -> str:

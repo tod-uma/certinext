@@ -731,7 +731,9 @@ def build_session(
     )
 
 
-def fatal_api_error(exc: CertiNextAPIError, message: str) -> NoReturn:
+def fatal_api_error(
+    exc: CertiNextAPIError, message: str, *, hint: str | None = None
+) -> NoReturn:
     """Log a CertiNext API error at ERROR level and exit with code 1.
 
     Logs ``message: exc`` at ERROR level, each field validation error at ERROR
@@ -741,8 +743,13 @@ def fatal_api_error(exc: CertiNextAPIError, message: str) -> NoReturn:
         exc: The :class:`~certinext.exceptions.CertiNextAPIError` that was caught.
         message: Short description of the failed operation, e.g.
             ``"Error creating order"``.
+        hint: Optional advice on what to do next, logged as a ``hint`` field
+            on the same error line.
     """
-    log.error(message, error=str(exc))
+    if hint:
+        log.error(message, error=str(exc), hint=hint)
+    else:
+        log.error(message, error=str(exc))
     for field_err in exc.field_errors:
         log.error("Field error", field_error=str(field_err))
     log.debug("Full response body", body=exc.body)
