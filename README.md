@@ -2150,7 +2150,7 @@ when writing a `fullchain.pem` for an ACME server).
 #### Other lifecycle operations
 
 ```python
-order.cancel()                              # cancel an in-progress order
+order.cancel("duplicate order")             # cancel an in-progress order (reason required)
 order.reject()                              # reject a draft order
 order.revoke(reason="keyCompromise")        # revoke an issued certificate
 order.reissue("rekey", csr=new_csr_pem)     # reissue with a new key
