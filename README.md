@@ -1156,8 +1156,9 @@ csr_file                    PEM-encoded CSR file (positional; omit to read from 
                             catalog product; default: API default for the type.
                             List codes with certinext setup defaults.
 --domain FQDN               Override the primary domain (default: extracted from CSR CN;
-                            required when the CSR has no CN)
---san FQDN                  Override SANs (default: extracted from CSR; repeatable)
+                            required when the CSR has no CN; must be a name in the CSR)
+--san FQDN                  Override SANs (default: extracted from CSR; each must be
+                            a name in the CSR; repeatable)
 --auto-secure-www           Request automatic www-redirect coverage (API default: true)
 
 # Requestor (can also be set via environment variables)

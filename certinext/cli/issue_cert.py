@@ -276,7 +276,13 @@ def _resolve_domain_and_sans(
     ``--domain`` wins over the CSR's CN. A CN-less CSR is fine as long as
     ``--domain`` is given. SANs taken from the CSR never repeat the primary
     domain, which matters for a CN-less CSR where ``csr_info.sans`` lists
-    every DNS name, the primary included.
+    every DNS name, the primary included. SANs are deduplicated
+    case-insensitively, keeping the first spelling.
+
+    Every name ordered must appear in the CSR (its CN or a DNS SAN): an order
+    is paid for, so a typo'd ``--domain`` or ``--san`` stops here rather than
+    at the vendor. CSR names the order leaves out (a ``--san`` override, or a
+    ``--domain`` that replaces the CN) only draw a warning.
 
     Args:
         csr_info: Parsed CSR fields.
@@ -287,15 +293,35 @@ def _resolve_domain_and_sans(
         ``(primary_domain, sans)``.
 
     Raises:
-        SystemExit: If neither ``--domain`` nor a CSR Common Name is available.
+        SystemExit: If neither ``--domain`` nor a CSR Common Name is available,
+            or a requested name is not in the CSR.
     """
     primary = domain or csr_info.common_name
     if not primary:
         log.error("CSR subject has no Common Name - use --domain to specify the primary domain")
         raise SystemExit(1)
-    if sans is None:
-        sans = [name for name in csr_info.sans if name.lower() != primary.lower()]
-    return primary, sans
+
+    seen = {primary.lower()}
+    resolved: list[str] = []
+    for name in csr_info.sans if sans is None else sans:
+        if name.lower() not in seen:
+            seen.add(name.lower())
+            resolved.append(name)
+
+    csr_names = ([csr_info.common_name] if csr_info.common_name else []) + csr_info.sans
+    csr_folded = {name.lower() for name in csr_names}
+    missing = [name for name in [primary, *resolved] if name.lower() not in csr_folded]
+    if missing:
+        log.error(
+            "Requested names are not in the CSR",
+            missing=", ".join(missing),
+            csr_names=", ".join(csr_names) or "(none)",
+        )
+        raise SystemExit(1)
+    dropped = [name for name in csr_names if name.lower() not in seen]
+    if dropped:
+        log.warning("CSR names left out of the order", dropped=", ".join(dropped))
+    return primary, resolved
 
 
 def _check_existing_and_prompt(
@@ -792,11 +818,12 @@ def issue_cert(
     domain: Optional[str] = typer.Option(
         None, "--domain", metavar="FQDN",
         help="Override the primary domain (default: extracted from CSR CN; "
-        "required when the CSR has no CN)",
+        "required when the CSR has no CN; must be a name in the CSR)",
     ),
     san: list[str] = typer.Option(
         [], "--san", metavar="FQDN",
-        help="Override SANs (default: extracted from CSR SAN extension; repeatable)",
+        help="Override SANs (default: extracted from CSR SAN extension; "
+        "each must be a name in the CSR; repeatable)",
     ),
     validity: Optional[int] = typer.Option(
         None, "--validity", metavar="YEARS", min=1, max=3,
