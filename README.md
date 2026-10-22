@@ -1155,7 +1155,8 @@ csr_file                    PEM-encoded CSR file (positional; omit to read from 
 --product CODE              Product code (X-Product-Code) selecting a specific
                             catalog product; default: API default for the type.
                             List codes with certinext setup defaults.
---domain FQDN               Override the primary domain (default: extracted from CSR CN)
+--domain FQDN               Override the primary domain (default: extracted from CSR CN;
+                            required when the CSR has no CN)
 --san FQDN                  Override SANs (default: extracted from CSR; repeatable)
 --auto-secure-www           Request automatic www-redirect coverage (API default: true)
 
