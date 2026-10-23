@@ -256,8 +256,8 @@ def _parse_csr(pem: str) -> CsrInfo:
         organisation, and DNS SANs.
 
     Raises:
-        SystemExit: If ``cryptography`` is not installed, the CSR cannot be
-            parsed, or no CN is found in the subject.
+        SystemExit: If ``cryptography`` is not installed or the CSR cannot be
+            parsed.
     """
     from certinext.csr import parse_csr
 
@@ -266,6 +266,62 @@ def _parse_csr(pem: str) -> CsrInfo:
     except (ImportError, ValueError) as exc:
         log.error(str(exc))
         raise SystemExit(1) from exc
+
+
+def _resolve_domain_and_sans(
+    csr_info: CsrInfo, domain: str | None, sans: list[str] | None
+) -> tuple[str, list[str] | None]:
+    """Pick the order's primary domain and additional SANs.
+
+    ``--domain`` wins over the CSR's CN. A CN-less CSR is fine as long as
+    ``--domain`` is given. SANs taken from the CSR never repeat the primary
+    domain, which matters for a CN-less CSR where ``csr_info.sans`` lists
+    every DNS name, the primary included. SANs are deduplicated
+    case-insensitively, keeping the first spelling.
+
+    Every name ordered must appear in the CSR (its CN or a DNS SAN): an order
+    is paid for, so a typo'd ``--domain`` or ``--san`` stops here rather than
+    at the vendor. CSR names the order leaves out (a ``--san`` override, or a
+    ``--domain`` that replaces the CN) only draw a warning.
+
+    Args:
+        csr_info: Parsed CSR fields.
+        domain: The ``--domain`` value, or ``None``.
+        sans: Explicit ``--san`` values, or ``None`` to take them from the CSR.
+
+    Returns:
+        ``(primary_domain, sans)``.
+
+    Raises:
+        SystemExit: If neither ``--domain`` nor a CSR Common Name is available,
+            or a requested name is not in the CSR.
+    """
+    primary = domain or csr_info.common_name
+    if not primary:
+        log.error("CSR subject has no Common Name - use --domain to specify the primary domain")
+        raise SystemExit(1)
+
+    seen = {primary.lower()}
+    resolved: list[str] = []
+    for name in csr_info.sans if sans is None else sans:
+        if name.lower() not in seen:
+            seen.add(name.lower())
+            resolved.append(name)
+
+    csr_names = ([csr_info.common_name] if csr_info.common_name else []) + csr_info.sans
+    csr_folded = {name.lower() for name in csr_names}
+    missing = [name for name in [primary, *resolved] if name.lower() not in csr_folded]
+    if missing:
+        log.error(
+            "Requested names are not in the CSR",
+            missing=", ".join(missing),
+            csr_names=", ".join(csr_names) or "(none)",
+        )
+        raise SystemExit(1)
+    dropped = [name for name in csr_names if name.lower() not in seen]
+    if dropped:
+        log.warning("CSR names left out of the order", dropped=", ".join(dropped))
+    return primary, resolved
 
 
 def _check_existing_and_prompt(
@@ -356,6 +412,18 @@ def _check_existing_and_prompt(
     return None
 
 
+_CREATE_ORDER_HINTS: dict[str, str] = {
+    # Whether the check matches the CSR bytes or its key is unknown, and it can
+    # fire for orders the API does not list. A new key is the safe choice.
+    "EMS-1099": (
+        "this CSR was already submitted on an earlier certificate order - "
+        "generate a fresh CSR and retry; a new private key is not required "
+        "but is recommended"
+    ),
+}
+"""Next-step advice for ``EMS-xxx`` codes the order-create call can return."""
+
+
 def _create_order(
     sess: CertiNextSession,
     values: OrderDefaults,
@@ -443,7 +511,9 @@ def _create_order(
                 product_code=values.product,
             )
     except CertiNextAPIError as exc:
-        fatal_api_error(exc, "Error creating order")
+        fatal_api_error(
+            exc, "Error creating order", hint=_CREATE_ORDER_HINTS.get(exc.ems_code or "")
+        )
 
 
 def _stem_from_domain(domain: str | None) -> str:
@@ -747,11 +817,13 @@ def issue_cert(
     ),
     domain: Optional[str] = typer.Option(
         None, "--domain", metavar="FQDN",
-        help="Override the primary domain (default: extracted from CSR CN)",
+        help="Override the primary domain (default: extracted from CSR CN; "
+        "required when the CSR has no CN; must be a name in the CSR)",
     ),
     san: list[str] = typer.Option(
         [], "--san", metavar="FQDN",
-        help="Override SANs (default: extracted from CSR SAN extension; repeatable)",
+        help="Override SANs (default: extracted from CSR SAN extension; "
+        "each must be a name in the CSR; repeatable)",
     ),
     validity: Optional[int] = typer.Option(
         None, "--validity", metavar="YEARS", min=1, max=3,
@@ -976,15 +1048,7 @@ def issue_cert(
             # Each field only overrides the CLI argument when the argument was
             # not supplied, so explicit flags always take precedence.
             csr_info = _parse_csr(csr)
-            if not effective_domain:
-                effective_domain = csr_info.common_name      # CN -> primary domain
-            if not effective_domain:
-                # _parse_csr exits when the CSR has no CN, so this is only
-                # reachable if that guarantee ever weakens.
-                log.error("No domain: CSR has no CN and --domain was not given")
-                raise SystemExit(1)
-            if sans is None:
-                sans = csr_info.sans                         # SAN extension
+            effective_domain, sans = _resolve_domain_and_sans(csr_info, effective_domain, sans)
             if not values.requestor_email and csr_info.email:
                 values.requestor_email = csr_info.email      # emailAddress OID
             if not values.signer_place and csr_info.signer_place:

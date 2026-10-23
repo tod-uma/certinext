@@ -12,9 +12,11 @@
 │ --csr                            FILE             PEM-encoded CSR file (alternative to           │
 │                                                   positional argument)                           │
 │ --domain                         FQDN             Override the primary domain (default:          │
-│                                                   extracted from CSR CN)                         │
+│                                                   extracted from CSR CN; required when the CSR   │
+│                                                   has no CN; must be a name in the CSR)          │
 │ --san                            FQDN             Override SANs (default: extracted from CSR SAN │
-│                                                   extension; repeatable)                         │
+│                                                   extension; each must be a name in the CSR;     │
+│                                                   repeatable)                                    │
 │ --validity                       YEARS [1<=x<=3]  Certificate validity in years (1, 2, or 3;     │
 │                                                   default: 1)                                    │
 │ --type                           [dv|ov|ev]       Certificate validation type (default: dv)      │

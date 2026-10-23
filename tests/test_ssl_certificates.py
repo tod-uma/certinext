@@ -467,9 +467,25 @@ class TestSslOrderLifecycleMethods:
         """cancel() POSTs to /ssl-certificates/{orderId}/cancel."""
         order, mock_session = self._make_order()
         mock_session.post.return_value = _ok_response({})
-        order.cancel()
+        order.cancel("duplicate order")
         url = mock_session.post.call_args[0][0]
         assert url.endswith(f"{_SSL_BASE}/ORDER-001/cancel")
+
+    def test_cancel_sends_reason_in_body(self) -> None:
+        """cancel() sends the reason as the CancelRequest ``reason`` field."""
+        order, mock_session = self._make_order()
+        mock_session.post.return_value = _ok_response({})
+        order.cancel("duplicate order")
+        _, kwargs = mock_session.post.call_args
+        assert kwargs["json"] == {"reason": "duplicate order"}
+
+    @pytest.mark.parametrize("reason", ["", "   ", "x" * 501])
+    def test_cancel_rejects_invalid_reason_without_calling_api(self, reason: str) -> None:
+        """cancel() raises ValueError for a blank or oversized reason, before any request."""
+        order, mock_session = self._make_order()
+        with pytest.raises(ValueError):
+            order.cancel(reason)
+        mock_session.post.assert_not_called()
 
     def test_reject_posts_to_reject_endpoint(self) -> None:
         """reject() POSTs to /ssl-certificates/{orderId}/reject."""

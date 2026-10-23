@@ -710,16 +710,29 @@ class SslOrder(CertiNextModel):
             accept="application/pkix-cert",
         )
 
-    def cancel(self) -> dict[str, Any]:
+    def cancel(self, reason: str) -> dict[str, Any]:
         """Cancel this certificate order.
+
+        Args:
+            reason: Why the order is being cancelled (1-500 characters). The
+                OpenAPI ``CancelRequest`` schema marks it optional, but the API
+                rejects a cancel without one (``422 Cancellation Remarks cannot
+                be empty``), so it is required here.
 
         Returns:
             Raw API response dict.
 
         Raises:
+            ValueError: If ``reason`` is blank or longer than 500 characters.
             CertiNextAPIError: On a non-2xx API response. Provides ``.status_code`` and ``.body``.
         """
-        return self._require_client().post(f"{_SSL_BASE}/{self.order_id}/cancel")
+        if not reason.strip():
+            raise ValueError("cancel() needs a non-empty reason")
+        if len(reason) > 500:
+            raise ValueError("cancel() reason must be at most 500 characters")
+        return self._require_client().post(
+            f"{_SSL_BASE}/{self.order_id}/cancel", json={"reason": reason}
+        )
 
     def reject(self) -> dict[str, Any]:
         """Reject this draft certificate order.

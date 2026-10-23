@@ -30,12 +30,17 @@ if importlib.util.find_spec("cryptography") is None:
     )
 
 
-def _make_csr(cn: str = "foo", extra_attrs: list[Any] | None = None) -> str:
+def _make_csr(
+    cn: str | None = "foo",
+    extra_attrs: list[Any] | None = None,
+    sans: list[str] | None = None,
+) -> str:
     """Generate a real PEM-encoded CSR using the cryptography library.
 
     Args:
-        cn: Common Name for the subject.
+        cn: Common Name for the subject, or ``None`` for a CN-less subject.
         extra_attrs: Additional NameAttribute objects to include in the subject.
+        sans: DNS names for a SubjectAlternativeName extension, if any.
 
     Returns:
         PEM-encoded CSR string.
@@ -46,14 +51,15 @@ def _make_csr(cn: str = "foo", extra_attrs: list[Any] | None = None) -> str:
     from cryptography.x509.oid import NameOID
 
     key = ec.generate_private_key(ec.SECP256R1())
-    attrs = [x509.NameAttribute(NameOID.COMMON_NAME, cn)]
+    attrs = [x509.NameAttribute(NameOID.COMMON_NAME, cn)] if cn is not None else []
     if extra_attrs:
         attrs.extend(extra_attrs)
-    csr = (
-        x509.CertificateSigningRequestBuilder()
-        .subject_name(x509.Name(attrs))
-        .sign(key, hashes.SHA256())
-    )
+    builder = x509.CertificateSigningRequestBuilder().subject_name(x509.Name(attrs))
+    if sans:
+        builder = builder.add_extension(
+            x509.SubjectAlternativeName([x509.DNSName(n) for n in sans]), critical=False
+        )
+    csr = builder.sign(key, hashes.SHA256())
     return csr.public_bytes(serialization.Encoding.PEM).decode()
 
 
@@ -108,13 +114,25 @@ class TestParseCsr:
         with pytest.raises(ValueError, match="Failed to parse"):
             parse_csr("not a csr")
 
-    def test_raises_when_no_cn(self) -> None:
-        """parse_csr raises ValueError when the CSR subject has no CN."""
-        with pytest.raises((ValueError, Exception)):
-            parse_csr(
-                "-----BEGIN CERTIFICATE REQUEST-----\nYQ==\n"
-                "-----END CERTIFICATE REQUEST-----\n"
-            )
+    def test_accepts_csr_without_cn(self) -> None:
+        """parse_csr accepts a CN-less CSR and keeps every DNS SAN."""
+        from cryptography import x509
+        from cryptography.x509.oid import NameOID
+
+        pem = _make_csr(
+            cn=None,
+            extra_attrs=[x509.NameAttribute(NameOID.LOCALITY_NAME, "Orono")],
+            sans=["host.example.edu", "mail.example.net"],
+        )
+        info = parse_csr(pem)
+        assert info.common_name is None
+        assert info.sans == ["host.example.edu", "mail.example.net"]
+        assert info.signer_place == "Orono"
+
+    def test_sans_exclude_cn(self) -> None:
+        """parse_csr drops the CN from sans, ignoring case."""
+        pem = _make_csr(cn="Host.Example.edu", sans=["host.example.edu", "alt.example.edu"])
+        assert parse_csr(pem).sans == ["alt.example.edu"]
 
     def test_returns_csrinfo(self) -> None:
         """parse_csr returns a CsrInfo instance."""

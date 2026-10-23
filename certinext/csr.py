@@ -33,12 +33,14 @@ class CsrInfo(BaseModel):
     without installing the optional ``[csr]`` extra.
 
     Attributes:
-        common_name: Common Name (CN) from the subject.
+        common_name: Common Name (CN) from the subject; ``None`` for a
+            CN-less CSR.
         email: Email address (``emailAddress`` OID) from the subject.
         locality: City or locality (L) from the subject.
         state: State or province (ST) from the subject.
         organization: Organisation name (O) from the subject.
-        sans: DNS Subject Alternative Names, excluding the common name.
+        sans: DNS Subject Alternative Names, excluding the common name
+            (compared case-insensitively). Every DNS SAN when there is no CN.
 
     Example::
 
@@ -81,14 +83,17 @@ def parse_csr(pem: str) -> CsrInfo:
     Args:
         pem: PEM-encoded certificate signing request string.
 
+    A CSR whose subject has no Common Name is accepted: ``common_name`` is
+    ``None`` and ``sans`` holds every DNS SAN. Callers that need a primary
+    domain must then choose one (the CLI requires ``--domain``).
+
     Returns:
         :class:`CsrInfo` with all available fields populated.
 
     Raises:
         ImportError: If the ``cryptography`` package is not installed. Install
             it with ``pip install certinext[csr]``.
-        ValueError: If the PEM cannot be parsed as a CSR, or the CSR subject
-            contains no Common Name.
+        ValueError: If the PEM cannot be parsed as a CSR.
     """
     try:
         from cryptography import x509
@@ -109,17 +114,20 @@ def parse_csr(pem: str) -> CsrInfo:
         attrs = csr.subject.get_attributes_for_oid(oid)  # type: ignore[arg-type]
         return str(attrs[0].value) if attrs else None
 
-    cn = _get(NameOID.COMMON_NAME)
-    if not cn:
-        raise ValueError(
-            "CSR subject has no Common Name - use --domain to specify the primary domain"
-        )
+    # A CN-less subject is legal (CA/B Forum deprecates CN in favour of SANs);
+    # callers that need a primary domain must supply one themselves.
+    cn = _get(NameOID.COMMON_NAME) or None
+    cn_folded = cn.lower() if cn else None
 
     try:
         san_ext = csr.extensions.get_extension_for_oid(ExtensionOID.SUBJECT_ALTERNATIVE_NAME)
         san_value = san_ext.value
         dns_names = (
-            [name for name in san_value.get_values_for_type(x509.DNSName) if name != cn]
+            [
+                name
+                for name in san_value.get_values_for_type(x509.DNSName)
+                if name.lower() != cn_folded
+            ]
             if isinstance(san_value, x509.SubjectAlternativeName)
             else []
         )
