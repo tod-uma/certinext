@@ -413,11 +413,14 @@ def _check_existing_and_prompt(
 
 
 _CREATE_ORDER_HINTS: dict[str, str] = {
-    # Whether the check matches the CSR bytes or its key is unknown, and it can
-    # fire for orders the API does not list. A new key is the safe choice.
+    # The duplicate check's scope is unknown. A user reported that the same CSR
+    # succeeded with a non-UCC product after a UCC order returned EMS-1099.
     "EMS-1099": (
-        "this CSR was already submitted on an earlier certificate order - "
-        "generate a fresh CSR and retry; a new private key is not required "
+        "the API reports this CSR belongs to an existing certificate order - "
+        "if a UCC product was selected, retrying with a non-UCC product via "
+        "--product CODE may allow the same CSR, provided that product covers "
+        "all requested names; otherwise generate a fresh CSR and retry; "
+        "a new private key is not required "
         "but is recommended"
     ),
 }

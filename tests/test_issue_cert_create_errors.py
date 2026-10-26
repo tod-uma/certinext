@@ -48,16 +48,20 @@ def _fail_create(
     return capsys.readouterr().err
 
 
-def test_ems_1099_logs_new_key_hint(
+def test_ems_1099_logs_product_alternative_and_fresh_csr_hint(
     capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A reused-CSR rejection tells the user to generate a fresh CSR."""
+    """A duplicate-CSR error offers a conditional product change and fresh CSR."""
     err = _fail_create(
         {"detail": "[EMS-1099] You are attempting to submit a CSR of an existing certificate order"},
         capsys, monkeypatch,
     )
     assert "Error creating order" in err
     assert "hint=" in err
+    assert "[EMS-1099]" in err
+    assert "if a UCC product was selected" in err
+    assert "non-UCC product via --product CODE may allow the same CSR" in err
+    assert "provided that product covers all requested names" in err
     assert "generate a fresh CSR" in err
     assert "new private key is not required but is recommended" in err
 
