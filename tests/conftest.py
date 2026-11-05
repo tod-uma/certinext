@@ -29,7 +29,7 @@ _FIXTURES_DIR = Path(__file__).parent / "fixtures"
 _GOLDENS_DIR = Path(__file__).parent / "goldens"
 
 
-def pytest_configure(config: pytest.Config) -> None:  # noqa: ARG001
+def pytest_configure(config: pytest.Config) -> None:  # noqa: ARG001 - pytest hook signature requires `config`
     """Pin typer's help-rendering width and terminal detection before import.
 
     typer reads ``TERMINAL_WIDTH`` into ``rich_utils.MAX_WIDTH`` *and*

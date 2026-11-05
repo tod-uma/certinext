@@ -1,13 +1,13 @@
 ---
-status: in-progress
+status: done
 depends-on: [replacement-report]
 implements-adr: [0019]
 ---
 
 # Plan: opt-in inspection cache and run timestamps for `replacement-report`
 
-**Status:** in progress on branch `feat/replacement-report-cache` (version `1.3.0rc5`), started
-2026-10-21. This repo copy supersedes the private plan-mode draft it was moved from.
+**Status:** done 2026-10-21: shipped in `v1.3.0rc5` (MR !134), released stable in `v1.3.0`.
+This repo copy supersedes the private plan-mode draft it was moved from.
 
 ## Context
 
@@ -140,7 +140,7 @@ off). Per-row: `CertificateFacts.from_cache` (library only; not added to the CSV
 5. Tests in `tests/test_replacement.py`; help golden regenerated.
 6. Docs: README (CLI section "Reusing downloads between runs", JSON timestamps, library example,
    module tree), IDEA-006 note, this plan, and
-   [ADR 0019](../adr/0019-command-local-opt-in-inspection-cache.md).
+   [ADR 0019](../../adr/0019-command-local-opt-in-inspection-cache.md).
 
 ## Verification
 
@@ -162,8 +162,8 @@ README and docstrings updated with the code. The tag changelog for `v1.3.0rc5` m
 
 ## References
 
-- Parent plan: [replacement-report.md](replacement-report.md); [ADR 0018](../adr/0018-classify-replacement-on-configurable-signals.md)
-- [IDEA-006](../wishlist/IDEA-006-response-caching.md): general response caching (still parked)
+- Parent plan: [replacement-report.md](replacement-report.md); [ADR 0018](../../adr/0018-classify-replacement-on-configurable-signals.md)
+- [IDEA-006](../../wishlist/IDEA-006-response-caching.md): general response caching (still parked)
 - [`os.replace`](https://docs.python.org/3/library/os.html#os.replace),
   [`tempfile`](https://docs.python.org/3/library/tempfile.html),
   [XDG base directory spec](https://specifications.freedesktop.org/basedir-spec/latest/),
