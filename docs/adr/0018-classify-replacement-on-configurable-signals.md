@@ -101,7 +101,7 @@ Chosen: **option 5**.
 `tests/test_replacement.py` covers every verdict, including both directions of
 disagreement, criteria layering, and the separate conflict count. The read-only
 production verification is recorded in
-[docs/plans/replacement-report.md](../plans/replacement-report.md).
+[docs/plans/archive/replacement-report.md](../plans/archive/replacement-report.md).
 
 ## Pros and cons of the options
 

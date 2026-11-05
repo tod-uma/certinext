@@ -349,10 +349,10 @@ This is a count reconciliation across one day, not a row-by-row join against the
 - **Inspection cache and run timestamps:** [replacement-report-cache.md](replacement-report-cache.md)
   (`1.3.0rc5`).
 - **#34:** fix revoke/reissue reason casing.
-- **Recorded 2026-10-21:** the decision is now [ADR 0018](../adr/0018-classify-replacement-on-configurable-signals.md).
+- **Recorded 2026-10-21:** the decision is now [ADR 0018](../../adr/0018-classify-replacement-on-configurable-signals.md).
   The two items below are parked as wishlist ideas
-  ([IDEA-014](../wishlist/IDEA-014-clm-certificate-report-access.md),
-  [IDEA-015](../wishlist/IDEA-015-list-certificates-status-values.md)), so as not to bother
+  ([IDEA-014](../../wishlist/IDEA-014-clm-certificate-report-access.md),
+  [IDEA-015](../../wishlist/IDEA-015-list-certificates-status-values.md)), so as not to bother
   the vendor mid-incident.
 - **Vendor question:** ask whether the API account can get CLM `reports/certificates` / `v3/orders`
   permission, which would give a server-side key-algorithm filter.

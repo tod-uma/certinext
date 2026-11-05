@@ -63,7 +63,7 @@ and follows these rules:
   summary and in the JSON `cache` block.
 
 The full design and its reasoning are in
-[the plan](../plans/replacement-report-cache.md).
+[the plan](../plans/archive/replacement-report-cache.md).
 
 ### Consequences
 
