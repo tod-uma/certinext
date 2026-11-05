@@ -344,6 +344,15 @@ def test_probe_r07_list_endpoint_shapes(client: CertiNextClient) -> None:
             assert lists, f"{path} wrapper dict has no list value — unwrap workaround would break"
 
 
+# Known drift, tracked in GitLab #38: since 2026-11-05 the sandbox account holds
+# SSL.com-validated domains whose DCV payload carries recordName/recordValue/
+# validatedBy/caStatus/options/optionId and no legacy token or host key, so
+# DcvInfo.from_wire() returns an empty token and host for them. strict=True makes
+# this XPASS-fail the moment #38 models those keys, forcing the marker's removal.
+@pytest.mark.xfail(
+    strict=True,
+    reason="#38: SSL.com DCV payload keys are not modelled by DcvInfo.from_wire()",
+)
 def test_probe_r08_dcv_payload_keys(probe_env: str, client: CertiNextClient, baseline_domains: list[Domain]) -> None:
     """R08: domain DCV payloads carry no key the library fails to model.
 
