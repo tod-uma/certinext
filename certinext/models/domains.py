@@ -25,7 +25,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Literal, cast
 
 import structlog
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 
 from ..client import CertiNextClient
 from ._base import CertiNextModel, _LenientDatetime
@@ -45,7 +45,46 @@ DcvStatus = Literal["VERIFIED", "PENDING", "REJECTED"]
 collection - GitLab issue #6)."""
 
 DcvMethod = Literal["DNS-TXT", "HTTP-URL"]
-"""Valid DCV method strings accepted by :meth:`Domain.change_dcv_method`."""
+"""Valid DCV method strings accepted by :meth:`Domain.change_dcv_method`.
+
+Deliberately narrower than what the API *reports*: ``dns-cname`` and
+``dns-persist`` appear on read paths (SSL.com domains default to
+``dns-persist``) but are not writable through this library."""
+
+CaStatus = Literal["PENDING", "UNDER_REVIEW", "VALIDATED", "EXPIRED"]
+"""Values of :attr:`DcvInfo.ca_status` - SSL.com's own validation state for an
+SSL.com-validated domain (sandbox spec 2026-11-05, GitLab #38). Kept separate
+from :data:`DcvStatus`, which CertiNext still reports on the domain itself."""
+
+CertificateAuthority = Literal["EMSIGN", "SSLCOM"]
+"""Certificate authorities *known* to validate domains as of the 2026-11-05
+sandbox spec. Documentation only: the vendor intends to add more CAs, so
+every API in this library that takes or returns a CA uses plain ``str`` and
+passes unknown values through rather than rejecting them.
+
+On the wire, ``validatedBy`` is absent for emSign and present for every other
+CA. **Branch on** :attr:`Domain.is_emsign` / :attr:`DcvInfo.is_emsign`
+**rather than on a specific newer CA**: emSign is the only CA with the
+rotating-token challenge model, so a CA this library has never heard of must
+fall to the record/options path, never to the token path (GitLab #38)."""
+
+EMSIGN: str = "EMSIGN"
+"""Normalised CA name for emSign (the wire omits ``validatedBy`` for it)."""
+
+SSLCOM: str = "SSLCOM"
+"""Wire value of ``validatedBy`` for a domain SSL.com validates."""
+
+
+def _normalise_ca(validated_by: str | None) -> str:
+    """Map a wire ``validatedBy`` value to a CA name.
+
+    Args:
+        validated_by: The raw ``validatedBy`` value, or ``None`` when absent.
+
+    Returns:
+        The upper-cased CA name, or :data:`EMSIGN` when absent/empty.
+    """
+    return (validated_by or "").strip().upper() or EMSIGN
 
 VALID_DCV_METHODS: frozenset[str] = frozenset({"DNS-TXT", "HTTP-URL"})
 """DCV methods this library fully supports for write operations
@@ -87,6 +126,52 @@ def _has_ns_records(name: str) -> bool:
         return False
 
 
+class DcvOption(CertiNextModel):
+    """One way to validate a non-emSign domain, from ``DcvInfo.options``.
+
+    The CA (SSL.com today) offers several options per domain at once (DNS
+    TXT, DNS CNAME, DNS persistent record, HTTP file); the one CertiNext
+    currently checks is
+    the option whose :attr:`option_id` equals :attr:`DcvInfo.option_id`.
+
+    Attributes:
+        option_id: Opaque option ID; pass to :meth:`Domain.verify` to check
+            this option instead of the selected one.
+        method: DCV method in upper case (``DNS-TXT``, ``DNS-CNAME``,
+            ``DNS-PERSIST``, ``HTTP-URL``).
+        br_method: CA/B Forum Baseline Requirements section, e.g. ``3.2.2.4.7``.
+        record_name: Where to publish — a **fully-qualified** DNS name
+            (``_pki-validation.example.edu``) or, for HTTP-URL, the full URL.
+            Unlike :attr:`DcvInfo.host` this is not a prefix.
+        record_value: What to publish at :attr:`record_name`.
+        covers_name: The name this option validates.
+        exact_name: Whether the option validates only :attr:`covers_name`.
+        expires_at: Timezone-aware UTC expiry of the option, or ``None``.
+    """
+
+    option_id: str = Field(default="", alias="optionId", description="Opaque option ID.")
+    method: str = Field(default="", description="DCV method in upper case.")
+    br_method: str | None = Field(default=None, alias="brMethod", description="CA/B BR section.")
+    record_name: str = Field(default="", alias="recordName", description="Fully-qualified record name or URL.")
+    record_value: str = Field(default="", alias="recordValue", description="Value to publish.")
+    covers_name: str | None = Field(default=None, alias="coversName", description="Name this option validates.")
+    exact_name: bool | None = Field(default=None, alias="exactName", description="Validates only covers_name.")
+    expires_at: _LenientDatetime = Field(default=None, alias="expiresAt", description="Option expiry (UTC).")
+
+    @field_validator("method", mode="before")
+    @classmethod
+    def _upper_method(cls, value: Any) -> Any:
+        """Upper-case the wire method so it compares equal to :attr:`DcvInfo.method`.
+
+        Args:
+            value: The raw wire value.
+
+        Returns:
+            The upper-cased string, or the value untouched when not a string.
+        """
+        return value.upper() if isinstance(value, str) else value
+
+
 class DcvInfo(BaseModel):
     """Parsed DCV configuration returned by :meth:`Domain.get_dcv`.
 
@@ -94,11 +179,23 @@ class DcvInfo(BaseModel):
     field name variants or case differences. Build from a wire payload with
     :meth:`from_wire`; direct keyword construction preserves values verbatim.
 
+    **Two shapes, by CA.** For an emSign domain (no ``validatedBy`` on the
+    wire, :attr:`is_emsign`) the challenge is in :attr:`token` / :attr:`host`.
+    For any other CA — SSL.com today, more planned by the vendor — the API
+    sends no token or host key at all: the challenge is :attr:`record_name` /
+    :attr:`record_value` (the selected option) plus the full :attr:`options`
+    list, and :attr:`token` / :attr:`host` stay ``""``. They are deliberately
+    *not* back-filled from the record fields — :attr:`record_name` is a
+    fully-qualified name, not a prefix, so code that builds
+    ``f"{host}.{domain}"`` would publish to the wrong name (GitLab #38).
+    Check :attr:`is_emsign` before using :attr:`token`.
+
     Attributes:
-        method: DCV method in upper case, e.g. ``DNS-TXT`` or ``HTTP-URL``.
-        token:  Challenge value to publish. For DNS-TXT this is the TXT record
-                content (``txtToken``); for HTTP-URL it is the file token
-                (``fileToken``).
+        method: DCV method in upper case, e.g. ``DNS-TXT`` or ``HTTP-URL``
+                (non-emSign domains may also report ``DNS-PERSIST`` or ``DNS-CNAME``).
+        token:  emSign only. Challenge value to publish. For DNS-TXT this is
+                the TXT record content (``txtToken``); for HTTP-URL it is the
+                file token (``fileToken``).
         host:   Sub-domain prefix for the challenge record, or ``""`` when the
                 API returns none (the Domains API currently never returns it —
                 probe R08, corpus 2026-07-02). With no host the DNS-TXT
@@ -109,21 +206,51 @@ class DcvInfo(BaseModel):
                 :attr:`~certinext.models.ssl_certificates.DcvChallenge.host`,
                 which the API does populate with values like
                 ``_emudhra-challenge.<domain>``.)
-        token_expiry: Timezone-aware UTC expiry of :attr:`token`, or ``None``
+        token_expiry: Timezone-aware UTC expiry of the challenge, or ``None``
                 when absent/unparseable. Use this instead of inferring
                 staleness from an empty :attr:`token` — see
                 :meth:`Domain.reinitiate_dcv`.
+        validated_by: Raw wire ``validatedBy`` (e.g. ``"SSLCOM"``), or
+                ``None`` for emSign (the API omits the key). Prefer :attr:`ca`.
+        ca_status: Non-emSign only — the CA's own validation state (SSL.com
+                values: :data:`CaStatus`; kept as ``str`` for future CAs).
+        record_name: Non-emSign only — fully-qualified record name (or URL) of
+                the selected option. ``""`` for emSign.
+        record_value: Non-emSign only — value to publish at :attr:`record_name`.
+        option_id: Non-emSign only — ID of the selected entry in :attr:`options`.
+        options: Non-emSign only — every validation option the CA offers.
     """
 
     model_config = ConfigDict(populate_by_name=True)
 
     method: str = Field(description="DCV method in upper case, e.g. ``DNS-TXT`` or ``HTTP-URL``.")
-    token: str = Field(description="Challenge value to publish.")
-    host: str = Field(description="Sub-domain prefix for the challenge record.")
+    token: str = Field(description="emSign challenge value to publish (``\"\"`` for other CAs).")
+    host: str = Field(description="emSign sub-domain prefix for the challenge record.")
     token_expiry: _LenientDatetime = Field(
         default=None,
-        description="Timezone-aware UTC expiry of `token`, or `None` if absent/unparseable.",
+        description="Timezone-aware UTC expiry of the challenge, or `None` if absent/unparseable.",
     )
+    validated_by: str | None = Field(default=None, description="Raw ``validatedBy``; ``None`` for emSign.")
+    ca_status: str | None = Field(default=None, description="Non-emSign CA's validation state.")
+    record_name: str = Field(default="", description="Non-emSign: fully-qualified record name or URL.")
+    record_value: str = Field(default="", description="Non-emSign: value to publish.")
+    option_id: str | None = Field(default=None, description="Non-emSign: selected option ID.")
+    options: list[DcvOption] = Field(default_factory=list, description="Non-emSign: all validation options.")
+
+    @property
+    def ca(self) -> str:
+        """Return the validating CA, upper-cased (``"EMSIGN"`` when the wire omits it)."""
+        return _normalise_ca(self.validated_by)
+
+    @property
+    def is_emsign(self) -> bool:
+        """Return True for emSign — the only CA whose challenge is :attr:`token` / :attr:`host`."""
+        return self.ca == EMSIGN
+
+    @property
+    def selected_option(self) -> DcvOption | None:
+        """Return the entry of :attr:`options` CertiNext currently checks, or ``None``."""
+        return next((o for o in self.options if o.option_id and o.option_id == self.option_id), None)
 
     @classmethod
     def from_wire(cls, raw: dict[str, Any]) -> "DcvInfo":
@@ -136,6 +263,10 @@ class DcvInfo(BaseModel):
         ``dnsHost``/``host``. Missing chains resolve to ``""``. ``tokenExpiry``
         is passed through as-is (parsed leniently by the field itself).
 
+        SSL.com keys (``validatedBy``, ``caStatus``, ``recordName``,
+        ``recordValue``, ``optionId``, ``options``) map to their own fields
+        and never feed :attr:`token` / :attr:`host` — see the class docstring.
+
         Args:
             raw: The raw API response dict from the DCV endpoint.
 
@@ -145,7 +276,23 @@ class DcvInfo(BaseModel):
         method = (raw.get("dcvMethod") or raw.get("method") or "").upper()
         token = raw.get("txtToken") or raw.get("fileToken") or raw.get("token") or raw.get("dnsContents") or ""
         host = raw.get("dnsHost") or raw.get("host") or ""
-        return cls(method=method, token=token, host=host, token_expiry=raw.get("tokenExpiry"))
+        raw_options = raw.get("options")
+        options = [
+            DcvOption.model_validate(o) for o in (raw_options if isinstance(raw_options, list) else [])
+            if isinstance(o, dict)
+        ]
+        return cls(
+            method=method,
+            token=token,
+            host=host,
+            token_expiry=raw.get("tokenExpiry"),
+            validated_by=raw.get("validatedBy") or None,
+            ca_status=raw.get("caStatus") or None,
+            record_name=raw.get("recordName") or "",
+            record_value=raw.get("recordValue") or "",
+            option_id=raw.get("optionId") or None,
+            options=options,
+        )
 
 
 class DcvVerifyResult(CertiNextModel):
@@ -286,6 +433,16 @@ class Domain(CertiNextModel):
             "in PENDING or REJECTED state."
         ),
     )
+    validated_by: str | None = Field(
+        default=None,
+        alias="validatedBy",
+        description=(
+            "Raw wire ``validatedBy`` (e.g. ``SSLCOM``); ``None`` for emSign "
+            "(the API omits the key). Prefer :attr:`ca` / :attr:`is_emsign`. "
+            "An organization may hold the same name once per CA, so two "
+            "Domains can share a :attr:`name`."
+        ),
+    )
 
     _client: CertiNextClient | None = PrivateAttr(default=None)
 
@@ -333,6 +490,7 @@ class Domain(CertiNextModel):
         lines.append(row("id:", self.id))
         lines.append(row("status:", self.status))
         lines.append(row("dcv_status:", self.dcv_status))
+        lines.append(row("validated_by:", self.ca))
         if self.dcv_expires:
             lines.append(row("dcv_expires:", self.dcv_expires))
         lines.append(row("organization:", self.organization_name))
@@ -345,6 +503,46 @@ class Domain(CertiNextModel):
         return f"Domain(name={self.name!r}, status={self.status!r})"
 
     # --- public helpers ---
+
+    @property
+    def ca(self) -> str:
+        """Return the validating CA, upper-cased (``"EMSIGN"`` when the wire omits it).
+
+        Unknown future CAs are returned as-is, never mapped to a known one.
+        """
+        return _normalise_ca(self.validated_by)
+
+    @property
+    def is_emsign(self) -> bool:
+        """Return True for emSign — the only CA using the rotating-token DCV model."""
+        return self.ca == EMSIGN
+
+    def _refuse_non_emsign_write(self, operation: str, *, ca: str | None = None) -> None:
+        """Raise when a DCV write that only understands emSign targets another CA.
+
+        ``change_dcv_method`` / ``reinitiate_dcv`` were built around emSign's
+        token model. On an SSL.com domain they would switch a working
+        ``dns-persist`` record to a method whose challenge
+        :attr:`DcvInfo.token` cannot carry (GitLab #38). The check is
+        fail-closed — it refuses every CA except emSign, including ones this
+        library has never seen — so a vendor-added CA cannot silently take
+        the token path.
+
+        Args:
+            operation: Name of the refused method, for the error message.
+            ca: Pre-computed CA (e.g. from a fresh :class:`DcvInfo`);
+                defaults to :attr:`ca`.
+
+        Raises:
+            ValueError: If the domain is validated by any CA other than emSign.
+        """
+        effective = ca if ca is not None else self.ca
+        if effective != EMSIGN:
+            raise ValueError(
+                f"{operation}() is not supported for {self.name!r}: it is validated by {effective}, "
+                "whose DCV options come from DcvInfo.options/record_name/record_value, not an "
+                "emSign rotating token. Publish the selected option's record and call verify()."
+            )
 
     @property
     def needs_dcv(self) -> bool:
@@ -443,6 +641,7 @@ class Domain(CertiNextModel):
             "organization": _s(self.organization_name),
             "created_at": self.created_at.isoformat() if self.created_at else "",
             "id": _s(self.id),
+            "validated_by": self.ca,
         }
 
     # --- API methods ---
@@ -492,7 +691,8 @@ class Domain(CertiNextModel):
         result: dict[str, Any] | list[Any] = self._require_client().get(f"{_BASE}/{self.id}/dcv")
         raw: dict[str, Any] = result if isinstance(result, dict) else {}
         info = DcvInfo.from_wire(raw)
-        if info.method and info.method not in VALID_DCV_METHODS:
+        # Non-emSign methods are modelled (DcvInfo.options); only warn for emSign drift.
+        if info.method and info.method not in VALID_DCV_METHODS and info.is_emsign:
             log.warning(
                 "unrecognized DCV method from API",
                 domain=self.name,
@@ -501,8 +701,17 @@ class Domain(CertiNextModel):
             )
         return info
 
-    def verify(self) -> DcvVerifyResult:
+    def verify(self, option_id: str | None = None) -> DcvVerifyResult:
         """Trigger DCV verification for this domain.
+
+        For an SSL.com domain the API waits (about 15 s) for SSL.com's own
+        multi-perspective check and returns 422 with ``diagnostics.caStatus``
+        / ``caMessage`` when it does not validate.
+
+        Args:
+            option_id: SSL.com domains only — check this entry of
+                :attr:`DcvInfo.options` instead of the selected option. Omit
+                for emSign domains.
 
         Returns:
             A :class:`DcvVerifyResult` summarising the outcome. Call
@@ -512,7 +721,9 @@ class Domain(CertiNextModel):
         Raises:
             CertiNextAPIError: On a non-2xx API response. Provides ``.status_code`` and ``.body``.
         """
-        raw: Any = self._require_client().post(f"{_BASE}/{self.id}/dcv/verify")
+        path = f"{_BASE}/{self.id}/dcv/verify"
+        client = self._require_client()
+        raw: Any = client.post(path, json={"optionId": option_id}) if option_id else client.post(path)
         return DcvVerifyResult.model_validate(raw if isinstance(raw, dict) else {})
 
     def change_dcv_method(self, method: DcvMethod) -> dict[str, Any]:
@@ -527,7 +738,9 @@ class Domain(CertiNextModel):
             Raw API response dict containing the updated DCV configuration.
 
         Raises:
-            ValueError: If ``method`` is not one of the accepted DCV methods.
+            ValueError: If ``method`` is not one of the accepted DCV methods,
+                or the domain is validated by any CA other than emSign
+                (:attr:`is_emsign` is ``False``).
             CertiNextAPIError: On a non-2xx API response. Provides ``.status_code`` and ``.body``.
         """
         method_upper = method.upper()
@@ -535,6 +748,7 @@ class Domain(CertiNextModel):
             raise ValueError(
                 f"Invalid DCV method {method_upper!r}; must be one of {sorted(VALID_DCV_METHODS)}"
             )
+        self._refuse_non_emsign_write("change_dcv_method")
         return self._require_client().patch(
             f"{_BASE}/{self.id}/dcv/method", json={"dcvMethod": method_upper.lower()}
         )
@@ -563,11 +777,14 @@ class Domain(CertiNextModel):
             same DCV method.
 
         Raises:
-            ValueError: If the current DCV method cannot be determined or is
+            ValueError: If the domain is validated by any CA other than
+                emSign, or the current DCV method cannot be determined or is
                 not one of the accepted values (``"DNS-TXT"``, ``"HTTP-URL"``).
             CertiNextAPIError: On a non-2xx API response.
         """
         current = self.get_dcv()
+        # Either signal suffices: a stale Domain row or a fresh DCV payload.
+        self._refuse_non_emsign_write("reinitiate_dcv", ca=self.ca if not self.is_emsign else current.ca)
         if not current.method or current.method not in VALID_DCV_METHODS:
             raise ValueError(
                 f"Cannot reinitiate DCV for {self.name!r}: "

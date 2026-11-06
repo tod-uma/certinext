@@ -54,8 +54,11 @@ from .client import CertiNextClient
 from .csr import CsrInfo
 from .domains import (
     VALID_DCV_METHODS,
+    CaStatus,
+    CertificateAuthority,
     DcvInfo,
     DcvMethod,
+    DcvOption,
     DcvStatus,
     Domain,
     DomainAccessor,
@@ -178,7 +181,10 @@ __all__ = [
     "Domain",
     "DomainAccessor",
     "DcvInfo",
+    "DcvOption",
     "filter_needs_dcv",
+    "CaStatus",
+    "CertificateAuthority",
     "DcvMethod",
     "DcvStatus",
     "DomainStatus",

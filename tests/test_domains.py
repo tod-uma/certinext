@@ -177,7 +177,9 @@ class TestDomainHelpers:
     def test_to_row_keys(self, domain: Domain) -> None:
         """to_row() returns a dict with the expected column keys."""
         row = domain.to_row()
-        assert set(row.keys()) == {"id", "name", "status", "dcv_status", "dcv_expires", "organization", "created_at"}
+        assert set(row.keys()) == {
+            "id", "name", "status", "dcv_status", "dcv_expires", "organization", "created_at", "validated_by",
+        }
 
     def test_to_row_values_are_strings(self, domain: Domain) -> None:
         """to_row() returns only string values."""
@@ -608,24 +610,31 @@ class TestDomainAccessorListPagination:
             [_domain_row(1), _domain_row(2)],
             [_domain_row(3), _domain_row(4)],
             [_domain_row(5)],  # short page: fewer rows than the page size
+            [],  # boundary re-fetch: domain-2.edu
+            [],  # boundary re-fetch: domain-4.edu
         ]
         mock_client.get.side_effect = pages
         result = accessor.get_list()
         assert [d.id for d in result] == ["id-1", "id-2", "id-3", "id-4", "id-5"]
-        assert mock_client.get.call_count == 3
-        offsets_used = [call.kwargs["params"]["offset"] for call in mock_client.get.call_args_list]
+        assert mock_client.get.call_count == 5
+        offsets_used = [call.kwargs["params"]["offset"] for call in mock_client.get.call_args_list[:3]]
         assert offsets_used == [0, 2, 4]
+        refetches = [call.kwargs["params"] for call in mock_client.get.call_args_list[3:]]
+        assert [(p["search"], p["exactMatch"]) for p in refetches] == [
+            ("domain-2.edu", "true"),
+            ("domain-4.edu", "true"),
+        ]
 
     def test_stops_on_empty_page(
         self, accessor: DomainAccessor, mock_client: MagicMock, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Stops paging as soon as a page comes back empty."""
         monkeypatch.setattr("certinext.domains._LIST_PAGE_SIZE", 2)
-        pages = [[_domain_row(1), _domain_row(2)], []]
+        pages = [[_domain_row(1), _domain_row(2)], [], []]  # last: boundary re-fetch
         mock_client.get.side_effect = pages
         result = accessor.get_list()
         assert [d.id for d in result] == ["id-1", "id-2"]
-        assert mock_client.get.call_count == 2
+        assert mock_client.get.call_count == 3
 
     def test_dedupes_rows_repeated_across_pages(
         self, accessor: DomainAccessor, mock_client: MagicMock, monkeypatch: pytest.MonkeyPatch
@@ -637,10 +646,31 @@ class TestDomainAccessorListPagination:
             [_domain_row(1), overlapping_row],
             [overlapping_row, _domain_row(3)],
             [],
+            [overlapping_row],  # boundary re-fetch of domain-2.edu echoes the same id
+            [],  # boundary re-fetch of domain-3.edu
         ]
         mock_client.get.side_effect = pages
         result = accessor.get_list()
         assert [d.id for d in result] == ["id-1", "id-2", "id-3"]
+
+    def test_boundary_refetch_recovers_row_tied_on_name(
+        self, accessor: DomainAccessor, mock_client: MagicMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A same-name row (one per CA, #38) skipped by a tie at a page boundary is recovered."""
+        monkeypatch.setattr("certinext.domains._LIST_PAGE_SIZE", 2)
+        emsign = dict(SAMPLE_DOMAIN_DATA, domainId="id-em", domainName="maine.edu")
+        sslcom = dict(emsign, domainId="id-ssl", validatedBy="SSLCOM")
+        other = dict(SAMPLE_DOMAIN_DATA, domainId="id-x", domainName="maine.edux")
+        pages = [
+            [_domain_row(1), emsign],  # page 1 ends on the tied name
+            [emsign, other],  # tie re-ordered: emsign repeated, sslcom skipped
+            [],
+            [emsign, sslcom],  # exact re-fetch of maine.edu returns both records
+            [],  # exact re-fetch of maine.edux
+        ]
+        mock_client.get.side_effect = pages
+        result = accessor.get_list()
+        assert sorted(d.id or "" for d in result) == ["id-1", "id-em", "id-ssl", "id-x"]
 
     def test_stops_at_defensive_page_ceiling(
         self, accessor: DomainAccessor, mock_client: MagicMock, monkeypatch: pytest.MonkeyPatch
@@ -655,8 +685,10 @@ class TestDomainAccessorListPagination:
 
         mock_client.get.side_effect = _next_page
         result = accessor.get_list()
-        assert len(result) == 6  # 3 pages * page size 2
-        assert mock_client.get.call_count == 3
+        # 3 pages * page size 2; the 3 boundary re-fetches return only
+        # differently-named rows, which the exact-name check discards.
+        assert len(result) == 6
+        assert mock_client.get.call_count == 6
 
 
 class TestDomainAccessorGetPendingDcv:

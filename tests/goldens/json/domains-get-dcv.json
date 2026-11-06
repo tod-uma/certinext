@@ -2,5 +2,11 @@
   "method": "DNS-TXT",
   "token": "9B2CA888948836F803ECEA19F0AAEE0B",
   "host": "",
-  "token_expiry": "2026-08-01T00:00:00Z"
+  "token_expiry": "2026-08-01T00:00:00Z",
+  "validated_by": null,
+  "ca_status": null,
+  "record_name": "",
+  "record_value": "",
+  "option_id": null,
+  "options": []
 }

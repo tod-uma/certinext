@@ -1709,7 +1709,7 @@ domain = sess.domain.get("maine.edu")
 domain = sess.domain.get("vuxwZgEXWWFXQQWC-3zElI5VlhinKlE8xyYJqfeYNtFE0SAP")
 ```
 
-When a name is passed (contains a `.`), the library lists all domains and finds the match. When an ID is passed, it calls the single-domain endpoint directly.
+When a name is passed (contains a `.`), the library lists all domains and finds the match. When an ID is passed, it calls the single-domain endpoint directly. A name can have one record per CA. See [More than one CA](#more-than-one-ca-sslcom-and-others-to-come) and `validated_by=`.
 
 #### Create a domain
 
@@ -1729,6 +1729,47 @@ domain = sess.domain.create(
 )
 ```
 
+#### More than one CA (SSL.com, and others to come)
+
+Since November 2026 a domain can be validated by **SSL.com** as well as
+emSign (the eMudhra replacement). The vendor plans to add more CAs. The
+library follows four rules:
+
+- **`domain.ca`** is `"EMSIGN"` when the API omits `validatedBy`, which is
+  how it reports emSign. Otherwise it's the wire value upper-cased
+  (`"SSLCOM"`). Unknown future CAs pass through unchanged. `domain.is_emsign`
+  is the check to branch on.
+- **One name can have one record per CA.** `get_list()` can return
+  `maine.edu` twice. `sess.domain.get("maine.edu")` returns the emSign record
+  and logs a warning if there's also another. Pass `validated_by="SSLCOM"` to
+  choose a record. If a name has several records and none is emSign, `get()`
+  raises `ValueError` instead of guessing.
+  `get_list(validated_by="SSLCOM")` filters by CA. The filter runs on the
+  server and again in the client, because prod's spec didn't have it yet as
+  of 2026-11-05.
+- **Only emSign uses the rotating-token challenge.** For any other CA,
+  `DcvInfo.token` / `host` stay `""`. The challenge is `record_name` (a
+  **fully-qualified** DNS name or URL, not a prefix) and `record_value`, plus
+  every alternative in `options`. Don't build `f"{dcv.host}.{domain}"` for a
+  non-emSign domain.
+- **The emSign-only write methods refuse every other CA.**
+  `change_dcv_method()` and `reinitiate_dcv()` raise `ValueError` for any
+  domain that isn't emSign, including CAs this library doesn't know yet. For
+  those domains, publish the selected option's record and call `verify()`. To
+  check a different option, pass `verify(option_id=...)`.
+
+```python
+dcv = domain.get_dcv()
+if dcv.is_emsign:
+    publish_txt(domain.name, dcv.token)             # emSign: token at the apex
+else:
+    publish(dcv.record_name, dcv.record_value)      # e.g. _validation-persist.maine.edu
+    domain.verify()
+
+# Create a domain for an explicit CA; when omitted the account decides
+sess.domain.create("newdomain.example.com", dcv_method="dns-persist", ca="SSLCOM")
+```
+
 <details>
 <summary>Domain properties and DcvInfo fields</summary>
 
@@ -1746,6 +1787,9 @@ domain = sess.domain.create(
 | `verified_at` | `datetime \| None` | Timestamp DCV was last completed, or `None` if not yet verified |
 | `dcv_expires` | `datetime \| None` | DCV token expiry (timezone-aware UTC); only set once DCV has completed |
 | `needs_dcv` | `bool` | `True` if status is `ACTIVE` and `dcv_status` is not `VERIFIED` |
+| `validated_by` | `str \| None` | Raw wire `validatedBy` (`SSLCOM`, ...); `None` means emSign |
+| `ca` | `str` | Validating CA, `EMSIGN` when `validatedBy` is absent |
+| `is_emsign` | `bool` | `True` for emSign, the only CA using `DcvInfo.token` |
 
 `Domain` objects support `str()` and `repr()`:
 
@@ -1755,6 +1799,7 @@ print(domain)
 #   id:              vuxwZgEXWWFXQQWC-...
 #   status:          ACTIVE
 #   dcv_status:      VERIFIED
+#   validated_by:    EMSIGN
 #   dcv_expires:     2026-12-14 00:00:00+00:00   (only shown once DCV has completed)
 #   organization:    University of Maine System
 #   created:         2026-05-04 21:27:14+00:00
@@ -1769,10 +1814,16 @@ repr(domain)
 
 | Field | Type | Description |
 |---|---|---|
-| `method` | `str` | DCV method in upper case, normally `DNS-TXT` or `HTTP-URL`. Methods the library doesn't recognise (the vendor spec added undocumented `dns-cname` / `dns-persist` enums on 2026-07-13) are returned as-is with a warning logged rather than raising. |
-| `token` | `str` | Challenge value to publish (TXT record content for DNS-TXT, file token for HTTP-URL) |
-| `host` | `str` | Sub-domain prefix for the challenge record (e.g. `_emudhra-challenge`). Empty string if not returned by the API. |
-| `token_expiry` | `datetime \| None` | Timezone-aware UTC expiry of `token`, or `None` if absent/unparseable. Check this (or an empty `token`) before calling `domain.reinitiate_dcv()`. |
+| `method` | `str` | DCV method in upper case, normally `DNS-TXT` or `HTTP-URL`; SSL.com domains also report `DNS-PERSIST` / `DNS-CNAME`. On an emSign domain, methods the library doesn't recognise are returned as-is with a warning logged rather than raising. |
+| `token` | `str` | **emSign only.** Challenge value to publish (TXT record content for DNS-TXT, file token for HTTP-URL). Always `""` for other CAs. |
+| `host` | `str` | **emSign only.** Sub-domain prefix for the challenge record. Empty string if not returned by the API. |
+| `token_expiry` | `datetime \| None` | Timezone-aware UTC expiry of the challenge, or `None` if absent/unparseable. Check this (or an empty `token`) before calling `domain.reinitiate_dcv()`. |
+| `ca` / `is_emsign` | `str` / `bool` | Validating CA (`EMSIGN` when `validatedBy` is absent). Branch on `is_emsign`. |
+| `record_name` | `str` | Non-emSign: **fully-qualified** record name (or URL) of the selected option. |
+| `record_value` | `str` | Non-emSign: value to publish at `record_name`. |
+| `option_id` / `selected_option` | `str \| None` / `DcvOption \| None` | Non-emSign: the option CertiNext currently checks. |
+| `options` | `list[DcvOption]` | Non-emSign: every option the CA offers (`option_id`, `method`, `br_method`, `record_name`, `record_value`, `covers_name`, `exact_name`, `expires_at`). |
+| `ca_status` | `str \| None` | Non-emSign: the CA's own state (SSL.com: `PENDING`, `UNDER_REVIEW`, `VALIDATED`, `EXPIRED`). |
 
 </details>
 
@@ -1793,9 +1844,10 @@ print(dcv.host)                    # sub-domain prefix for the challenge record
 print(dcv.token_expiry)            # UTC datetime, or None
 
 result = domain.verify()           # trigger verification; returns a DcvVerifyResult summary
-domain.change_dcv_method("DNS-TXT")   # accepted values: "DNS-TXT", "HTTP-URL" (write ops reject
-                                      # methods the library can't represent yet, e.g. dns-persist)
-domain.reinitiate_dcv()            # force a fresh challenge token (e.g. after tokenExpiry lapses)
+domain.verify(option_id="...")     # non-emSign only: check a different entry of dcv.options
+domain.change_dcv_method("DNS-TXT")   # emSign only; accepted values: "DNS-TXT", "HTTP-URL"
+                                      # (raises ValueError for any other CA)
+domain.reinitiate_dcv()            # emSign only: force a fresh challenge token
 attempt = domain.last_dcv_attempt()   # returns raw API response dict
 history = domain.dcv_attempt_history() # returns raw API response dict or list
 

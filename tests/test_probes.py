@@ -45,7 +45,7 @@ import certinext
 from certinext._chain import order_certificate_chain
 from certinext._keyring import keyring_get, keyring_service
 from certinext.client import CertiNextClient
-from certinext.domains import Domain
+from certinext.domains import DcvInfo, Domain
 from certinext.exceptions import CertiNextAPIError
 from certinext.ssl_certificates import CertificateDownload
 
@@ -344,15 +344,6 @@ def test_probe_r07_list_endpoint_shapes(client: CertiNextClient) -> None:
             assert lists, f"{path} wrapper dict has no list value — unwrap workaround would break"
 
 
-# Known drift, tracked in GitLab #38: since 2026-11-05 the sandbox account holds
-# SSL.com-validated domains whose DCV payload carries recordName/recordValue/
-# validatedBy/caStatus/options/optionId and no legacy token or host key, so
-# DcvInfo.from_wire() returns an empty token and host for them. strict=True makes
-# this XPASS-fail the moment #38 models those keys, forcing the marker's removal.
-@pytest.mark.xfail(
-    strict=True,
-    reason="#38: SSL.com DCV payload keys are not modelled by DcvInfo.from_wire()",
-)
 def test_probe_r08_dcv_payload_keys(probe_env: str, client: CertiNextClient, baseline_domains: list[Domain]) -> None:
     """R08: domain DCV payloads carry no key the library fails to model.
 
@@ -368,13 +359,21 @@ def test_probe_r08_dcv_payload_keys(probe_env: str, client: CertiNextClient, bas
     So the assertion is inverted onto the condition that *would* be drift: a key
     the library does not model. A renamed or re-nested token field shows up as an
     unmodelled key, which fails loudly here; a merely-absent token skips.
+
+    Non-emSign domains (``validatedBy`` present -- SSL.com since 2026-11-05,
+    GitLab #38) carry no token key by design; their challenge is
+    ``recordName``/``recordValue``. For those the probe instead requires that
+    :meth:`DcvInfo.from_wire` yields a non-empty ``record_value``, which is the
+    silent-empty-challenge failure #38 fixed.
     """
     _sandbox_only(probe_env)
     token_keys = {"txtToken", "fileToken", "token", "dnsContents"}
     host_keys = {"dnsHost", "host"}
+    multi_ca_keys = {"validatedBy", "caStatus", "recordName", "recordValue", "optionId", "options"}
     # Every key from_wire() consumes, plus those the models tolerate. Anything
     # outside this set is a payload change nobody has modelled yet.
-    known_keys = token_keys | host_keys | {"method", "dcvMethod", "tokenExpiry"}
+    known_keys = token_keys | host_keys | multi_ca_keys | {"method", "dcvMethod", "tokenExpiry"}
+    empty_challenge: list[str] = []
 
     # PENDING domains are the only ones that can carry a token, so scan them
     # first. dcv_status comes from the already-fetched list — no extra GETs.
@@ -390,6 +389,11 @@ def test_probe_r08_dcv_payload_keys(probe_env: str, client: CertiNextClient, bas
         extra = set(body) - known_keys
         if extra:
             unmodelled[str(domain.id)] = extra
+        info = DcvInfo.from_wire(body)
+        if not info.is_emsign:
+            if not info.record_value:
+                empty_challenge.append(f"{domain.id} ({info.ca})")
+            continue
         present_token = token_keys & set(body)
         if present_token:
             found_host = host_keys & set(body)
@@ -401,6 +405,10 @@ def test_probe_r08_dcv_payload_keys(probe_env: str, client: CertiNextClient, bas
         f"unmodelled key(s) in {probe_env} domain DCV payloads: "
         f"{ {k: sorted(v) for k, v in unmodelled.items()} } — DcvInfo.from_wire() ignores these, so a "
         "renamed or re-nested token field would be silently dropped. Update the model and this key set."
+    )
+    assert not empty_challenge, (
+        f"non-emSign domain DCV payload(s) parsed with an empty record_value in {probe_env}: "
+        f"{empty_challenge} - the challenge moved to a key DcvInfo.from_wire() does not read (#38)."
     )
     if not checked:
         pytest.skip("no domain DCV payloads retrievable")

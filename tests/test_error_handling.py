@@ -138,9 +138,14 @@ class TestDomainBadFieldData:
         assert result.startswith("Domain(")
 
     def test_to_row_with_missing_fields_returns_empty_strings(self, mock_client: MagicMock) -> None:
-        """to_row() returns empty strings for all missing fields."""
+        """to_row() returns empty strings for all missing fields.
+
+        ``validated_by`` is the exception: an absent ``validatedBy`` *means*
+        emSign on the wire (spec 2026-11-05), so it is derived, not missing.
+        """
         d = _domain(mock_client, {})
         row = d.to_row()
+        assert row.pop("validated_by") == "EMSIGN"
         assert all(v == "" for v in row.values())
 
     def test_to_row_with_null_name_returns_empty_string(self, mock_client: MagicMock) -> None:
