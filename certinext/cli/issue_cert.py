@@ -52,7 +52,12 @@ from certinext.cli._app import app
 from certinext.cli._shared import err_console, progress_disabled, session
 from certinext.cli_support import fatal_api_error, prompt_stderr
 from certinext.csr import CsrInfo
-from certinext.exceptions import CertiNextAPIError, CertiNextTimeoutError
+from certinext.exceptions import (
+    CertiNextAPIError,
+    CertiNextCreateTimeoutError,
+    CertiNextOrderRecoveryError,
+    CertiNextTimeoutError,
+)
 from certinext.session import CertiNextSession
 from certinext.ssl_certificates import (
     CertificateDownload,
@@ -425,6 +430,60 @@ _CREATE_ORDER_HINTS: dict[str, str] = {
     ),
 }
 """Next-step advice for ``EMS-xxx`` codes the order-create call can return."""
+
+
+def _handle_create_timeout(
+    sess: CertiNextSession, exc: CertiNextCreateTimeoutError, recover: bool
+) -> SslOrder:
+    """Deal with an order-create call that got no response in time.
+
+    The vendor may have created the order anyway, so re-sending the CSR would
+    fail as a duplicate (EMS-1099). With ``recover`` the single matching order
+    is adopted; otherwise the candidates are listed for the operator and
+    nothing is adopted.
+
+    Args:
+        sess: Active CertiNext session.
+        exc: The timeout raised by the create call.
+        recover: The ``--recover-on-timeout`` flag.
+
+    Returns:
+        The recovered order (only when ``recover`` is set and one order matched).
+
+    Raises:
+        SystemExit: With code 1 whenever no order is adopted.
+    """
+    log.error(
+        "No response to the certificate order; it may still have been created",
+        domain=exc.common_name, sent_at=exc.sent_at.isoformat(),
+    )
+    if recover:
+        log.info("Looking for the order (--recover-on-timeout)", domain=exc.common_name)
+        try:
+            return sess.ssl.recover_timed_out_create(exc)
+        except CertiNextOrderRecoveryError as rexc:
+            log.error(str(rexc), candidates=rexc.candidates)
+            raise SystemExit(1) from rexc
+        except CertiNextAPIError as aexc:
+            log.error("Order lookup failed", status_code=aexc.status_code)
+            raise SystemExit(1) from aexc
+    try:
+        candidates = sess.ssl.find_created_orders(exc.common_name, exc.sent_at)
+    except CertiNextAPIError as aexc:
+        log.error("Order lookup failed", status_code=aexc.status_code)
+        candidates = []
+    for c in candidates:
+        log.error(
+            "Possible order from this request - re-run with --order-id to resume it",
+            order_id=c.order_number, status=c.certificate_status,
+        )
+    if not candidates:
+        log.error(
+            "No order found yet; it can appear a few minutes later. Do not re-send this CSR - "
+            "check the portal, or re-run with --recover-on-timeout next time",
+            domain=exc.common_name,
+        )
+    raise SystemExit(1) from exc
 
 
 def _create_order(
@@ -945,6 +1004,15 @@ def issue_cert(
             "prompts before creating a new one. Set this flag in automated pipelines."
         ),
     ),
+    recover_on_timeout: bool = typer.Option(
+        False, "--recover-on-timeout",
+        help=(
+            "If the order request gets no response in time (the vendor may still "
+            "create the order), look for it for up to 3 minutes and continue with it "
+            "when exactly one new order for this domain is found. Without this flag "
+            "the candidates are listed and the command exits."
+        ),
+    ),
 ) -> None:
     """Submit a CSR to CertiNext and download the issued certificate.
 
@@ -1065,12 +1133,15 @@ def issue_cert(
                     domain=effective_domain,
                     sans_count=len(sans) if sans else 0,
                 )
-                order = _create_order(
-                    sess, values,
-                    domain=effective_domain, sans=sans,
-                    auto_secure_www=auto_secure_www,
-                    prevetting_token=resolved_token, csr=csr,
-                )
+                try:
+                    order = _create_order(
+                        sess, values,
+                        domain=effective_domain, sans=sans,
+                        auto_secure_www=auto_secure_www,
+                        prevetting_token=resolved_token, csr=csr,
+                    )
+                except CertiNextCreateTimeoutError as exc:
+                    order = _handle_create_timeout(sess, exc, recover_on_timeout)
                 log.info("Created order", order_id=order.order_id, status=order.status)
 
         # ------------------------------------------------------------------

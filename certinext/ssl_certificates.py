@@ -66,12 +66,20 @@ with the initial order or separately via ``PUT /ssl-certificates/{orderId}/csr``
 
 import time
 from collections.abc import Callable
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any
 
+import httpx
 import structlog
 
 from .client import CertiNextClient
-from .exceptions import CertiNextAPIError, CertiNextTimeoutError  # noqa: F401 — referenced in Raises docstrings
+from .exceptions import (  # noqa: F401 — CertiNextAPIError/CertiNextTimeoutError referenced in Raises docstrings
+    CertiNextAPIError,
+    CertiNextCreateTimeoutError,
+    CertiNextOrderRecoveryError,
+    CertiNextTimeoutError,
+)
+from .models.orders import OrderRecord
 from .models.ssl_certificates import (
     _SSL_BASE,
     CertificateDownload,
@@ -81,6 +89,7 @@ from .models.ssl_certificates import (
     SslOrder,
     SslOrderStatus,
 )
+from .orders import OrderAccessor
 
 __all__ = [
     "CertificateDownload",
@@ -163,11 +172,101 @@ class SslAccessor:
 
         Returns:
             :class:`SslOrder` wrapping the API response.
+
+        Raises:
+            CertiNextCreateTimeoutError: When the POST gets no response within
+                the client's ``create_timeout``. The order may still exist; see
+                :meth:`find_created_orders` / :meth:`recover_timed_out_create`.
         """
         log.debug("POST ssl-certificates", body=body, product_code=product_code)
         extra_headers = {"X-Product-Code": product_code} if product_code else None
-        data = self._client.post(_SSL_BASE, json=body, extra_headers=extra_headers)
+        sent_at = datetime.now(timezone.utc)
+        try:
+            data = self._client.post(
+                _SSL_BASE, json=body, extra_headers=extra_headers, timeout=self._client.create_timeout,
+            )
+        except httpx.ReadTimeout as exc:
+            # The request was sent; only the response is missing. Connect/write
+            # timeouts mean it never fully arrived, so they propagate unchanged.
+            common_name = str((body.get("certificate") or {}).get("domain") or "")
+            log.warning(
+                "Certificate order timed out; it may still have been created",
+                domain=common_name, sent_at=sent_at.isoformat(),
+            )
+            raise CertiNextCreateTimeoutError(
+                common_name, sent_at, body.get("productVariant"), request=getattr(exc, "_request", None),
+            ) from exc
         return SslOrder.from_payload(self._client, data)
+
+    def find_created_orders(
+        self,
+        common_name: str,
+        sent_at: datetime,
+        *,
+        clock_skew: timedelta = timedelta(minutes=1),
+    ) -> list[OrderRecord]:
+        """List orders for ``common_name`` placed at or after ``sent_at``.
+
+        One lookup, no waiting, nothing adopted — use it to show a person the
+        candidates after a :class:`~certinext.exceptions.CertiNextCreateTimeoutError`.
+
+        Args:
+            common_name: The order's primary domain (CN), case-insensitive.
+            sent_at: Timezone-aware time the create request was sent.
+            clock_skew: Allowance for client/server clock difference.
+
+        Returns:
+            Matching :class:`~certinext.orders.OrderRecord` rows, oldest first.
+
+        Raises:
+            CertiNextAPIError: On a non-2xx API response.
+        """
+        cutoff = sent_at - clock_skew
+        rows = OrderAccessor(self._client).find_by_domain(common_name, status=None)
+        matches = [r for r in rows if r.order_number and r.order_date is not None and r.order_date >= cutoff]
+        return sorted(matches, key=lambda r: r.order_date or cutoff)
+
+    def recover_timed_out_create(
+        self,
+        exc: CertiNextCreateTimeoutError,
+        *,
+        wait: float = 180.0,
+        interval: float = 10.0,
+        clock_skew: timedelta = timedelta(minutes=1),
+    ) -> SslOrder:
+        """Find and return the order a timed-out create request produced.
+
+        Opt-in: call it only where adopting the order is safe for you — e.g.
+        when the CN is unique to this run. Polls :meth:`find_created_orders`
+        because the order can appear after the timeout. Never guesses: zero or
+        several candidates raise.
+
+        Args:
+            exc: The error raised by the create call.
+            wait: Seconds to keep looking before giving up.
+            interval: Seconds between lookups.
+            clock_skew: Allowance for client/server clock difference.
+
+        Returns:
+            The single matching :class:`SslOrder`, freshly fetched.
+
+        Raises:
+            CertiNextOrderRecoveryError: When no order, or more than one,
+                matches. ``.candidates`` lists the order numbers.
+            CertiNextAPIError: On a non-2xx API response.
+        """
+        deadline = time.monotonic() + wait
+        while True:
+            matches = self.find_created_orders(exc.common_name, exc.sent_at, clock_skew=clock_skew)
+            if len(matches) > 1:
+                raise CertiNextOrderRecoveryError(exc.common_name, [str(m.order_number) for m in matches])
+            if len(matches) == 1:
+                order_number = str(matches[0].order_number)
+                log.warning("Recovered timed-out order", domain=exc.common_name, order_number=order_number)
+                return self.get(order_number)
+            if time.monotonic() >= deadline:
+                raise CertiNextOrderRecoveryError(exc.common_name, [])
+            time.sleep(interval)
 
     @staticmethod
     def _build_body(

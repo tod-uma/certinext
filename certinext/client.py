@@ -30,6 +30,30 @@ from .exceptions import (
 #: generous because report/list endpoints can be slow server-side.
 _TIMEOUT = httpx.Timeout(10.0, read=60.0)
 
+#: Read timeout for certificate creation (``POST /ssl-certificates``). The
+#: vendor can take over a minute to answer it while still creating (and even
+#: issuing) the order — observed in the sandbox on 2026-11-06 — so it gets a
+#: longer limit than every other call. Override with ``create_timeout=``.
+_CREATE_TIMEOUT = httpx.Timeout(10.0, read=180.0)
+
+TimeoutSpec = httpx.Timeout | float
+"""A timeout setting: an :class:`httpx.Timeout`, or seconds applied to every phase."""
+
+
+def _as_timeout(value: TimeoutSpec | None, default: httpx.Timeout) -> httpx.Timeout:
+    """Normalise a user-supplied timeout.
+
+    Args:
+        value: An :class:`httpx.Timeout`, a number of seconds, or ``None``.
+        default: Returned when ``value`` is ``None``.
+
+    Returns:
+        The resolved :class:`httpx.Timeout`.
+    """
+    if value is None:
+        return default
+    return value if isinstance(value, httpx.Timeout) else httpx.Timeout(float(value))
+
 
 def _bearer_token(resp: httpx.Response) -> str | None:
     """Return the bearer token a response's request was sent with.
@@ -65,7 +89,17 @@ class CertiNextClient:
     caching transport can wrap the client later without touching accessors
     (wishlist IDEA-006). The token endpoint in :mod:`certinext.auth` is the
     one allowed exception.
+
+    Attributes:
+        timeout: Default timeout applied to every request.
+        create_timeout: Timeout for certificate creation
+            (``POST /ssl-certificates``) only.
     """
+
+    # Class-level defaults (overridden per instance in __init__) so that
+    # MagicMock(spec=CertiNextClient) in callers' tests exposes them.
+    timeout: httpx.Timeout = _TIMEOUT
+    create_timeout: httpx.Timeout = _CREATE_TIMEOUT
 
     def __init__(
         self,
@@ -74,6 +108,8 @@ class CertiNextClient:
         client_id: str,
         client_secret: str,
         scope: str = "",
+        timeout: TimeoutSpec | None = None,
+        create_timeout: TimeoutSpec | None = None,
     ) -> None:
         """
         Args:
@@ -82,12 +118,18 @@ class CertiNextClient:
             client_id: OAuth client ID (your CertiNext account number).
             client_secret: OAuth client secret.
             scope: Optional OAuth scope string.
+            timeout: Default timeout for every request — an
+                :class:`httpx.Timeout` or seconds. Default: 10s connect, 60s read.
+            create_timeout: Timeout for certificate creation only. Default:
+                10s connect, 180s read (the vendor can be slow to answer).
         """
         self.base_url = base_url.rstrip("/")
         self._auth = OAuth2ClientCredentials(token_url, client_id, client_secret, scope)
+        self.timeout = _as_timeout(timeout, _TIMEOUT)
+        self.create_timeout = _as_timeout(create_timeout, _CREATE_TIMEOUT)
         # follow_redirects matches the requests.Session default this client
         # was originally built on; httpx does not follow redirects by default.
-        self._session = httpx.Client(timeout=_TIMEOUT, follow_redirects=True)
+        self._session = httpx.Client(timeout=self.timeout, follow_redirects=True)
 
     def _headers(self) -> dict[str, str]:
         """Build request headers with a fresh bearer token."""
@@ -214,6 +256,7 @@ class CertiNextClient:
         path: str,
         json: dict[str, Any] | None = None,
         extra_headers: dict[str, str] | None = None,
+        timeout: httpx.Timeout | None = None,
     ) -> dict[str, Any]:
         """Send a POST request with an optional JSON body and return the parsed response.
 
@@ -222,18 +265,23 @@ class CertiNextClient:
             json: Optional request body to serialize as JSON.
             extra_headers: Optional additional HTTP headers to include (e.g.
                 ``{"X-Product-Code": "842"}`` for SSL certificate creation).
+            timeout: Per-request timeout; ``None`` uses the client default.
 
         Returns:
             Parsed JSON response as a dict.
 
         Raises:
             CertiNextAPIError: On a non-2xx response. Provides ``.status_code`` and ``.body``.
+            httpx.TimeoutException: When the request times out.
         """
+        # Only pass timeout when set, so the default call stays byte-identical.
+        kwargs: dict[str, Any] = {"timeout": timeout} if timeout is not None else {}
+
         def _req() -> httpx.Response:
             headers = self._headers()
             if extra_headers:
                 headers.update(extra_headers)
-            return self._session.post(f"{self.base_url}{path}", headers=headers, json=json)
+            return self._session.post(f"{self.base_url}{path}", headers=headers, json=json, **kwargs)
         resp = self._execute(_req)
         self._raise_api_error(resp)
         return cast(dict[str, Any], resp.json() if resp.content else {})

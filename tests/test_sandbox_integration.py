@@ -314,17 +314,23 @@ class TestCertIssuance:
         cn = f"certinext-ci-{job_id}.maine.edu"
         csr_pem = _generate_csr(cn)
 
-        order = sandbox_session.ssl.create_ov(
-            cn,
-            organization_id=sandbox_ov_creds["org_id"],
-            prevetting_token=sandbox_ov_creds["prevetting_token"],
-            requestor_name="CertiNext CI",
-            requestor_email="tod.detre@maine.edu",
-            requestor_phone="+12073708630",
-            signer_name="CertiNext CI",
-            signer_place="Orono, Maine",
-            csr=csr_pem,
-        )
+        try:
+            order = sandbox_session.ssl.create_ov(
+                cn,
+                organization_id=sandbox_ov_creds["org_id"],
+                prevetting_token=sandbox_ov_creds["prevetting_token"],
+                requestor_name="CertiNext CI",
+                requestor_email="tod.detre@maine.edu",
+                requestor_phone="+12073708630",
+                signer_name="CertiNext CI",
+                signer_place="Orono, Maine",
+                csr=csr_pem,
+            )
+        except certinext.CertiNextCreateTimeoutError as exc:
+            # The sandbox can take over the create timeout to answer while still
+            # creating the order (2026-11-06). The CN is unique to this job, so
+            # adopting the single match is safe here.
+            order = sandbox_session.ssl.recover_timed_out_create(exc)
 
         try:
             pem = OrderWorkflow(

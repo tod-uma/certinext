@@ -14,7 +14,7 @@
 
 from .accounts import AccountAccessor
 from .catalog import CatalogAccessor
-from .client import CertiNextClient
+from .client import CertiNextClient, TimeoutSpec
 from .domains import DomainAccessor
 from .ledger import LedgerAccessor
 from .orders import OrderAccessor
@@ -51,6 +51,8 @@ class CertiNextSession:
         client_secret: str = "",
         scope: str = "",
         sandbox: bool = False,
+        timeout: TimeoutSpec | None = None,
+        create_timeout: TimeoutSpec | None = None,
     ) -> None:
         """
         Args:
@@ -65,12 +67,19 @@ class CertiNextSession:
             sandbox: When ``True``, default ``base_url`` / ``token_url`` to the
                 sandbox endpoints. Callers can also read this attribute to adjust
                 behaviour without re-inspecting the base URL.
+            timeout: Default request timeout (:class:`httpx.Timeout` or
+                seconds). See :class:`~certinext.client.CertiNextClient`.
+            create_timeout: Timeout for certificate creation only. See
+                :class:`~certinext.client.CertiNextClient`.
         """
         from . import BASE_URL, SANDBOX_BASE_URL, SANDBOX_TOKEN_URL, TOKEN_URL
         self.sandbox = sandbox
         resolved_base = base_url or (SANDBOX_BASE_URL if sandbox else BASE_URL)
         resolved_token = token_url or (SANDBOX_TOKEN_URL if sandbox else TOKEN_URL)
-        self._client = CertiNextClient(resolved_base, resolved_token, client_id, client_secret, scope)
+        self._client = CertiNextClient(
+            resolved_base, resolved_token, client_id, client_secret, scope,
+            timeout=timeout, create_timeout=create_timeout,
+        )
         self.accounts = AccountAccessor(self._client)
         self.catalog = CatalogAccessor(self._client)
         self.domain = DomainAccessor(self._client)
