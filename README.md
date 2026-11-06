@@ -1223,6 +1223,10 @@ certinext issue-cert --order-id ORDER-ID --wait 600
 # Resume and supply the CSR (in case the order is still in pending-csr)
 certinext issue-cert --order-id ORDER-ID --csr example.com.csr
 
+# Unattended runs: if the order request gets no response in time, look for the
+# order it created and carry on with it (only when exactly one new order matches)
+certinext issue-cert example.com.csr --no-domain-check --recover-on-timeout
+
 # Capture the values used on this run as defaults for future runs
 certinext issue-cert example.com.csr --type ov --org-id 1234567 --save-defaults
 ```
@@ -1474,8 +1478,14 @@ sess = certinext.session(
     sandbox=False,      # True → use sandbox endpoints automatically
     base_url="",        # override; defaults to production (or sandbox when sandbox=True)
     token_url="",       # override; defaults to match base_url
+    timeout=None,       # httpx.Timeout or seconds; default 10s connect / 60s read
+    create_timeout=None,  # certificate creation only; default 10s connect / 180s read
 )
 ```
+
+Certificate creation (`POST /ssl-certificates`) gets its own, longer read
+timeout because the vendor can take over a minute to answer while still
+creating the order. See [A timed-out certificate order](#a-timed-out-certificate-order).
 
 When `sandbox=True`, `base_url` and `token_url` default to the sandbox endpoints
 (`https://sandbox-us-api.certinext.io`). Explicit `base_url` / `token_url` values
@@ -2260,6 +2270,36 @@ except httpx.HTTPError as exc:        # timeout, DNS, connection refused, ...
 > catch `CertiNextAPIError` for API errors and `httpx.HTTPError` for
 > transport failures, as above. Code that already caught `CertiNextAPIError`
 > needs no changes.
+
+#### A timed-out certificate order
+
+When a create call (`sess.ssl.create_dv()`, `create_ov()`, ...) gets no
+response within `create_timeout`, it raises `CertiNextCreateTimeoutError`.
+The request reached the vendor, so **the order may exist** — it can even be
+issued — and re-sending the same CSR fails as a duplicate (EMS-1099). The
+error subclasses `httpx.ReadTimeout`, so an existing `except httpx.HTTPError`
+still catches it, and it carries `.common_name` and `.sent_at`.
+
+Nothing is recovered automatically. Two opt-in helpers:
+
+```python
+from certinext import CertiNextCreateTimeoutError, CertiNextOrderRecoveryError
+
+try:
+    order = sess.ssl.create_dv("host.example.edu", csr=csr_pem)
+except CertiNextCreateTimeoutError as exc:
+    # Look only: orders for this CN placed since the request (1 min clock skew).
+    for row in sess.ssl.find_created_orders(exc.common_name, exc.sent_at):
+        print("candidate:", row.order_number, row.certificate_status)
+
+    # Or adopt: polls up to `wait` seconds, returns the single match,
+    # raises CertiNextOrderRecoveryError (with .candidates) on zero or several.
+    order = sess.ssl.recover_timed_out_create(exc, wait=180)
+```
+
+Adopt only when the CN identifies this request — two orders for the same
+name in the same minute are indistinguishable. A connect or write timeout
+is *not* converted: the request never fully arrived, so no order exists.
 
 ---
 

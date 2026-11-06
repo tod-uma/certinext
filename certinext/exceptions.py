@@ -15,10 +15,10 @@
 """CertiNext exception classes."""
 
 import re
-from typing import TYPE_CHECKING, Any, Optional
+from datetime import datetime
+from typing import Any, Optional
 
-if TYPE_CHECKING:
-    import httpx
+import httpx
 
 
 class CertiNextAPIError(Exception):
@@ -196,3 +196,75 @@ class CertiNextConflictError(CertiNextAPIError):
         if isinstance(self.body, dict):
             return self.body.get("existingDomainId")
         return None
+
+
+class CertiNextCreateTimeoutError(httpx.ReadTimeout):
+    """Raised when a certificate-creation POST gets no response in time.
+
+    The request reached the server, so the order **may already exist** — the
+    vendor can create (and even issue) it after the client stops waiting.
+    Re-sending the same CSR then fails as a duplicate (EMS-1099). Look the
+    order up instead: :meth:`~certinext.ssl_certificates.SslAccessor.find_created_orders`
+    lists candidates, and
+    :meth:`~certinext.ssl_certificates.SslAccessor.recover_timed_out_create`
+    adopts exactly one match. Neither runs automatically.
+
+    Subclasses :class:`httpx.ReadTimeout`, so existing ``except
+    httpx.ReadTimeout`` / ``httpx.TimeoutException`` / ``httpx.HTTPError``
+    handlers still catch it.
+
+    Attributes:
+        common_name: The primary domain (CN) the order was created for.
+        sent_at: Timezone-aware UTC time just before the POST was sent.
+        product_variant: The ``productVariant`` of the request, if known.
+    """
+
+    def __init__(
+        self,
+        common_name: str,
+        sent_at: datetime,
+        product_variant: str | None = None,
+        *,
+        request: Optional["httpx.Request"] = None,
+    ) -> None:
+        """
+        Args:
+            common_name: The primary domain (CN) of the timed-out order.
+            sent_at: Timezone-aware UTC time just before the POST was sent.
+            product_variant: The request's ``productVariant``, if known.
+            request: The timed-out :class:`httpx.Request`, if available.
+        """
+        self.common_name = common_name
+        self.sent_at = sent_at
+        self.product_variant = product_variant
+        super().__init__(
+            f"No response to the certificate order for {common_name!r} (sent "
+            f"{sent_at.isoformat()}); the order may still have been created. Look it "
+            "up with SslAccessor.find_created_orders() or recover_timed_out_create() "
+            "rather than re-sending the CSR.",
+            request=request,
+        )
+
+
+class CertiNextOrderRecoveryError(LookupError):
+    """Raised when a timed-out order cannot be identified unambiguously.
+
+    Attributes:
+        common_name: The CN that was searched for.
+        candidates: Order numbers that matched (empty when none did). More
+            than one means the caller must choose; this library never guesses.
+    """
+
+    def __init__(self, common_name: str, candidates: list[str]) -> None:
+        """
+        Args:
+            common_name: The CN that was searched for.
+            candidates: Matching order numbers (possibly empty).
+        """
+        self.common_name = common_name
+        self.candidates = candidates
+        if candidates:
+            detail = f"{len(candidates)} candidate orders: {', '.join(candidates)}; choose one by order number"
+        else:
+            detail = "no order was found (the vendor may not have created it)"
+        super().__init__(f"Could not recover the order for {common_name!r}: {detail}")

@@ -80,6 +80,12 @@
 │                                                   command queries issued and in-progress orders  │
 │                                                   and prompts before creating a new one. Set     │
 │                                                   this flag in automated pipelines.              │
+│ --recover-on-timeout                              If the order request gets no response in time  │
+│                                                   (the vendor may still create the order), look  │
+│                                                   for it for up to 3 minutes and continue with   │
+│                                                   it when exactly one new order for this domain  │
+│                                                   is found. Without this flag the candidates are │
+│                                                   listed and the command exits.                  │
 │ --help                                            Show this message and exit.                    │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 

@@ -50,7 +50,7 @@ Errors:
 
 from .accounts import AccountAccessor, AccountInfo, Group, Organization
 from .catalog import CatalogAccessor, CustomField, Product, ProductCategory
-from .client import CertiNextClient
+from .client import CertiNextClient, TimeoutSpec
 from .csr import CsrInfo
 from .domains import (
     VALID_DCV_METHODS,
@@ -68,7 +68,9 @@ from .domains import (
 from .exceptions import (
     CertiNextAPIError,
     CertiNextConflictError,
+    CertiNextCreateTimeoutError,
     CertiNextNotFoundError,
+    CertiNextOrderRecoveryError,
     CertiNextRateLimitError,
     CertiNextTimeoutError,
 )
@@ -119,6 +121,8 @@ def session(
     client_secret: str = "",
     scope: str = "",
     sandbox: bool = False,
+    timeout: TimeoutSpec | None = None,
+    create_timeout: TimeoutSpec | None = None,
 ) -> CertiNextSession:
     """Create and return a new `CertiNextSession`.
 
@@ -140,13 +144,21 @@ def session(
         scope: Optional OAuth scope string. Leave empty if not required.
         sandbox: When ``True``, connect to the sandbox environment and default
             ``base_url`` / ``token_url`` to the sandbox endpoints.
+        timeout: Default request timeout — an :class:`httpx.Timeout` or
+            seconds. Default: 10s connect, 60s read.
+        create_timeout: Timeout for certificate creation only. Default: 10s
+            connect, 180s read, because the vendor can take over a minute to
+            answer while still creating the order.
 
     Returns:
         A configured `CertiNextSession` ready to make API calls.
     """
     resolved_base = base_url or (SANDBOX_BASE_URL if sandbox else BASE_URL)
     resolved_token = token_url or (SANDBOX_TOKEN_URL if sandbox else TOKEN_URL)
-    return CertiNextSession(resolved_base, resolved_token, client_id, client_secret, scope, sandbox)
+    return CertiNextSession(
+        resolved_base, resolved_token, client_id, client_secret, scope, sandbox,
+        timeout=timeout, create_timeout=create_timeout,
+    )
 
 
 __all__ = [
@@ -164,8 +176,11 @@ __all__ = [
     "CertiNextNotFoundError",
     "CertiNextRateLimitError",
     "CertiNextTimeoutError",
+    "CertiNextCreateTimeoutError",
+    "CertiNextOrderRecoveryError",
     # Core
     "CertiNextClient",
+    "TimeoutSpec",
     "CertiNextSession",
     # Accounts
     "AccountAccessor",
