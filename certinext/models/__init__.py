@@ -25,8 +25,11 @@ from .accounts import AccountInfo, Group, Organization
 from .catalog import CustomField, Product, ProductCategory
 from .domains import (
     VALID_DCV_METHODS,
+    CaStatus,
+    CertificateAuthority,
     DcvInfo,
     DcvMethod,
+    DcvOption,
     DcvStatus,
     DcvVerifyResult,
     Domain,
@@ -57,8 +60,11 @@ __all__ = [
     "CertificateStatus",
     "OrderRecord",
     "VALID_DCV_METHODS",
+    "CaStatus",
+    "CertificateAuthority",
     "DcvInfo",
     "DcvMethod",
+    "DcvOption",
     "DcvStatus",
     "DcvVerifyResult",
     "Domain",

@@ -51,10 +51,23 @@ trust the OpenAPI spec.
 `GET /api/certinext/v2/domains`'s default sort order (`createdAt desc`) is
 not a documented stable total order across `offset` pages — vendor-confirmed;
 looping raw `offset`/`limit` under it can skip or duplicate rows. `domainName`
-is a documented, unique `sortBy` value, so `DomainAccessor.get_list()` pages
-under `sortBy=domainName&sortDir=asc` whenever it's asked for the whole
-account (no `offset`/`limit` given). Only pass `offset`/`limit` explicitly
-when you want one raw server page and can tolerate the default ordering.
+is a documented `sortBy` value, so `DomainAccessor.get_list()` pages under
+`sortBy=domainName&sortDir=asc` whenever it's asked for the whole account
+(no `offset`/`limit` given). Only pass `offset`/`limit` explicitly when you
+want one raw server page and can tolerate the default ordering.
+
+**`domainName` stopped being unique in November 2026 (GitLab #38).** An
+organization can now hold the same name once per CA (emSign + SSL.com, with
+more CAs planned). Two rows tied on a name can swap across a page boundary
+and one of them is silently skipped. `_get_all_domains()` therefore
+re-fetches every name that sits on a page boundary with
+`search=<name>&exactMatch=true` (in both prod and sandbox specs) and merges
+the results by id. That costs one extra GET per 200 rows. Don't remove it as
+redundant.
+
+**`validatedBy` list filter** was in the sandbox spec only as of 2026-11-05.
+`get_list(validated_by=...)` sends it and then filters again client-side,
+because a prod that ignored it would return rows from every CA.
 
 ## Filing a new issue
 

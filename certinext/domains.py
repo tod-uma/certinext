@@ -22,8 +22,11 @@ from .exceptions import CertiNextAPIError  # noqa: F401 — referenced in Raises
 from .models.domains import (
     _BASE,
     VALID_DCV_METHODS,
+    CaStatus,
+    CertificateAuthority,
     DcvInfo,
     DcvMethod,
+    DcvOption,
     DcvStatus,
     DcvVerifyResult,
     Domain,
@@ -32,8 +35,11 @@ from .models.domains import (
 
 __all__ = [
     "VALID_DCV_METHODS",
+    "CaStatus",
+    "CertificateAuthority",
     "DcvInfo",
     "DcvMethod",
+    "DcvOption",
     "DcvStatus",
     "DcvVerifyResult",
     "Domain",
@@ -50,10 +56,14 @@ log = structlog.get_logger()
 # offset/limit pages under the API's default sort, which vendor-confirmed is
 # not a stable total order across offset values (tracked as issue #1 on UMS's
 # private GitLab instance at gitlab.its.maine.edu -- not the public GitHub
-# mirror's tracker, and not visible outside UMS). domainName is a unique,
-# documented sortBy value instead, so paging under it is a stable total order
-# regardless of account size; _LIST_PAGE_SIZE bounds each request (the API
-# docs recommend limit <=200).
+# mirror's tracker, and not visible outside UMS). domainName is a documented
+# sortBy value instead, so paging under it is a stable order regardless of
+# account size; _LIST_PAGE_SIZE bounds each request (the API docs recommend
+# limit <=200). domainName stopped being *unique* when the vendor let an
+# organization hold the same name once per CA (GitLab #38): rows tied on a name
+# can swap across a page boundary, skipping one. _get_all_domains() therefore
+# re-fetches every name sitting on a page boundary with an exact search and
+# merges by id.
 _LIST_PAGE_SIZE = 200
 # Defensive ceiling on the number of pages get_list() will walk before giving
 # up, in case pagination ever regresses to non-terminating drift. At
@@ -80,6 +90,37 @@ def _extract_domain_rows(result: dict[str, Any] | list[Any]) -> list[Any]:
         if isinstance(val, list):
             return val
     return []
+
+
+def _filter_params(
+    search: str | None,
+    domain_status: str | None,
+    dcv_status: str | None,
+    validated_by: str | None,
+) -> dict[str, Any]:
+    """Build the server-side filter params shared by the list paths.
+
+    Args:
+        search: ``search`` filter, or ``None`` to omit.
+        domain_status: ``domainStatus`` filter, or ``None`` to omit.
+        dcv_status: ``dcvStatus`` filter, or ``None`` to omit.
+        validated_by: ``validatedBy`` CA filter, or ``None`` to omit. Passed
+            through upper-cased without checking against known CAs, so a
+            vendor-added CA works without a library release.
+
+    Returns:
+        A dict holding only the filters that were given.
+    """
+    params: dict[str, Any] = {}
+    if search is not None:
+        params["search"] = search
+    if domain_status is not None:
+        params["domainStatus"] = domain_status
+    if dcv_status is not None:
+        params["dcvStatus"] = dcv_status
+    if validated_by is not None:
+        params["validatedBy"] = validated_by.upper()
+    return params
 
 
 def filter_needs_dcv(
@@ -146,6 +187,7 @@ class DomainAccessor:
         domain_status: str | None = None,
         dcv_status: str | None = None,
         pattern: str | None = None,
+        validated_by: str | None = None,
     ) -> list[Domain]:
         """Return a list of all domains in the account.
 
@@ -193,6 +235,12 @@ class DomainAccessor:
                 (``".*\\.maine\\.edu"``), or anchored exact match. For plain
                 substring filtering, prefer ``search`` — it's server-side and
                 reduces the data transferred.
+            validated_by: Server-side CA filter, e.g. ``"SSLCOM"`` or
+                ``"EMSIGN"`` (see :data:`CertificateAuthority`; verified in
+                the sandbox 2026-11-06, GitLab #38). Any string is passed
+                through, so future CAs need no library change. An
+                organization may hold the same name once per CA, so without
+                this filter a name can appear more than once.
 
         Returns:
             List of `Domain` objects.
@@ -201,10 +249,16 @@ class DomainAccessor:
             re.error: If ``pattern`` is not a valid regular expression.
             CertiNextAPIError: On a non-2xx API response. Provides ``.status_code`` and ``.body``.
         """
+        filters = _filter_params(search, domain_status, dcv_status, validated_by)
         if offset is None and limit is None:
-            domains = self._get_all_domains(search, domain_status, dcv_status)
+            domains = self._get_all_domains(filters)
         else:
-            domains = self._get_domains_page(offset, limit, search, domain_status, dcv_status)
+            domains = self._get_domains_page(offset, limit, filters)
+        if validated_by is not None:
+            # Also filter client-side: prod's spec lacked the validatedBy filter
+            # as of 2026-11-05, and an ignored filter would return every CA's rows.
+            wanted = validated_by.strip().upper()
+            domains = [d for d in domains if d.ca == wanted]
         if pattern is not None:
             domains = [d for d in domains if re.fullmatch(pattern, d.name or "", re.IGNORECASE)]
         return domains
@@ -213,18 +267,14 @@ class DomainAccessor:
         self,
         offset: int | None,
         limit: int | None,
-        search: str | None,
-        domain_status: str | None,
-        dcv_status: str | None,
+        filters: dict[str, Any],
     ) -> list[Domain]:
         """Fetch a single raw server page, under whichever ordering the API applies by default.
 
         Args:
             offset: 0-based row offset, or ``None`` to omit.
             limit: Page size, or ``None`` to omit.
-            search: Server-side ``search`` filter, or ``None`` to omit.
-            domain_status: Server-side ``domainStatus`` filter, or ``None`` to omit.
-            dcv_status: Server-side ``dcvStatus`` filter, or ``None`` to omit.
+            filters: Server-side filter params from :func:`_filter_params`.
 
         Returns:
             List of `Domain` objects for that one page.
@@ -234,62 +284,56 @@ class DomainAccessor:
             params["offset"] = offset
         if limit is not None:
             params["limit"] = limit
-        if search is not None:
-            params["search"] = search
-        if domain_status is not None:
-            params["domainStatus"] = domain_status
-        if dcv_status is not None:
-            params["dcvStatus"] = dcv_status
+        params.update(filters)
         result = self._client.get(_BASE, params=params or None)
         return [Domain.from_payload(self._client, item) for item in _extract_domain_rows(result)]
 
-    def _get_all_domains(
-        self,
-        search: str | None,
-        domain_status: str | None,
-        dcv_status: str | None,
-    ) -> list[Domain]:
+    def _get_all_domains(self, filters: dict[str, Any]) -> list[Domain]:
         """Fetch every domain in the account via stable sortBy=domainName offset paging.
 
         Args:
-            search: Server-side ``search`` filter, or ``None`` to omit.
-            domain_status: Server-side ``domainStatus`` filter, or ``None`` to omit.
-            dcv_status: Server-side ``dcvStatus`` filter, or ``None`` to omit.
+            filters: Server-side filter params from :func:`_filter_params`.
 
         Returns:
             List of `Domain` objects for the whole account, de-duplicated by
-            id (or name, if id is absent) as a defensive measure against any
-            residual server-side ordering drift.
+            id (or CA + name, if id is absent) as a defensive measure against any
+            residual server-side ordering drift. Two records sharing a name
+            (one per CA) have distinct ids, so both are kept.
         """
         params: dict[str, Any] = {
             "sortBy": "domainName",
             "sortDir": "asc",
             "limit": _LIST_PAGE_SIZE,
+            **filters,
         }
-        if search is not None:
-            params["search"] = search
-        if domain_status is not None:
-            params["domainStatus"] = domain_status
-        if dcv_status is not None:
-            params["dcvStatus"] = dcv_status
 
         domains: list[Domain] = []
         seen: set[str] = set()
+
+        def _add(items: list[Any]) -> None:
+            for item in items:
+                domain = Domain.from_payload(self._client, item)
+                # Without an id, key on CA + name: the same name is legitimately
+                # held once per CA, and a bare-name key would collapse them.
+                key = domain.id or f"{domain.ca}:{(domain.name or '').lower()}"
+                if key in seen:
+                    continue
+                seen.add(key)
+                domains.append(domain)
+
+        boundary_names: set[str] = set()
         offset = 0
         for _ in range(_MAX_LIST_PAGES):
             result = self._client.get(_BASE, params={**params, "offset": offset})
             raw = _extract_domain_rows(result)
             if not raw:
                 break
-            for item in raw:
-                domain = Domain.from_payload(self._client, item)
-                key = domain.id or domain.name or ""
-                if key in seen:
-                    continue
-                seen.add(key)
-                domains.append(domain)
+            _add(raw)
             if len(raw) < _LIST_PAGE_SIZE:
                 break
+            last = raw[-1]
+            if isinstance(last, dict) and last.get("domainName"):
+                boundary_names.add(str(last["domainName"]))
             offset += _LIST_PAGE_SIZE
         else:
             log.warning(
@@ -297,6 +341,27 @@ class DomainAccessor:
                 pages=_MAX_LIST_PAGES,
                 count=len(domains),
             )
+
+        # A name held once per CA ties under sortBy=domainName; a tie straddling
+        # a page boundary can drop a row. Re-fetch each boundary name exactly.
+        for name in sorted(boundary_names):
+            result = self._client.get(
+                _BASE,
+                params={**filters, "search": name, "exactMatch": "true", "limit": _LIST_PAGE_SIZE},
+            )
+            rows = _extract_domain_rows(result)
+            if len(rows) >= _LIST_PAGE_SIZE:
+                # One row per CA per name means this cannot fill a page today;
+                # if it ever does, tied rows past the page may be missing.
+                log.warning(
+                    "exact-match boundary re-fetch filled a whole page; results may be incomplete",
+                    domain=name,
+                    count=len(rows),
+                )
+            _add([
+                r for r in rows
+                if isinstance(r, dict) and str(r.get("domainName", "")).lower() == name.lower()
+            ])
         return domains
 
     def get_pending_dcv(self, search: str | None = None, pattern: str | None = None) -> list[Domain]:
@@ -330,15 +395,23 @@ class DomainAccessor:
         domains = self.get_list(search=search, domain_status="ACTIVE", pattern=pattern)
         return [d for d in domains if d.needs_dcv]
 
-    def get(self, domain_id_or_name: str) -> Domain:
+    def get(self, domain_id_or_name: str, validated_by: str | None = None) -> Domain:
         """Return a single domain by ID or by fully-qualified domain name.
 
         The lookup strategy depends on whether the argument contains a dot:
 
         - **Contains a dot** (e.g. ``maine.edu``): treated as a domain name.
-          All domains are fetched and the first case-insensitive match is returned.
+          All domains are fetched and the case-insensitive matches considered.
         - **No dot** (e.g. ``"dom-abc-123"``): treated as an opaque ID and the
           single-domain endpoint is called directly.
+
+        **One name, several CAs.** An organization may hold the same name once
+        per CA (GitLab #38), so a name can match more than one record. Pass
+        ``validated_by`` to pick one. Without it: a single match is returned
+        as before; with several, the emSign record is returned (the behavior
+        callers had before other CAs existed) and a warning lists the others;
+        with several and no emSign record among them, ``ValueError`` is raised
+        rather than guessing between non-emSign CAs.
 
         **Edge case:** if a domain ID itself contains a dot, pass it via
         :meth:`get_list` and filter on :attr:`Domain.id` directly to avoid the
@@ -346,21 +419,42 @@ class DomainAccessor:
 
         Args:
             domain_id_or_name: A domain name (e.g. ``maine.edu``) or a domain ID.
+            validated_by: For a name lookup, only consider the record validated
+                by this CA (e.g. ``"SSLCOM"``, ``"EMSIGN"``). Ignored for an ID
+                lookup, which is already unambiguous.
 
         Returns:
             The matching `Domain` object.
 
         Raises:
             KeyError: If a name lookup finds no matching domain.
-            ValueError: If the API returns an unexpected response type for an ID lookup.
+            ValueError: If a name matches several non-emSign records and
+                ``validated_by`` was not given, or the API returns an
+                unexpected response type for an ID lookup.
             CertiNextAPIError: On a non-2xx API response. Provides ``.status_code`` and ``.body``.
         """
         if "." in domain_id_or_name:
             name = domain_id_or_name.lower()
-            for domain in self.get_list():
-                if (domain.name or "").lower() == name:
-                    return domain
-            raise KeyError(f"No domain found with name {domain_id_or_name!r}")
+            matches = [d for d in self.get_list(validated_by=validated_by) if (d.name or "").lower() == name]
+            if not matches:
+                suffix = f" validated by {validated_by.upper()}" if validated_by else ""
+                raise KeyError(f"No domain found with name {domain_id_or_name!r}{suffix}")
+            if len(matches) == 1:
+                return matches[0]
+            cas = sorted(d.ca for d in matches)
+            emsign = [d for d in matches if d.is_emsign]
+            if len(emsign) == 1:
+                log.warning(
+                    "domain name has one record per CA; returning the emSign record "
+                    "(pass validated_by= to choose)",
+                    domain=domain_id_or_name,
+                    cas=cas,
+                )
+                return emsign[0]
+            raise ValueError(
+                f"Domain name {domain_id_or_name!r} matches {len(matches)} records (CAs: {cas}); "
+                "pass validated_by= to choose one"
+            )
         result = self._client.get(f"{_BASE}/{domain_id_or_name}")
         if not isinstance(result, dict):
             raise ValueError(f"Unexpected list response for domain {domain_id_or_name!r}")
@@ -372,6 +466,7 @@ class DomainAccessor:
         organization_id: str | None = None,
         dcv_method: str | None = None,
         mode: str | None = None,
+        ca: str | None = None,
     ) -> Domain:
         """Create a new domain, or renew an existing independently-verified one.
 
@@ -384,6 +479,14 @@ class DomainAccessor:
                 existing same-org domain with 409. ``"renew"`` renews an existing,
                 independently-verified (ADN) domain that is expired or within its
                 renewal window — inherited domains cannot be renewed this way.
+            ca: Certificate authority to validate the domain (e.g.
+                ``"EMSIGN"``, ``"SSLCOM"`` — see :data:`CertificateAuthority`;
+                any string is passed through for future CAs). **When omitted
+                the account decides** — SSL.com on an account that uses
+                SSL.com, else emSign — so pass it explicitly when the DCV flow
+                that follows depends on the CA. The organization may hold the
+                same name once per CA. A CA the account doesn't use returns
+                422; SSL.com failing to register the domain returns 502.
 
         Returns:
             The created or renewed :class:`Domain`.
@@ -398,6 +501,8 @@ class DomainAccessor:
             body["dcvMethod"] = dcv_method
         if mode is not None:
             body["mode"] = mode
+        if ca is not None:
+            body["ca"] = ca.upper()
         return Domain.from_payload(self._client, self._client.post(_BASE, json=body))
 
     def deactivate(self, domain_id: str) -> Domain:
