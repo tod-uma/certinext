@@ -22,7 +22,7 @@ Wire shapes are validated leniently per ADR 0005; see
 
 from collections.abc import Iterable
 from datetime import datetime, timedelta, timezone
-from typing import Any, Literal, cast
+from typing import Any, Literal
 
 import structlog
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
@@ -75,16 +75,31 @@ SSLCOM: str = "SSLCOM"
 """Wire value of ``validatedBy`` for a domain SSL.com validates."""
 
 
+UNKNOWN_CA: str = "UNKNOWN"
+"""CA name reported when ``validatedBy`` is present but blank.
+
+The spec says an *absent* key means emSign; a present empty or
+whitespace-only value is malformed and is not trusted to mean emSign, so
+:attr:`Domain.is_emsign` is ``False`` and emSign-only writes fail closed."""
+
+
 def _normalise_ca(validated_by: str | None) -> str:
     """Map a wire ``validatedBy`` value to a CA name.
+
+    ``None`` (key absent, or JSON ``null``) means emSign, per the spec. JSON
+    ``null`` is treated like absence because many serializers emit an unset
+    field as ``null``; refusing it would break every emSign write.
 
     Args:
         validated_by: The raw ``validatedBy`` value, or ``None`` when absent.
 
     Returns:
-        The upper-cased CA name, or :data:`EMSIGN` when absent/empty.
+        :data:`EMSIGN` when ``None``; :data:`UNKNOWN_CA` when present but
+        blank; otherwise the stripped, upper-cased CA name.
     """
-    return (validated_by or "").strip().upper() or EMSIGN
+    if validated_by is None:
+        return EMSIGN
+    return validated_by.strip().upper() or UNKNOWN_CA
 
 VALID_DCV_METHODS: frozenset[str] = frozenset({"DNS-TXT", "HTTP-URL"})
 """DCV methods this library fully supports for write operations
@@ -286,7 +301,9 @@ class DcvInfo(BaseModel):
             token=token,
             host=host,
             token_expiry=raw.get("tokenExpiry"),
-            validated_by=raw.get("validatedBy") or None,
+            # Not ``or None``: a present-but-blank value must stay distinguishable
+            # from absence so _normalise_ca() can fail it closed.
+            validated_by=raw.get("validatedBy"),
             ca_status=raw.get("caStatus") or None,
             record_name=raw.get("recordName") or "",
             record_value=raw.get("recordValue") or "",
@@ -739,8 +756,10 @@ class Domain(CertiNextModel):
 
         Raises:
             ValueError: If ``method`` is not one of the accepted DCV methods,
-                or the domain is validated by any CA other than emSign
-                (:attr:`is_emsign` is ``False``).
+                or the domain is validated by any CA other than emSign —
+                according to either this object or a fresh :meth:`get_dcv`
+                read, so a stale or incomplete Domain row cannot let the
+                write through.
             CertiNextAPIError: On a non-2xx API response. Provides ``.status_code`` and ``.body``.
         """
         method_upper = method.upper()
@@ -748,7 +767,33 @@ class Domain(CertiNextModel):
             raise ValueError(
                 f"Invalid DCV method {method_upper!r}; must be one of {sorted(VALID_DCV_METHODS)}"
             )
-        self._refuse_non_emsign_write("change_dcv_method")
+        self._refuse_stale_non_emsign_write("change_dcv_method", self.get_dcv())
+        return self._patch_dcv_method(method_upper)
+
+    def _refuse_stale_non_emsign_write(self, operation: str, current: DcvInfo) -> None:
+        """Refuse an emSign-only write if this row *or* a fresh DCV read names another CA.
+
+        Args:
+            operation: Name of the refused method, for the error message.
+            current: A DcvInfo fetched just before the write.
+
+        Raises:
+            ValueError: If either signal identifies a CA other than emSign.
+        """
+        self._refuse_non_emsign_write(operation, ca=self.ca if not self.is_emsign else current.ca)
+
+    def _patch_dcv_method(self, method_upper: str) -> dict[str, Any]:
+        """Send the DCV method PATCH. Callers must have run the emSign guard first.
+
+        Args:
+            method_upper: An upper-cased member of :data:`VALID_DCV_METHODS`.
+
+        Returns:
+            Raw API response dict.
+
+        Raises:
+            CertiNextAPIError: On a non-2xx API response.
+        """
         return self._require_client().patch(
             f"{_BASE}/{self.id}/dcv/method", json={"dcvMethod": method_upper.lower()}
         )
@@ -784,14 +829,14 @@ class Domain(CertiNextModel):
         """
         current = self.get_dcv()
         # Either signal suffices: a stale Domain row or a fresh DCV payload.
-        self._refuse_non_emsign_write("reinitiate_dcv", ca=self.ca if not self.is_emsign else current.ca)
+        self._refuse_stale_non_emsign_write("reinitiate_dcv", current)
         if not current.method or current.method not in VALID_DCV_METHODS:
             raise ValueError(
                 f"Cannot reinitiate DCV for {self.name!r}: "
                 f"current method {current.method!r} is not in "
                 f"{sorted(VALID_DCV_METHODS)}"
             )
-        self.change_dcv_method(cast(DcvMethod, current.method))
+        self._patch_dcv_method(current.method)
         return self.get_dcv()
 
     def last_dcv_attempt(self) -> dict[str, Any]:

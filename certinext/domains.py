@@ -296,7 +296,7 @@ class DomainAccessor:
 
         Returns:
             List of `Domain` objects for the whole account, de-duplicated by
-            id (or name, if id is absent) as a defensive measure against any
+            id (or CA + name, if id is absent) as a defensive measure against any
             residual server-side ordering drift. Two records sharing a name
             (one per CA) have distinct ids, so both are kept.
         """
@@ -313,7 +313,9 @@ class DomainAccessor:
         def _add(items: list[Any]) -> None:
             for item in items:
                 domain = Domain.from_payload(self._client, item)
-                key = domain.id or domain.name or ""
+                # Without an id, key on CA + name: the same name is legitimately
+                # held once per CA, and a bare-name key would collapse them.
+                key = domain.id or f"{domain.ca}:{(domain.name or '').lower()}"
                 if key in seen:
                     continue
                 seen.add(key)
@@ -347,8 +349,17 @@ class DomainAccessor:
                 _BASE,
                 params={**filters, "search": name, "exactMatch": "true", "limit": _LIST_PAGE_SIZE},
             )
+            rows = _extract_domain_rows(result)
+            if len(rows) >= _LIST_PAGE_SIZE:
+                # One row per CA per name means this cannot fill a page today;
+                # if it ever does, tied rows past the page may be missing.
+                log.warning(
+                    "exact-match boundary re-fetch filled a whole page; results may be incomplete",
+                    domain=name,
+                    count=len(rows),
+                )
             _add([
-                r for r in _extract_domain_rows(result)
+                r for r in rows
                 if isinstance(r, dict) and str(r.get("domainName", "")).lower() == name.lower()
             ])
         return domains

@@ -179,6 +179,43 @@ class TestDomainMultiCa:
             d.reinitiate_dcv()
         mock_client.patch.assert_not_called()
 
+    def test_change_dcv_method_refuses_when_only_dcv_payload_says_sslcom(self, mock_client: MagicMock) -> None:
+        """A stale/incomplete row (no validatedBy) is caught by the fresh DCV read before the PATCH."""
+        d = _domain(mock_client)
+        mock_client.get.return_value = dict(SSLCOM_DCV)
+        with pytest.raises(ValueError, match="validated by SSLCOM"):
+            d.change_dcv_method("DNS-TXT")
+        mock_client.patch.assert_not_called()
+
+    def test_change_dcv_method_emsign_reads_then_patches(self, mock_client: MagicMock) -> None:
+        """For emSign the guard reads /dcv once, then sends the PATCH."""
+        d = _domain(mock_client)
+        mock_client.get.return_value = {"method": "dns-txt", "txtToken": "abc"}
+        d.change_dcv_method("HTTP-URL")
+        mock_client.get.assert_called_once_with(f"/api/certinext/v2/domains/{d.id}/dcv")
+        mock_client.patch.assert_called_once_with(
+            f"/api/certinext/v2/domains/{d.id}/dcv/method", json={"dcvMethod": "http-url"}
+        )
+
+    @pytest.mark.parametrize("blank", ["", "   "])
+    def test_blank_validated_by_is_unknown_not_emsign(self, mock_client: MagicMock, blank: str) -> None:
+        """A present-but-blank validatedBy is malformed: not emSign, and writes fail closed."""
+        d = _domain(mock_client, validatedBy=blank)
+        assert d.ca == "UNKNOWN"
+        assert not d.is_emsign
+        info = DcvInfo.from_wire({"method": "dns-txt", "validatedBy": blank})
+        assert info.ca == "UNKNOWN"
+        assert not info.is_emsign
+        with pytest.raises(ValueError, match="validated by UNKNOWN"):
+            d.change_dcv_method("DNS-TXT")
+        mock_client.patch.assert_not_called()
+
+    def test_null_validated_by_means_emsign(self, mock_client: MagicMock) -> None:
+        """JSON null is treated like an absent key (emSign), so emSign writes keep working."""
+        d = _domain(mock_client, validatedBy=None)
+        assert d.is_emsign
+        assert DcvInfo.from_wire({"method": "dns-txt", "validatedBy": None}).is_emsign
+
     def test_get_dcv_no_unknown_method_warning_for_sslcom(self, mock_client: MagicMock) -> None:
         """dns-persist on an SSL.com domain is modelled, so get_dcv() does not warn."""
         d = _domain(mock_client, validatedBy="SSLCOM")
@@ -260,6 +297,31 @@ class TestAccessorMultiCa:
         mock_client.get.return_value = [self._rows()[0]]
         with pytest.raises(KeyError, match="SSLCOM"):
             accessor.get("maine.edu", validated_by="SSLCOM")
+
+    def test_get_list_keeps_id_less_rows_of_different_cas(
+        self, accessor: DomainAccessor, mock_client: MagicMock
+    ) -> None:
+        """Rows missing domainId are de-duplicated by CA + name, not by name alone."""
+        rows = [{k: v for k, v in r.items() if k != "domainId"} for r in self._rows()]
+        mock_client.get.return_value = rows
+        result = accessor.get_list()
+        assert sorted((d.name or "", d.ca) for d in result) == [
+            ("maine.edu", "EMSIGN"),
+            ("maine.edu", "SSLCOM"),
+            ("umaine.edu", "EMSIGN"),
+        ]
+
+    def test_boundary_refetch_full_page_warns(
+        self, accessor: DomainAccessor, mock_client: MagicMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An exact-match re-fetch that fills a page is flagged as possibly incomplete."""
+        monkeypatch.setattr("certinext.domains._LIST_PAGE_SIZE", 2)
+        emsign, sslcom, _ = self._rows()
+        mock_client.get.side_effect = [[emsign, sslcom], [], [emsign, sslcom]]
+        with capture_logs() as logs:
+            result = accessor.get_list()
+        assert sorted(d.id or "" for d in result) == ["id-em", "id-ssl"]
+        assert any("exact-match boundary re-fetch" in e["event"] for e in logs)
 
     def test_create_sends_ca(self, accessor: DomainAccessor, mock_client: MagicMock) -> None:
         """create(ca=...) sends the upper-cased CA in the body."""
