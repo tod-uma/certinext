@@ -1737,8 +1737,11 @@ library follows four rules:
 
 - **`domain.ca`** is `"EMSIGN"` when the API omits `validatedBy`, which is
   how it reports emSign. Otherwise it's the wire value upper-cased
-  (`"SSLCOM"`). Unknown future CAs pass through unchanged. `domain.is_emsign`
-  is the check to branch on.
+  (`"SSLCOM"`). Unknown future CAs pass through unchanged. JSON `null` counts
+  as absent (emSign). A `validatedBy` that is present but blank is malformed:
+  `ca` is `"UNKNOWN"` (`certinext.models.domains.UNKNOWN_CA`) and `is_emsign`
+  is `False`, so the emSign-only writes refuse it. `domain.is_emsign` is the
+  check to branch on.
 - **One name can have one record per CA.** `get_list()` can return
   `maine.edu` twice. `sess.domain.get("maine.edu")` returns the emSign record
   and logs a warning if there's also another. Pass `validated_by="SSLCOM"` to
@@ -1754,7 +1757,10 @@ library follows four rules:
   non-emSign domain.
 - **The emSign-only write methods refuse every other CA.**
   `change_dcv_method()` and `reinitiate_dcv()` raise `ValueError` for any
-  domain that isn't emSign, including CAs this library doesn't know yet. For
+  domain that isn't emSign, including CAs this library doesn't know yet. Both
+  first re-read `GET /domains/{id}/dcv` and refuse if either that payload or
+  the `Domain` object names another CA, so a `Domain` fetched before a CA
+  change can't slip the write through (one extra GET per call). For
   those domains, publish the selected option's record and call `verify()`. To
   check a different option, pass `verify(option_id=...)`.
 
