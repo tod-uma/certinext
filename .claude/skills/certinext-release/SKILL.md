@@ -77,6 +77,21 @@ Cut a release for certinext. The tag message is the source of truth — GitLab C
    ```
 
 9. **Verify all three destinations:**
-   - **GitLab** — `release_job` passes; release at `sysadmin/python-libs/certinext/-/releases` has the correct description.
+   - **GitLab** — find the *tag's own* pipeline, then wait on it by id:
+     ```bash
+     glab api "projects/sysadmin%2Fpython-libs%2Fcertinext/pipelines?ref=vX.Y.Z"   # → pipeline id
+     bash ~/.claude/scripts/ci-wait.sh -p <id>
+     ```
+     Do **not** use a bare `ci-wait.sh` here: the tag points at the same commit as `main`, so it
+     matches `main`'s already-green pipeline by SHA and reports success before the tag pipeline
+     (`integration-cert-issuance`, `release_build`, `release_job`) has even run. Then confirm
+     `release_job` passed and the release at `sysadmin/python-libs/certinext/-/releases` has the correct description.
    - **GitHub Actions** — `publish-pypi` job passes; GitHub release appears with the same description.
    - **PyPI** — stable versions are visible without `--pre`; pre-releases require `pip install --pre certinext` to see.
+
+**Windows-on-ARM64 workstation:** the pre-commit gate runs `mypy` and the full test suite from
+`.venv`, and `uv.lock` pins a `cryptography` with no `win_arm64` wheel, so a native `uv sync`
+fails to build it and the gate then dies with `Failed to spawn: mypy`. Build the venv on x64
+Python instead: `uv sync --locked --all-extras --python cpython-3.14-windows-x86_64`.
+The full suite includes live sandbox probes that CI skips, so the gate can fail on vendor drift
+that no pipeline would catch.
