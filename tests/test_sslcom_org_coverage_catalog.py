@@ -257,6 +257,28 @@ class TestFindCovering:
         assert hit is not None and hit.name == "maine.edu"
         assert acc.find_covering("MAINE.EDU.", "SSLCOM", domains) is not None
 
+    @pytest.mark.parametrize("name", ["www.its.maine.edu", "*.its.maine.edu", "its.maine.edu", "a.b.its.maine.edu"])
+    def test_wildcard_record_covers(self, client: MagicMock, name: str) -> None:
+        """A "*.<cn>" record (auto-created by an SSL.com wildcard order) covers its base and below.
+
+        Regression for Gemini review of 54a5f81, finding 1: the record's ``*.``
+        was not stripped, so a wildcard record never matched anything.
+        """
+        hit = DomainAccessor(client).find_covering(name, "SSLCOM", [_dom("*.its.maine.edu")])
+        assert hit is not None and hit.name == "*.its.maine.edu"
+
+    def test_wildcard_record_label_boundary(self, client: MagicMock) -> None:
+        """A wildcard record covers neither a sibling nor a parent."""
+        acc = DomainAccessor(client)
+        assert acc.find_covering("notits.maine.edu", "SSLCOM", [_dom("*.its.maine.edu")]) is None
+        assert acc.find_covering("maine.edu", "SSLCOM", [_dom("*.its.maine.edu")]) is None
+
+    def test_closest_wins_over_wildcard_parent(self, client: MagicMock) -> None:
+        """Closeness is measured without the ``*.``: a deeper exact record beats a wildcard parent."""
+        domains = [_dom("*.maine.edu"), _dom("its.maine.edu")]
+        hit = DomainAccessor(client).find_covering("www.its.maine.edu", "SSLCOM", domains)
+        assert hit is not None and hit.name == "its.maine.edu"
+
     def test_label_boundary(self, client: MagicMock) -> None:
         """notmaine.edu is not under maine.edu."""
         assert DomainAccessor(client).find_covering("notmaine.edu", "SSLCOM", [_dom("maine.edu")]) is None

@@ -486,7 +486,8 @@ class DomainAccessor:
         """Return the domain record that lets ``ca`` issue for ``name``, or ``None``.
 
         A record covers ``name`` when it is that name or a parent of it
-        (``*.`` is stripped from a wildcard first), belongs to ``ca``, is
+        (``*.`` is stripped from a wildcard name and a wildcard record
+        first), belongs to ``ca``, is
         ``ACTIVE`` and DCV ``VERIFIED``, and its DCV has not expired. The
         closest such record wins.
 
@@ -519,8 +520,11 @@ class DomainAccessor:
         target = name.strip().lower().removeprefix("*.").rstrip(".")
         now = datetime.now(timezone.utc)
         best: Domain | None = None
+        best_len = -1
         for d in domains:
-            record = (d.name or "").lower().rstrip(".")
+            # A record can itself be a wildcard: an SSL.com wildcard order
+            # auto-creates one named "*.<cn>" (sandbox 2026-11-09).
+            record = (d.name or "").strip().lower().removeprefix("*.").rstrip(".")
             if not record or d.ca != wanted_ca:
                 continue
             if d.status != "ACTIVE" or d.dcv_status != "VERIFIED":
@@ -529,8 +533,8 @@ class DomainAccessor:
                 continue
             if target != record and not target.endswith("." + record):
                 continue
-            if best is None or len(record) > len(best.name or ""):
-                best = d
+            if len(record) > best_len:
+                best, best_len = d, len(record)
         return best
 
     def uncovered_names(self, names: list[str], ca: str) -> list[str]:
