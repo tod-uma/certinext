@@ -172,8 +172,12 @@ What this means for later work:
   `create()` cannot route an order.
 - The ordering design keeps its own future ADR. It needs the vendor's answers
   first.
-- A CI job is tied to whichever CA its credential uses. An emSign issuance check
-  needs a credential that stays on emSign.
+- A CI issuance job issues from whichever CA its credential uses. eMudhra has
+  announced that emSign is leaving certificate issuance, so no emSign issuance
+  check is planned.
+- The emSign branching above still matters. Existing emSign domain and DCV
+  records stay in the API until they age out, and the fail-closed writes
+  protect them until then.
 
 ## More information
 
