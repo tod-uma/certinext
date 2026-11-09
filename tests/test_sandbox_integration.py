@@ -15,18 +15,22 @@
 """End-to-end sandbox integration tests for the CertiNext library.
 
 Covers the full API surface against the live sandbox: authentication, domain
-management, order reporting, organization lookup, and OV certificate issuance.
+management, order reporting, organization lookup, and DV certificate issuance.
 All tests skip automatically when the required credentials are absent, so this
 file is safe to include in every pipeline — only those that have the right
 environment variables will actually exercise the API.
 
-Required environment variables (base access):
+Required environment variables (base access, and DV issuance):
 
     CERTINEXT_SANDBOX_CLIENT_ID       CertiNext account number
     CERTINEXT_SANDBOX_CLIENT_SECRET   OAuth client secret
 
-Required additionally for cert-issuance tests:
+The API credential picks the issuing CA (ADR 0020 amendment), so DV issuance
+runs against whichever CA the credential is bound to — SSL.com in CI.
 
+OV issuance is opt-in (SSL.com OV is not yet available) and needs all of:
+
+    CERTINEXT_SANDBOX_RUN_OV          Set to any non-empty value to enable
     CERTINEXT_SANDBOX_ORG_ID          Organisation ID for OV orders
     CERTINEXT_SANDBOX_PREVETTING_TOKEN Prevetting token for sandbox auto-approval
 
@@ -42,9 +46,11 @@ Run all integration tests explicitly::
 
 import os
 import time
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 
+import httpx
 import pytest
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes
@@ -71,6 +77,10 @@ def sandbox_session() -> certinext.CertiNextSession:
     Looks up credentials from the ``sandbox`` keyring profile first, then
     falls back to ``CERTINEXT_SANDBOX_CLIENT_ID`` / ``CERTINEXT_SANDBOX_CLIENT_SECRET``.
 
+    The read timeout is raised to 180s (default 60s): the sandbox has been
+    slow enough to time out ordinary order calls in tag pipelines
+    (pipeline 55677, 2026-11-09).
+
     Returns:
         An authenticated :class:`~certinext.CertiNextSession` using the sandbox
         base URL and token URL.
@@ -94,19 +104,26 @@ def sandbox_session() -> certinext.CertiNextSession:
         token_url=certinext.SANDBOX_TOKEN_URL,
         client_id=client_id,
         client_secret=client_secret,
+        timeout=httpx.Timeout(10.0, read=180.0),
     )
 
 
 @pytest.fixture(scope="session")
 def sandbox_ov_creds() -> dict[str, str]:
-    """Return OV-specific credentials, or skip if not configured.
+    """Return OV-specific credentials, or skip if OV issuance is not enabled.
 
-    These are only required for the cert-issuance tests.  All other tests in
-    this file depend only on ``sandbox_session`` and skip independently.
+    OV issuance is opt-in: SSL.com OV is not available yet (the vendor is
+    shipping DV first), and CI's credential is SSL.com-bound. Set
+    ``CERTINEXT_SANDBOX_RUN_OV`` once SSL.com OV can be tested.
 
     Returns:
         Dict with ``org_id`` and ``prevetting_token`` keys.
     """
+    if not os.environ.get("CERTINEXT_SANDBOX_RUN_OV"):
+        pytest.skip(
+            "OV issuance is opt-in until SSL.com OV is available — "
+            "set CERTINEXT_SANDBOX_RUN_OV to enable"
+        )
     org_id = os.environ.get("CERTINEXT_SANDBOX_ORG_ID", "")
     prevetting_token = os.environ.get("CERTINEXT_SANDBOX_PREVETTING_TOKEN", "")
     if not org_id or not prevetting_token:
@@ -270,20 +287,214 @@ class TestOrganisations:
 
 
 # ---------------------------------------------------------------------------
-# OV certificate issuance
+# Certificate issuance
 # ---------------------------------------------------------------------------
+
+#: InCommon DV product code. On an SSL.com-bound credential the vendor
+#: translates it to SSL.com DV (reported as 1011); native SSL.com codes are
+#: rejected with EMS-1162. See ADR 0020 and the README known issues.
+_DV_PRODUCT_CODE = "970"
+
+_CI_NAME = "CertiNext CI"
+_CI_EMAIL = "tod.detre@maine.edu"
+_CI_PHONE = "+12073708630"
+_CI_PLACE = "Orono, Maine"
+
+
+def _ci_cn(kind: str) -> str:
+    """Return a CI-job-unique certificate CN.
+
+    Args:
+        kind: Short tag for the order type (e.g. ``"dv"``), so DV and OV
+            orders from the same job never share a CN.
+
+    Returns:
+        A ``certinext-ci-<kind>-<job>.maine.edu`` FQDN.
+    """
+    job_id = os.environ.get("CI_JOB_ID", str(int(time.time())))
+    return f"certinext-ci-{kind}-{job_id}.maine.edu"
+
+
+def _issue(
+    session: certinext.CertiNextSession, order_factory: Callable[[], SslOrder]
+) -> SslOrder:
+    """Create an order, adopting it if the create call times out.
+
+    Args:
+        session: Authenticated sandbox session.
+        order_factory: Zero-argument callable that places the order.
+
+    Returns:
+        The created (or recovered) :class:`SslOrder`.
+    """
+    try:
+        return order_factory()
+    except certinext.CertiNextCreateTimeoutError as exc:
+        # The sandbox can take over the create timeout to answer while still
+        # creating the order (2026-11-06). The CN is unique to this job, so
+        # adopting the single match is safe here.
+        return session.ssl.recover_timed_out_create(exc)
+
+
+def _run_to_issued(order: SslOrder) -> str:
+    """Drive an order whose CSR was sent at create time to issuance.
+
+    ``run()`` is called without ``csr=``: the CSR already went in with the
+    create, and the redundant forced ``PUT /csr`` re-send is what hung tag
+    pipeline 55677 (2026-11-09).
+
+    Args:
+        order: The created order.
+
+    Returns:
+        The issued PEM bundle.
+    """
+    try:
+        return OrderWorkflow(order, signer_name=_CI_NAME, signer_place=_CI_PLACE).run(wait=300)
+    except CertiNextTimeoutError as exc:
+        pytest.fail(f"Timed out waiting for order {exc.order_id} to issue after 300 s")
+
+
+def _verify_issued(order: SslOrder, pem: str, cn: str, tmp_path: Path) -> None:
+    """Verify an issued certificate and every download format.
+
+    Checks that the PEM bundle parses, chain links that are present verify,
+    the leaf issuer looks like a sandbox CA, the leaf is unexpired and its CN
+    matches, the DER download matches, and ``--all-formats-out`` writes
+    parseable PEM and DER files.
+
+    Args:
+        order: The issued order.
+        pem: PEM bundle returned by :meth:`OrderWorkflow.run`.
+        cn: The CN the order was placed for.
+        tmp_path: Pytest temporary directory for ``--all-formats-out`` output.
+    """
+    assert "-----BEGIN CERTIFICATE-----" in pem, (
+        "Response does not contain a PEM certificate"
+    )
+
+    chain = _parse_chain(pem)
+    assert len(chain) >= 1, "Response contains no parseable certificates"
+    leaf = chain[0]
+
+    # Verify chain signatures for every link whose issuer cert is present.
+    # The CA may omit intermediate certs from the returned chain; we verify
+    # whatever links we can find by matching issuer/subject, rather than
+    # assuming consecutive ordering.
+    for cert in chain:
+        if cert.issuer == cert.subject:
+            continue  # self-signed root — no parent to verify against
+        issuer = next((c for c in chain if c.subject == cert.issuer), None)
+        if issuer is None:
+            continue  # issuer not in chain; CA omitted it
+        try:
+            cert.verify_directly_issued_by(issuer)
+        except Exception as exc:
+            pytest.fail(
+                f"Signature verification failed: "
+                f"{cert.subject.rfc4514_string()!r} not correctly signed by "
+                f"{issuer.subject.rfc4514_string()!r}: {exc}"
+            )
+
+    # When the intermediate is absent we fall back to an issuer-name check:
+    # assert the leaf's issuer looks like a CertiNext/InCommon/emSign/SSL.com CA
+    # cert. The API credential picks the CA (ADR 0020 amendment), so a
+    # credential bound to SSL.com issues from "SSL.com TLS Issuing ... - STG".
+    leaf_issuer_cn_attrs = leaf.issuer.get_attributes_for_oid(NameOID.COMMON_NAME)
+    assert leaf_issuer_cn_attrs, "Leaf cert has no issuer CN"
+    raw = leaf_issuer_cn_attrs[0].value
+    leaf_issuer_cn = raw.decode() if isinstance(raw, bytes) else raw
+    known_ca_keywords = ("InCommon", "emSign", "Staging", "CertiNext", "SSL.com")
+    assert any(kw in leaf_issuer_cn for kw in known_ca_keywords), (
+        f"Leaf cert issuer {leaf_issuer_cn!r} does not look like a CertiNext sandbox CA"
+    )
+
+    # Leaf must not be expired.
+    now = datetime.now(timezone.utc)
+    assert leaf.not_valid_after_utc > now, (
+        f"Issued certificate expired at {leaf.not_valid_after_utc}"
+    )
+
+    # Leaf CN must match the CSR.
+    cn_attrs = leaf.subject.get_attributes_for_oid(NameOID.COMMON_NAME)
+    assert cn_attrs, "Issued certificate has no CN attribute"
+    assert cn_attrs[0].value == cn, (
+        f"CN mismatch: expected {cn!r}, got {cn_attrs[0].value!r}"
+    )
+
+    # ------------------------------------------------------------------
+    # DER download — single end-entity cert
+    # ------------------------------------------------------------------
+    der = order.download_certificate_der()
+    assert isinstance(der, bytes) and len(der) > 0, "DER download returned empty bytes"
+    der_cert = x509.load_der_x509_certificate(der)
+    der_cn_attrs = der_cert.subject.get_attributes_for_oid(NameOID.COMMON_NAME)
+    assert der_cn_attrs, "DER certificate has no CN attribute"
+    assert der_cn_attrs[0].value == cn, (
+        f"DER CN mismatch: expected {cn!r}, got {der_cn_attrs[0].value!r}"
+    )
+    assert der_cert.not_valid_after_utc > now, (
+        f"DER certificate expired at {der_cert.not_valid_after_utc}"
+    )
+
+    # ------------------------------------------------------------------
+    # --all-formats-out: PEM and DER written and parseable
+    # ------------------------------------------------------------------
+    from certinext.cli.issue_cert import OutputOptions, _stem_from_domain, _write_outputs
+
+    _write_outputs(order, OutputOptions(all_formats_out=str(tmp_path)), pem)
+
+    stem = _stem_from_domain(order.domain)
+    pem_file = tmp_path / f"{stem}.pem"
+    der_file = tmp_path / f"{stem}.der"
+
+    assert pem_file.exists(), f"--all-formats-out did not write {pem_file.name}"
+    assert der_file.exists(), f"--all-formats-out did not write {der_file.name}"
+
+    x509.load_der_x509_certificate(der_file.read_bytes())
+
 
 @pytest.mark.integration
 class TestCertIssuance:
-    """End-to-end OV certificate issuance against the sandbox.
+    """End-to-end certificate issuance against the sandbox.
 
-    These tests consume a sandbox certificate slot and may take up to five
-    minutes.  They are only attempted when ``CERTINEXT_SANDBOX_ORG_ID`` and
-    ``CERTINEXT_SANDBOX_PREVETTING_TOKEN`` are set.
+    Each test consumes a sandbox certificate slot and may take up to five
+    minutes. The DV test needs only the base credentials; the OV test is
+    opt-in (see :func:`sandbox_ov_creds`).
 
-    In GitLab CI, the ``integration-cert-issuance`` job provides all required
-    variables and runs only on release-candidate and stable tag pipelines.
+    In GitLab CI, the ``integration-cert-issuance`` job runs these only on
+    release-candidate and stable tag pipelines.
     """
+
+    def test_issue_dv_cert(
+        self,
+        sandbox_session: certinext.CertiNextSession,
+        tmp_path: Path,
+    ) -> None:
+        """Issue a DV certificate end-to-end and verify all download formats.
+
+        Places a DV order with InCommon code 970 and the CSR included at
+        create time. On an SSL.com-bound credential this issues SSL.com DV
+        from the staging hierarchy.
+
+        Args:
+            sandbox_session: Authenticated sandbox session fixture.
+            tmp_path: Pytest temporary directory for ``--all-formats-out`` output.
+        """
+        cn = _ci_cn("dv")
+        csr_pem = _generate_csr(cn)
+        order = _issue(sandbox_session, lambda: sandbox_session.ssl.create_dv(
+            cn,
+            csr=csr_pem,
+            product_code=_DV_PRODUCT_CODE,
+            requestor_name=_CI_NAME,
+            requestor_email=_CI_EMAIL,
+            requestor_phone=_CI_PHONE,
+            signer_name=_CI_NAME,
+            signer_place=_CI_PLACE,
+        ))
+        pem = _run_to_issued(order)
+        _verify_issued(order, pem, cn, tmp_path)
 
     def test_issue_ov_cert(
         self,
@@ -293,134 +504,26 @@ class TestCertIssuance:
     ) -> None:
         """Issue an OV certificate end-to-end and verify all download formats.
 
-        Generates a fresh EC P-256 CSR with a CI-job-unique CN, creates an OV
-        order with the prevetting token so the sandbox auto-approves it, drives
-        the order to issuance via :class:`~certinext.ssl_certificates.OrderWorkflow`,
-        then verifies:
-
-        - The returned PEM bundle contains a parseable cert chain whose leaf CN
-          matches the CSR.
-        - :meth:`~certinext.ssl_certificates.SslOrder.download_certificate_der`
-          returns valid DER for the leaf certificate with a matching CN.
-        - ``--all-formats-out`` writes PEM and DER to a directory and each
-          file is parseable.
+        Creates an OV order with the prevetting token so the sandbox
+        auto-approves it. Opt-in until SSL.com OV is available.
 
         Args:
             sandbox_session: Authenticated sandbox session fixture.
             sandbox_ov_creds: OV org ID and prevetting token fixture.
             tmp_path: Pytest temporary directory for ``--all-formats-out`` output.
         """
-        job_id = os.environ.get("CI_JOB_ID", str(int(time.time())))
-        cn = f"certinext-ci-{job_id}.maine.edu"
+        cn = _ci_cn("ov")
         csr_pem = _generate_csr(cn)
-
-        try:
-            order = sandbox_session.ssl.create_ov(
-                cn,
-                organization_id=sandbox_ov_creds["org_id"],
-                prevetting_token=sandbox_ov_creds["prevetting_token"],
-                requestor_name="CertiNext CI",
-                requestor_email="tod.detre@maine.edu",
-                requestor_phone="+12073708630",
-                signer_name="CertiNext CI",
-                signer_place="Orono, Maine",
-                csr=csr_pem,
-            )
-        except certinext.CertiNextCreateTimeoutError as exc:
-            # The sandbox can take over the create timeout to answer while still
-            # creating the order (2026-11-06). The CN is unique to this job, so
-            # adopting the single match is safe here.
-            order = sandbox_session.ssl.recover_timed_out_create(exc)
-
-        try:
-            pem = OrderWorkflow(
-                order, signer_name="CertiNext CI", signer_place="Orono, Maine"
-            ).run(csr=csr_pem, wait=300)
-        except CertiNextTimeoutError as exc:
-            pytest.fail(
-                f"Timed out waiting for order {exc.order_id} to issue after 300 s"
-            )
-
-        assert "-----BEGIN CERTIFICATE-----" in pem, (
-            "Response does not contain a PEM certificate"
-        )
-
-        chain = _parse_chain(pem)
-        assert len(chain) >= 1, "Response contains no parseable certificates"
-        leaf = chain[0]
-
-        # Verify chain signatures for every link whose issuer cert is present.
-        # The CA may omit intermediate certs from the returned chain; we verify
-        # whatever links we can find by matching issuer/subject, rather than
-        # assuming consecutive ordering.
-        for cert in chain:
-            if cert.issuer == cert.subject:
-                continue  # self-signed root — no parent to verify against
-            issuer = next((c for c in chain if c.subject == cert.issuer), None)
-            if issuer is None:
-                continue  # issuer not in chain; CA omitted it
-            try:
-                cert.verify_directly_issued_by(issuer)
-            except Exception as exc:
-                pytest.fail(
-                    f"Signature verification failed: "
-                    f"{cert.subject.rfc4514_string()!r} not correctly signed by "
-                    f"{issuer.subject.rfc4514_string()!r}: {exc}"
-                )
-
-        # When the intermediate is absent we fall back to an issuer-name check:
-        # assert the leaf's issuer looks like a CertiNext/InCommon/emSign/SSL.com CA
-        # cert. The API credential picks the CA (ADR 0020 amendment), so a
-        # credential bound to SSL.com issues from "SSL.com TLS Issuing ... - STG".
-        leaf_issuer_cn_attrs = leaf.issuer.get_attributes_for_oid(NameOID.COMMON_NAME)
-        assert leaf_issuer_cn_attrs, "Leaf cert has no issuer CN"
-        raw = leaf_issuer_cn_attrs[0].value
-        leaf_issuer_cn = raw.decode() if isinstance(raw, bytes) else raw
-        known_ca_keywords = ("InCommon", "emSign", "Staging", "CertiNext", "SSL.com")
-        assert any(kw in leaf_issuer_cn for kw in known_ca_keywords), (
-            f"Leaf cert issuer {leaf_issuer_cn!r} does not look like a CertiNext sandbox CA"
-        )
-
-        # Leaf must not be expired.
-        now = datetime.now(timezone.utc)
-        assert leaf.not_valid_after_utc > now, (
-            f"Issued certificate expired at {leaf.not_valid_after_utc}"
-        )
-
-        # Leaf CN must match the CSR.
-        cn_attrs = leaf.subject.get_attributes_for_oid(NameOID.COMMON_NAME)
-        assert cn_attrs, "Issued certificate has no CN attribute"
-        assert cn_attrs[0].value == cn, (
-            f"CN mismatch: expected {cn!r}, got {cn_attrs[0].value!r}"
-        )
-
-        # ------------------------------------------------------------------
-        # DER download — single end-entity cert
-        # ------------------------------------------------------------------
-        der = order.download_certificate_der()
-        assert isinstance(der, bytes) and len(der) > 0, "DER download returned empty bytes"
-        der_cert = x509.load_der_x509_certificate(der)
-        der_cn_attrs = der_cert.subject.get_attributes_for_oid(NameOID.COMMON_NAME)
-        assert der_cn_attrs, "DER certificate has no CN attribute"
-        assert der_cn_attrs[0].value == cn, (
-            f"DER CN mismatch: expected {cn!r}, got {der_cn_attrs[0].value!r}"
-        )
-        assert der_cert.not_valid_after_utc > now, (
-            f"DER certificate expired at {der_cert.not_valid_after_utc}"
-        )
-
-        # ------------------------------------------------------------------
-        # --all-formats-out: PEM and DER written and parseable
-        # ------------------------------------------------------------------
-        from certinext.cli.issue_cert import OutputOptions, _stem_from_domain, _write_outputs
-
-        _write_outputs(order, OutputOptions(all_formats_out=str(tmp_path)), pem)
-
-        stem = _stem_from_domain(order.domain)
-        pem_file = tmp_path / f"{stem}.pem"
-        der_file = tmp_path / f"{stem}.der"
-
-        assert pem_file.exists(), f"--all-formats-out did not write {pem_file.name}"
-        assert der_file.exists(), f"--all-formats-out did not write {der_file.name}"
-
-        x509.load_der_x509_certificate(der_file.read_bytes())
+        order = _issue(sandbox_session, lambda: sandbox_session.ssl.create_ov(
+            cn,
+            organization_id=sandbox_ov_creds["org_id"],
+            prevetting_token=sandbox_ov_creds["prevetting_token"],
+            csr=csr_pem,
+            requestor_name=_CI_NAME,
+            requestor_email=_CI_EMAIL,
+            requestor_phone=_CI_PHONE,
+            signer_name=_CI_NAME,
+            signer_place=_CI_PLACE,
+        ))
+        pem = _run_to_issued(order)
+        _verify_issued(order, pem, cn, tmp_path)

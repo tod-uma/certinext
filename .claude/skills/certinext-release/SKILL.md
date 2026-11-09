@@ -86,6 +86,12 @@ Cut a release for certinext. The tag message is the source of truth — GitLab C
      matches `main`'s already-green pipeline by SHA and reports success before the tag pipeline
      (`integration-cert-issuance`, `release_build`, `release_job`) has even run. Then confirm
      `release_job` passed and the release at `sysadmin/python-libs/certinext/-/releases` has the correct description.
+
+     **If `integration-cert-issuance` fails on a vendor sandbox timeout** (`ReadTimeout`, nothing
+     wrong in the diff), `release_build`/`release_job` are skipped, so the GitLab release and registry
+     package never appear, while GitHub/PyPI publish anyway. Don't re-tag. Retry the job instead
+     (`glab ci retry <job-id>`), and the release jobs run once it passes. That worked for v1.4.0rc3.
+     Each retry places one more sandbox order, so ask Tod first.
    - **GitHub Actions** — `publish-pypi` job passes; GitHub release appears with the same description.
    - **PyPI** — stable versions are visible without `--pre`; pre-releases require `pip install --pre certinext` to see.
 
