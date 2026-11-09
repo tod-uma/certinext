@@ -1815,7 +1815,7 @@ names = ["www.maine.edu", "*.its.maine.edu"]
 missing = sess.domain.uncovered_names(names, ca="SSLCOM")
 if missing:
     raise SystemExit(f"not validated for SSL.com: {missing}")
-order = sess.ssl.create_dv(...)          # no product_code for SSL.com
+order = sess.ssl.create_dv(...)          # InCommon code (e.g. 970) or unset; never 1011+
 
 record = sess.domain.find_covering("www.maine.edu", "SSLCOM")   # the Domain, or None
 ```
