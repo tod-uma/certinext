@@ -33,5 +33,6 @@ Numbering is sequential and never reused.
 | [0017](0017-connection-destinations-fail-closed.md) | Connection destination settings fail closed; issuance defaults warn and continue | accepted |
 | [0018](0018-classify-replacement-on-configurable-signals.md) | Classify replacement need on configurable issuer, key, and chain signals; flag disagreement | accepted |
 | [0019](0019-command-local-opt-in-inspection-cache.md) | Cache certificate downloads per command, opt-in, never volatile state | accepted |
+| [0020](0020-multi-ca-domains-fail-closed-and-opt-in-create-recovery.md) | Branch on "is emSign?", fail closed on emSign-only writes, and never auto-recover a timed-out order | accepted |
 
 See also: [docs/wishlist/](../wishlist/) for deferred ideas not yet committed to.
