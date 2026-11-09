@@ -1795,9 +1795,12 @@ SSL.com.
 > **Known issue: EMS-1162 with SSL.com product codes.** Sending an SSL.com
 > code (1011-1020) as `product_code` (the `X-Product-Code` header) returns
 > 422 `[EMS-1162] Invalid Product Code`, even on an SSL.com credential.
-> **Leave `product_code` unset** for SSL.com. The same DV order then issues
-> normally (sandbox, 2026-11-09). How to choose a specific SSL.com product
-> (wildcard, UCC, OV) is still open with the vendor (#39). Also, the SSL.com
+> **Send the InCommon code instead.** On an SSL.com credential the vendor
+> translates InCommon codes into the matching SSL.com product: `970` (DV)
+> issued an SSL.com DV certificate, and `971` (DV Wildcard) issued an SSL.com
+> wildcard (sandbox, 2026-11-09). With `product_code` unset you get the default
+> DV. The OV, UCC and 30/45/90-day codes have not been tried yet, and the
+> vendor hasn't confirmed this behaviour (#39). Also, the SSL.com
 > certificate's lifetime is set by the CA, not by `validity_years`: the
 > staging certificate lasted 90 days on `validity_years=1`.
 

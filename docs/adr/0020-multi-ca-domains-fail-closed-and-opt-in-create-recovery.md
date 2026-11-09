@@ -139,16 +139,27 @@ of the decisions above.
   the same thing.
 - `POST /ssl-certificates` has no CA field. An order goes to whichever CA the
   calling credential is bound to.
-- **Send no `X-Product-Code` for SSL.com.**
+- **Never send an SSL.com code in `X-Product-Code`. To choose a product, send
+  the InCommon code for it, or send no header for the default DV.** This
+  bullet first said to send no header at all. It was corrected later on
+  2026-11-09, after a cert-users report led to the 970/971 test below.
   - On a credential switched to SSL.com, sending SSL.com DV code `1011` in the
     header still returned 422 `[EMS-1162] Invalid Product Code`.
   - The same DV request without the header was issued in the create response
     itself, by SSL.com TLS Issuing ECC CA R1 - STG.
-  - Both were sandbox requests on 2026-11-09.
+  - With InCommon DV code `970`, it issued an SSL.com DV certificate, and the
+    orders report recorded product code `1011`. With InCommon DV Wildcard code
+    `971`, it issued an SSL.com wildcard certificate, recorded as `1012`. The
+    vendor translates InCommon codes into SSL.com codes product by product.
+  - All were sandbox requests on 2026-11-09. The OV, UCC and 30/45/90-day
+    InCommon codes have not been tried.
 - **The catalog cannot show a credential's CA.** After the switch,
   `GET /catalog/products` still listed the emSign products and the `SSL.com`
   category (codes 1011–1020). The category name is the only CA marker on a
-  product.
+  product. It names the CA a code belongs to, not where an order sent with
+  that code goes: `970` sits in the emSign category but issued from SSL.com.
+  Orders are still labelled correctly by product code, because the report
+  records the translated code.
 - **The 2026-11-06 EMS-1162 failures came from configuration.** Those requests
   ran on a credential still bound to emSign. Widening its group scope did not
   change its CA.
@@ -161,8 +172,9 @@ of the decisions above.
 
 Still open with the vendor (#39):
 
-- How to order a specific SSL.com product, such as wildcard, UCC or OV, while
-  the header rejects every SSL.com code.
+- Whether the InCommon-code translation is intended and will stay. Whether
+  every InCommon code has an SSL.com equivalent (OV, UCC, the 30/45/90-day
+  variants), and what a code without one does.
 - Whether one credential can ever issue from both CAs.
 - Whether prod behaves the same once SSL.com issuance is enabled there.
 
@@ -197,6 +209,7 @@ What this means for later work:
 > `claude-haiku-5-5`) from a conversation with Tod Detre. The design it records
 > was done in earlier sessions on 2026-11-05 and 2026-11-06. The 2026-11-09
 > amendment records sandbox orders run in a later session (Claude Opus 5.5,
-> `claude-opus-5-5`, then Claude Haiku 5.5). May contain
+> `claude-opus-5-5`, then Claude Haiku 5.5). Claude Opus 5.5 corrected
+> its product-code rule after further sandbox orders the same day. May contain
 > inaccuracies or hallucinated details; verify specifics against current
 > sources before relying on them.

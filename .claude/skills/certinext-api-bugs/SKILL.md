@@ -10,18 +10,26 @@ bound to one CA connector on the portal's API Credentials page. Nothing in
 `POST /ssl-certificates` routes an order, so don't add a `ca=` argument that
 pretends to.
 
-**Send no `X-Product-Code` for SSL.com.** SSL.com codes (1011-1020, catalog
-category `"SSL.com"`) in that header return 422 `[EMS-1162] Invalid Product
-Code`, even on a credential bound to SSL.com. Without the header the same DV
-order issued at once (sandbox, 2026-11-09). EMS-1162 on an emSign-bound
-credential means a configuration problem: switch the credential, don't retry.
-Still open with the vendor: how to choose a specific SSL.com product
-(wildcard, UCC, OV) while the header rejects every SSL.com code.
+**Never put an SSL.com code in `X-Product-Code`; send the InCommon code.**
+SSL.com codes (1011-1020, catalog category `"SSL.com"`) in that header return
+422 `[EMS-1162] Invalid Product Code`, even on a credential bound to SSL.com.
+On that credential the vendor *translates* InCommon codes per product. In
+sandbox on 2026-11-09, `970` (InCommon DV) issued SSL.com DV and was reported
+as `1011`, and `971` (InCommon DV Wildcard) issued an SSL.com wildcard,
+reported as `1012`. No header gives the default DV. Don't "fix" a caller that
+sends `970` to an SSL.com credential: that is the supported way to pick a
+product. EMS-1162 on an emSign-bound credential means a configuration problem:
+switch the credential, don't retry. Untested: the OV, UCC and 30/45/90-day
+codes, and what an InCommon code with no SSL.com equivalent does. The vendor
+hasn't confirmed the translation yet.
 
 **The catalog can't show a credential's CA.** It lists both categories
 either way. `ProductCategory.ca` says which CA a *product* belongs to;
 label orders by joining `OrderRecord.product_code` to
-`catalog.ca_by_product_code()`. Don't use `issuer_ca` for that: emSign issues
+`catalog.ca_by_product_code()`. That still works for translated orders,
+because the report records the SSL.com code. Don't read a code's catalog CA as
+"where an order with it goes": `970` is in the emSign category but issues from
+SSL.com on an SSL.com credential. Don't use `issuer_ca` either: emSign issues
 from InCommon-branded intermediates whose names never say emSign.
 
 **`validity_years` is not the lifetime.** The SSL.com staging cert lasted 90
