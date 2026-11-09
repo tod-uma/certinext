@@ -36,7 +36,7 @@ class _FakeDomain:
 class _FakeDomainAccessor:
     """Stand-in for the session's ``domain`` accessor; ``get`` ignores its id."""
 
-    def get(self, _domain_id: str) -> _FakeDomain:
+    def get(self, _domain_id: str, validated_by: str | None = None) -> _FakeDomain:
         return _FakeDomain()
 
 

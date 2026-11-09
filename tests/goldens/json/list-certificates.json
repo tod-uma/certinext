@@ -6,7 +6,8 @@
     "orderStatus": "Order Fulfilled",
     "certificateStatus": "issued",
     "domainName": "maine.edu",
-    "validTill": "2099-12-31T00:00:00Z"
+    "validTill": "2099-12-31T00:00:00Z",
+    "ca": "EMSIGN"
   },
   {
     "orderNumber": "ORD-002",
@@ -15,6 +16,7 @@
     "orderStatus": "Order Fulfilled",
     "certificateStatus": "issued",
     "domainName": "sub.maine.edu",
-    "validTill": "2099-12-31T00:00:00Z"
+    "validTill": "2099-12-31T00:00:00Z",
+    "ca": "EMSIGN"
   }
 ]

@@ -21,6 +21,7 @@ Python library and CLI scripts for managing your [CertiNext](https://us.certinex
   - [certinext setup keyring](#certinext-setup-keyring)
   - [certinext setup defaults](#certinext-setup-defaults)
   - [certinext accounts](#certinext-accounts)
+  - [certinext ca-validation](#certinext-ca-validation)
   - [certinext domains](#certinext-domains)
   - [certinext ledger](#certinext-ledger)
   - [certinext list-certificates](#certinext-list-certificates)
@@ -398,6 +399,8 @@ type            = "ov"             # required (dv / ov / ev)
 org_id          = "12345"         # required for OV and EV; omit for DV
 validity        = 1                # optional; defaults to 1 year
 # product       = "974"            # optional product code; omit to let the API pick
+# ca            = "SSLCOM"         # optional: the CA this profile's credential issues
+#                                  # from; turns on issue-cert's domain-coverage check
 
 [profiles.sandbox]
 # overrides applied when --sandbox / --profile sandbox is active
@@ -719,6 +722,34 @@ certinext accounts --json
 
 ---
 
+### certinext ca-validation
+
+`certinext ca-validation ORG` shows an organization's validation with
+SSL.com: the overall status, each level (OV, EV) with whether certificates
+may use it now and when it lapses, and anything still missing before the
+organization can be submitted. It is read-only. Submitting an organization
+for vetting is available only from the library
+(`sess.accounts.submit_ca_validation`, see
+[Working with accounts](#working-with-accounts)).
+
+```bash
+certinext ca-validation 1234567
+certinext ca-validation 1234567 --sync     # re-read the status from SSL.com first
+certinext ca-validation 1234567 --json
+```
+
+| Argument | Description |
+|---|---|
+| `ORG` | Organization number (list them with `certinext accounts`) |
+| `--ca CA` | Non-emSign CA to show (default `SSLCOM`, the only one today) |
+| `--sync` | Ask CertiNext to re-read the status from the CA. This updates only CertiNext's cached copy |
+| `--json` | Output JSON instead of tables |
+
+The output never includes the contact name, phone or email the API returns
+alongside the status, in either format.
+
+---
+
 ### certinext domains
 
 `certinext domains` is a command-line interface for the domains API.
@@ -739,6 +770,13 @@ keychain (see [Credentials](#credentials) above).
 --json                  Output raw JSON instead of tabular format
 ```
 
+**More than one CA.** An organization can hold the same domain name once per
+CA (emSign and SSL.com today), each with its own DCV. `list` shows a
+`validated_by` column. Wherever a subcommand takes a domain *name*, add
+`--validated-by SSLCOM` (or `EMSIGN`) to pick that CA's record. Without it, a
+name with records under both CAs resolves to the emSign record, with a
+warning. A domain ID is already unambiguous.
+
 <details>
 <summary>Subcommands</summary>
 
@@ -750,6 +788,7 @@ List all domains.
 # credentials from keychain
 certinext domains list
 certinext domains list --offset 50 --limit 25
+certinext domains list --validated-by SSLCOM    # only SSL.com records
 
 # credentials explicit
 certinext domains --account-number ACCT --client-secret SECRET list
@@ -761,15 +800,18 @@ Get a single domain by name or ID.
 
 ```bash
 certinext domains get maine.edu
+certinext domains get maine.edu --validated-by SSLCOM
 certinext domains get vuxwZgEXWWFXQQWC-...
 ```
 
 #### create
 
 Create a new domain. Additional API fields can be passed as `KEY=VALUE` pairs.
+`--ca` picks the CA that validates it. Without it, the account decides.
 
 ```bash
 certinext domains create newdomain.example.com
+certinext domains create newdomain.example.com --ca SSLCOM
 ```
 
 #### deactivate
@@ -783,18 +825,26 @@ certinext domains deactivate DOMAIN_ID -y
 
 #### get-dcv
 
-Show current DCV status for a domain.
+Show current DCV status for a domain, by name or ID. An emSign domain shows
+its challenge token. An SSL.com domain instead lists every validation option
+SSL.com offers: method, record name and value to publish, the name it
+covers, its expiry and its ID. The option CertiNext currently checks is
+marked `*`.
 
 ```bash
 certinext domains get-dcv DOMAIN_ID
+certinext domains get-dcv maine.edu --validated-by SSLCOM
 ```
 
 #### verify-dcv
 
-Trigger DCV verification for a domain.
+Trigger DCV verification for a domain, by name or ID. For an SSL.com domain,
+`--option-id` checks a different option from the `get-dcv` list instead of
+the selected one.
 
 ```bash
 certinext domains verify-dcv DOMAIN_ID
+certinext domains verify-dcv maine.edu --validated-by SSLCOM --option-id OPTION_ID
 ```
 
 #### change-dcv-method
@@ -857,6 +907,12 @@ certinext ledger --sandbox --json
 
 `certinext list-certificates` lists all SSL/TLS certificate orders from the
 orders report. Use `--status` to filter by lifecycle status.
+
+The `ca` column (and the `ca` key in JSON) names the CA that issued each
+order. It comes from the order's product code, looked up in the catalog,
+because the issuer name can't tell: emSign issues from InCommon-branded
+intermediates. If the catalog can't be read, the column is left blank and
+the list still prints.
 
 #### Arguments
 
@@ -1160,6 +1216,9 @@ csr_file                    PEM-encoded CSR file (positional; omit to read from 
 --san FQDN                  Override SANs (default: extracted from CSR; each must be
                             a name in the CSR; repeatable)
 --auto-secure-www           Request automatic www-redirect coverage (API default: true)
+--ca CA                     The CA this profile's credential issues from (e.g. SSLCOM);
+                            turns on the domain-coverage pre-flight (see below)
+--skip-preflight            Place the order even if the --ca pre-flight fails
 
 # Requestor (can also be set via environment variables)
 --requestor-name NAME       Full name of the requestor (env: CERTINEXT_REQUESTOR_NAME)
@@ -1244,6 +1303,31 @@ export CERTINEXT_SIGNER_PLACE="Portland, ME"
 
 certinext issue-cert example.com.csr --output example.com.pem
 ```
+
+#### Choosing the CA (SSL.com)
+
+**The API credential picks the CA, not the command.** A REST credential set
+to SSL.com on the CertiNext API Credentials page issues every order from
+SSL.com, and an emSign one from emSign. No flag can change that. To use
+both, keep one profile per credential (see
+[Named profiles](#named-profiles)). Keep ordering with your usual InCommon
+product codes; the vendor translates them for an SSL.com credential.
+
+`--ca` tells `issue-cert` which CA the profile's credential issues from.
+Before ordering, it checks that every name on the certificate is covered
+by an active, DCV-verified domain record of that CA, and stops (exit 1,
+listing the names) if one is not. That catches a missing SSL.com domain
+record before an order exists to cancel. The check counts a verified parent
+as covering its subdomains, so it can pass an order the CA later rejects,
+but it never blocks one that would succeed. Store it per profile as
+`ca = "SSLCOM"` so you don't repeat it. `--skip-preflight` bypasses it.
+
+```bash
+certinext issue-cert example.com.csr --profile sslcom --ca SSLCOM
+```
+
+Once the certificate is issued, the log line `Certificate issued` names the
+leaf's issuer.
 
 #### Certificate lifecycle
 

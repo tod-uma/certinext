@@ -96,6 +96,8 @@ class OrderDefaults:
         org_id: Organization ID for OV/EV orders, or None.
         validity: Certificate validity in years (1, 2, or 3).
         product: CERTInext product code, or None for the API default.
+        ca: The CA the credential issues from (upper case, e.g. ``"SSLCOM"``),
+            or None to skip the domain-coverage pre-flight.
     """
 
     requestor_name: str
@@ -107,6 +109,7 @@ class OrderDefaults:
     org_id: str | None
     validity: int
     product: str | None
+    ca: str | None = None
 
 
 def resolve_order_defaults(
@@ -121,14 +124,15 @@ def resolve_order_defaults(
     org_id: str | None = None,
     validity: int | None = None,
     product: str | None = None,
+    ca: str | None = None,
 ) -> OrderDefaults:
     """Resolve order values with the 0.3.x precedence: CLI > environment > config.
 
     The requestor fields fall back to their ``CERTINEXT_REQUESTOR_*`` /
     ``CERTINEXT_SIGNER_PLACE`` environment variables and then the stored
     config defaults; the certificate fields (``type``, ``org_id``,
-    ``validity``, ``product``) fall back to config only, exactly as the
-    argparse parser's config-seeded defaults did.
+    ``validity``, ``product``, ``ca``) fall back to config only, exactly as
+    the argparse parser's config-seeded defaults did.
 
     Args:
         cfg: Stored defaults keyed by dest name, as returned by
@@ -142,6 +146,7 @@ def resolve_order_defaults(
         org_id: Explicit ``--org-id`` value, or None.
         validity: Explicit ``--validity`` value, or None.
         product: Explicit ``--product`` value, or None.
+        ca: Explicit ``--ca`` value, or None. Upper-cased.
 
     Returns:
         The resolved :class:`OrderDefaults`.
@@ -167,6 +172,7 @@ def resolve_order_defaults(
         org_id=org_id or (str(cfg["org_id"]) if cfg.get("org_id") else None),
         validity=validity if validity is not None else int(cfg.get("validity") or 1),
         product=product or (str(cfg["product"]) if cfg.get("product") else None),
+        ca=(ca or str(cfg.get("ca") or "")).strip().upper() or None,
     )
 
     missing = [
@@ -824,6 +830,73 @@ def _write_outputs(order: SslOrder, opts: OutputOptions, pem: str) -> None:
         print(pem_out, end="")
 
 
+def _preflight_coverage(sess: CertiNextSession, ca: str, domain: str | None, sans: list[str] | None) -> None:
+    """Refuse to order when a certificate name has no covering domain for ``ca``.
+
+    The API credential picks the CA (ADR 0020 amendment), so ``ca`` is the
+    operator's statement of which CA the profile's credential issues from.
+    The check is :meth:`~certinext.domains.DomainAccessor.uncovered_names`,
+    which is deliberately liberal (parents are assumed to cover subdomains):
+    it catches a name with no record for that CA at all, before an order
+    exists to clean up.
+
+    Args:
+        sess: An authenticated session.
+        ca: The CA, upper case (e.g. ``"SSLCOM"``).
+        domain: The certificate's CN, or None for a no-CN CSR.
+        sans: The certificate's SANs, or None.
+
+    Raises:
+        SystemExit: Exit 1 when any name is uncovered (listing them) or the
+            domain read fails.
+    """
+    names = [n for n in [domain, *(sans or [])] if n]
+    try:
+        uncovered = sess.domain.uncovered_names(names, ca)
+    except CertiNextAPIError as exc:
+        fatal_api_error(exc, "Error reading domains for the --ca pre-flight", hint="--skip-preflight bypasses it")
+    if uncovered:
+        log.error(
+            "No verified domain record for this CA covers these names; validate them "
+            "first or pass --skip-preflight",
+            ca=ca, uncovered=uncovered,
+        )
+        raise SystemExit(1)
+    log.info("Domain coverage pre-flight passed", ca=ca, names=len(names))
+
+
+def _leaf_issuer(pem: str) -> str | None:
+    """Return the issuer common name of the end-entity certificate in a PEM bundle.
+
+    Used only for an informational log line, so any parse problem returns
+    ``None`` rather than failing an issuance that already succeeded. The
+    issuer name says which CA signed it today, but SSL.com certificates are
+    expected to move to InCommon-branded intermediates later, so this is not
+    used to *decide* anything.
+
+    Args:
+        pem: The issued PEM bundle (leaf plus chain, any order).
+
+    Returns:
+        The leaf's issuer CN, or ``None`` when it can't be determined.
+    """
+    try:
+        from cryptography import x509
+        from cryptography.x509.oid import NameOID
+
+        for cert in x509.load_pem_x509_certificates(pem.encode()):
+            try:
+                is_ca = cert.extensions.get_extension_for_class(x509.BasicConstraints).value.ca
+            except x509.ExtensionNotFound:
+                is_ca = False
+            if not is_ca:
+                cns = cert.issuer.get_attributes_for_oid(NameOID.COMMON_NAME)
+                return str(cns[0].value) if cns else cert.issuer.rfc4514_string()
+    except Exception:  # noqa: BLE001 - informational only
+        return None
+    return None
+
+
 def _maybe_save_defaults(values: OrderDefaults, profile: str | None) -> None:
     """Store the effective requestor/certificate values as config defaults.
 
@@ -848,6 +921,7 @@ def _maybe_save_defaults(values: OrderDefaults, profile: str | None) -> None:
         "org_id": values.org_id,
         "validity": values.validity,
         "product": values.product,
+        "ca": values.ca,
     }
     section = f"profile {profile!r}" if profile else "the default profile"
     if sys.stdin.isatty():
@@ -906,6 +980,19 @@ def issue_cert(
             "product; list codes with 'certinext setup defaults'. "
             "Default: the API's default product for the --type."
         ),
+    ),
+    ca: Optional[str] = typer.Option(
+        None, "--ca", metavar="CA",
+        help=(
+            "The CA this profile's API credential issues from (e.g. SSLCOM). The "
+            "credential, not this flag, picks the CA; with it set, every CN/SAN "
+            "must be covered by a verified domain record of that CA before the "
+            "order is placed. Storable per profile as 'ca'. Default: no check."
+        ),
+    ),
+    skip_preflight: bool = typer.Option(
+        False, "--skip-preflight",
+        help="Place the order even when the --ca domain-coverage check fails or would fail",
     ),
     prevetting_token: Optional[str] = typer.Option(
         None, "--prevetting-token", metavar="TOKEN",
@@ -1051,6 +1138,7 @@ def issue_cert(
                 org_id=org_id,
                 validity=validity,
                 product=product,
+                ca=ca,
             )
         except ValueError as exc:
             ctx.fail(str(exc))
@@ -1125,6 +1213,9 @@ def issue_cert(
             if not values.signer_place and csr_info.signer_place:
                 values.signer_place = csr_info.signer_place  # "Orono, Maine"
                 signer_place = csr_info.signer_place
+
+            if values.ca and not skip_preflight:
+                _preflight_coverage(sess, values.ca, effective_domain, sans)
 
             order = _check_existing_and_prompt(sess, effective_domain, no_domain_check)
             if order is None:
@@ -1215,6 +1306,8 @@ def issue_cert(
                 order_id=order.order_id, status=order.status,
             )
             raise SystemExit(1)
+
+        log.info("Certificate issued", order_id=order.order_id, issuer=_leaf_issuer(pem))
 
         # ------------------------------------------------------------------
         # Output: write the PEM to files and/or stdout

@@ -63,6 +63,7 @@
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
 │ accounts            Show account info, groups, and organizations.                                │
+│ ca-validation       Show an organization's SSL.com validation status.                            │
 │ domain-cert-count   Show all registered domains and their certificate counts.                    │
 │ healthcheck         Probe every read-only CertiNext endpoint the library exposes and report      │
 │                     what works for the given credentials. Read-only and safe against production. │

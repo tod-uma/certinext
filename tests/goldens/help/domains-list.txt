@@ -4,8 +4,9 @@
  List all domains.                                                                                  
                                                                                                     
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --offset        INTEGER  Number of records to skip                                               │
-│ --limit         INTEGER  Maximum records to return                                               │
-│ --help                   Show this message and exit.                                             │
+│ --offset              INTEGER  Number of records to skip                                         │
+│ --limit               INTEGER  Maximum records to return                                         │
+│ --validated-by        CA       Only list records validated by this CA (e.g. SSLCOM, EMSIGN)      │
+│ --help                         Show this message and exit.                                       │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 

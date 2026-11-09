@@ -38,6 +38,7 @@ from certinext.cli._shared import (
 )
 from certinext.cli_support import prompt_stderr
 from certinext.domains import Domain
+from certinext.models.domains import DcvInfo
 
 domains_app = typer.Typer(
     name="domains",
@@ -46,6 +47,78 @@ domains_app = typer.Typer(
     pretty_exceptions_enable=False,
 )
 app.add_typer(domains_app)
+
+_VALIDATED_BY_HELP = (
+    "Only consider records validated by this CA (e.g. SSLCOM, EMSIGN). An "
+    "organization can hold the same name once per CA; without this a name "
+    "lookup returns the emSign record and warns."
+)
+
+
+def _validated_by_option() -> Any:
+    """Build the shared ``--validated-by`` option (one fresh instance per command).
+
+    Returns:
+        A typer option defaulting to ``None``.
+    """
+    return typer.Option(None, "--validated-by", metavar="CA", help=_VALIDATED_BY_HELP)
+
+
+def _lookup(ctx: typer.Context, name_or_id: str, validated_by: str | None) -> Domain:
+    """Fetch one domain by name or ID, honouring ``--validated-by`` for names.
+
+    Args:
+        ctx: The typer context (for the session).
+        name_or_id: A domain name (contains a dot) or an opaque domain ID.
+        validated_by: The CA to pick when a name has one record per CA.
+
+    Returns:
+        The matching :class:`Domain`.
+    """
+    return session(ctx).domain.get(name_or_id, validated_by=validated_by)
+
+
+def _show_dcv(ctx: typer.Context, info: DcvInfo) -> None:
+    """Print DCV details; non-emSign ``options`` get their own table.
+
+    JSON output is the full model dump, unchanged. The human form shows the
+    scalar fields as key/value rows, then one row per validation option
+    (method, record name and value, covered name, expiry), marking the
+    option CertiNext currently checks with ``*``.
+
+    Args:
+        ctx: The typer context (for the root ``--json`` flag).
+        info: The parsed DCV details.
+    """
+    # mode="json": datetimes (token_expiry, expires_at) aren't JSON-serializable raw.
+    data = info.model_dump(mode="json")
+    if ctx.obj.output_json:
+        print(json.dumps(data, indent=2))
+        return
+    data.pop("options", None)
+    if info.is_emsign:
+        for key in ("ca_status", "record_name", "record_value", "option_id"):
+            data.pop(key, None)
+    else:
+        for key in ("token", "host", "token_expiry"):
+            data.pop(key, None)
+    data["validated_by"] = info.ca
+    console = data_console()
+    console.print(pairs_table(data))
+    if info.options:
+        print("\nValidation options (* = selected):\n")
+        console.print(rows_table([
+            {
+                "": "*" if o.option_id and o.option_id == info.option_id else "",
+                "method": o.method,
+                "record_name": o.record_name,
+                "record_value": o.record_value,
+                "covers": o.covers_name or "",
+                "expires": o.expires_at.isoformat() if o.expires_at else "",
+                "option_id": o.option_id,
+            }
+            for o in info.options
+        ]))
 
 
 def _show_domain(ctx: typer.Context, domain: Domain) -> None:
@@ -104,6 +177,10 @@ def list_domains(
     ctx: typer.Context,
     offset: Optional[int] = typer.Option(None, "--offset", help="Number of records to skip"),
     limit: Optional[int] = typer.Option(None, "--limit", help="Maximum records to return"),
+    validated_by: Optional[str] = typer.Option(
+        None, "--validated-by", metavar="CA",
+        help="Only list records validated by this CA (e.g. SSLCOM, EMSIGN)",
+    ),
 ) -> None:
     """List all domains."""
     kwargs: dict[str, Any] = {}
@@ -111,6 +188,8 @@ def list_domains(
         kwargs["offset"] = offset
     if limit is not None:
         kwargs["limit"] = limit
+    if validated_by is not None:
+        kwargs["validated_by"] = validated_by
     _show_domains(ctx, session(ctx).domain.get_list(**kwargs))
 
 
@@ -120,9 +199,10 @@ def get_domain(
     domain_id: str = typer.Argument(
         ..., metavar="NAME_OR_ID", help="Domain name (e.g. maine.edu) or domain ID",
     ),
+    validated_by: Optional[str] = _validated_by_option(),
 ) -> None:
     """Get a single domain by name or ID."""
-    _show_domain(ctx, session(ctx).domain.get(domain_id))
+    _show_domain(ctx, _lookup(ctx, domain_id, validated_by))
 
 
 @domains_app.command("create")
@@ -133,12 +213,23 @@ def create_domain(
         None, metavar="[KEY=VALUE]...",
         help="Additional fields to include in the request body",
     ),
+    ca: Optional[str] = typer.Option(
+        None, "--ca", metavar="CA",
+        help=(
+            "CA to validate the domain (e.g. SSLCOM, EMSIGN). Omitted: the "
+            "account decides. The organization may hold the name once per CA."
+        ),
+    ),
 ) -> None:
     """Create a new domain."""
     fields: dict[str, str] = {}
     for pair in extra or []:
         key, _, value = pair.partition("=")
         fields[key] = value
+    if ca is not None:
+        if "ca" in fields:
+            ctx.fail("Give the CA once: --ca or ca=VALUE, not both")
+        fields["ca"] = ca
     _show_domain(ctx, session(ctx).domain.create(name, **fields))
 
 
@@ -160,21 +251,32 @@ def deactivate_domain(
 @domains_app.command("get-dcv")
 def get_dcv(
     ctx: typer.Context,
-    domain_id: str = typer.Argument(..., metavar="ID", help="Domain ID"),
+    domain_id: str = typer.Argument(
+        ..., metavar="NAME_OR_ID", help="Domain name (e.g. maine.edu) or domain ID",
+    ),
+    validated_by: Optional[str] = _validated_by_option(),
 ) -> None:
-    """Get DCV status for a domain."""
-    # mode="json": DcvInfo.token_expiry is a datetime, which the shared
-    # _show_data() -> json.dumps() path can't serialize directly.
-    _show_data(ctx, session(ctx).domain.get(domain_id).get_dcv().model_dump(mode="json"))
+    """Get DCV status for a domain, including every SSL.com validation option."""
+    _show_dcv(ctx, _lookup(ctx, domain_id, validated_by).get_dcv())
 
 
 @domains_app.command("verify-dcv")
 def verify_dcv(
     ctx: typer.Context,
-    domain_id: str = typer.Argument(..., metavar="ID", help="Domain ID"),
+    domain_id: str = typer.Argument(
+        ..., metavar="NAME_OR_ID", help="Domain name (e.g. maine.edu) or domain ID",
+    ),
+    validated_by: Optional[str] = _validated_by_option(),
+    option_id: Optional[str] = typer.Option(
+        None, "--option-id", metavar="ID",
+        help=(
+            "SSL.com domains only: check this validation option instead of the "
+            "selected one (IDs are listed by get-dcv)"
+        ),
+    ),
 ) -> None:
     """Trigger DCV verification for a domain."""
-    result = session(ctx).domain.get(domain_id).verify()
+    result = _lookup(ctx, domain_id, validated_by).verify(option_id=option_id)
     print(result)
     if ctx.obj.output_json:
         _show_data(ctx, result.raw)

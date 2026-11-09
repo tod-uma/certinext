@@ -11,7 +11,7 @@
 │ get                  Get a single domain by name or ID.                                          │
 │ create               Create a new domain.                                                        │
 │ deactivate           Deactivate a domain.                                                        │
-│ get-dcv              Get DCV status for a domain.                                                │
+│ get-dcv              Get DCV status for a domain, including every SSL.com validation option.     │
 │ verify-dcv           Trigger DCV verification for a domain.                                      │
 │ change-dcv-method    Change the DCV method for a domain.                                         │
 │ last-dcv-attempt     Get the last DCV attempt for a domain.                                      │

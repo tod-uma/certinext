@@ -73,6 +73,10 @@ class IssuanceDefaults(BaseModel):
     org_id: StrictStr | None = None
     validity: Literal[1, 2, 3] | None = None
     product: StrictStr | None = None
+    # The CA this profile's API credential issues from (e.g. "SSLCOM"); the
+    # credential, not the request, picks the CA (ADR 0020 amendment), so it is
+    # a per-profile fact. Drives issue-cert's domain-coverage pre-flight.
+    ca: StrictStr | None = None
 
 
 class ConnectionSettings(BaseModel):

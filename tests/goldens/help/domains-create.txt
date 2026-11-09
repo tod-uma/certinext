@@ -8,6 +8,8 @@
 │      [KEY=VALUE]...      TEXT  Additional fields to include in the request body                  │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --help          Show this message and exit.                                                      │
+│ --ca          CA  CA to validate the domain (e.g. SSLCOM, EMSIGN). Omitted: the account decides. │
+│                   The organization may hold the name once per CA.                                │
+│ --help            Show this message and exit.                                                    │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 

@@ -32,6 +32,7 @@ from certinext.cli import main as cli_main
 _HELP_CASES: dict[str, list[str]] = {
     "root": [],
     "accounts": ["accounts"],
+    "ca-validation": ["ca-validation"],
     "domain-cert-count": ["domain-cert-count"],
     "healthcheck": ["healthcheck"],
     "issue-cert": ["issue-cert"],

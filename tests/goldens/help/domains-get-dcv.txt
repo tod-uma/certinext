@@ -1,12 +1,15 @@
                                                                                                     
- Usage: certinext domains get-dcv [OPTIONS] ID                                                      
+ Usage: certinext domains get-dcv [OPTIONS] NAME_OR_ID                                              
                                                                                                     
- Get DCV status for a domain.                                                                       
+ Get DCV status for a domain, including every SSL.com validation option.                            
                                                                                                     
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│ *    ID      TEXT  Domain ID [required]                                                          │
+│ *    NAME_OR_ID      TEXT  Domain name (e.g. maine.edu) or domain ID [required]                  │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --help          Show this message and exit.                                                      │
+│ --validated-by        CA  Only consider records validated by this CA (e.g. SSLCOM, EMSIGN). An   │
+│                           organization can hold the same name once per CA; without this a name   │
+│                           lookup returns the emSign record and warns.                            │
+│ --help                    Show this message and exit.                                            │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 
