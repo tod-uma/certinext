@@ -127,17 +127,62 @@ together in v1.4.0rc2 (#38).
 - Automatic recovery: good, because it is convenient. Bad, because it can adopt
   the wrong order.
 
+## Amendment 2026-11-09: how an order reaches SSL.com
+
+This section records a fact the original decision left open. It changes none
+of the decisions above.
+
+**The API credential picks the CA. The order request does not.**
+
+- An API credential is bound to one CA connector, which is set on the portal's
+  API Credentials page. InCommon's 2026-11-06 update to the cert-users list says
+  the same thing.
+- `POST /ssl-certificates` has no CA field. An order goes to whichever CA the
+  calling credential is bound to.
+- **Send no `X-Product-Code` for SSL.com.**
+  - On a credential switched to SSL.com, sending SSL.com DV code `1011` in the
+    header still returned 422 `[EMS-1162] Invalid Product Code`.
+  - The same DV request without the header was issued in the create response
+    itself, by SSL.com TLS Issuing ECC CA R1 - STG.
+  - Both were sandbox requests on 2026-11-09.
+- **The catalog cannot show a credential's CA.** After the switch,
+  `GET /catalog/products` still listed the emSign products and the `SSL.com`
+  category (codes 1011–1020). The category name is the only CA marker on a
+  product.
+- **The 2026-11-06 EMS-1162 failures came from configuration.** Those requests
+  ran on a credential still bound to emSign. Widening its group scope did not
+  change its CA.
+- **The staging certificate:**
+  - It lasted 90 days, although the request asked for `validityYears: 1`. Callers
+    must not treat `validity_years` as the lifetime.
+  - Its EKU carried both serverAuth and clientAuth.
+  - Its chain came back already in order, and `as_pem_chain()` handled it
+    unchanged.
+
+Still open with the vendor (#39):
+
+- How to order a specific SSL.com product, such as wildcard, UCC or OV, while
+  the header rejects every SSL.com code.
+- Whether one credential can ever issue from both CAs.
+- Whether prod behaves the same once SSL.com issuance is enabled there.
+
+What this means for later work:
+
+- Choosing a CA means choosing a credential profile. A `ca=` argument on
+  `create()` cannot route an order.
+- The ordering design keeps its own future ADR. It needs the vendor's answers
+  first.
+- A CI issuance job issues from whichever CA its credential uses. eMudhra has
+  announced that emSign is leaving certificate issuance, so no emSign issuance
+  check is planned.
+- The emSign branching above still matters. Existing emSign domain and DCV
+  records stay in the API until they age out, and the fail-closed writes
+  protect them until then.
+
 ## More information
 
-- Still open: **how an order is routed to SSL.com.**
-  - The sandbox catalog lists SSL.com products in their own `SSL.com` category.
-    The products carry no CA field.
-  - On 2026-11-06, `POST /ssl-certificates` with an SSL.com DV product code in
-    `X-Product-Code` returned 422 `[EMS-1162] Invalid Product Code`. The result
-    was the same after the API credential's group scope was widened to all
-    groups, and again with an explicit `groupNumber`. The question goes to the
-    vendor.
-  - Ordering design will get its own ADR once this is answered.
+- The 2026-11-09 amendment above answers how an order is routed. The original
+  2026-11-06 text left that question open.
 - [MADR](https://adr.github.io/madr/): the format this record follows.
 - [httpx timeouts](https://www.python-httpx.org/advanced/timeouts/): the
   connect/read split and per-request timeouts.
@@ -150,6 +195,8 @@ together in v1.4.0rc2 (#38).
 ---
 > **AI-assistant disclaimer:** Drafted by Claude Code (Claude Haiku 5.5,
 > `claude-haiku-5-5`) from a conversation with Tod Detre. The design it records
-> was done in earlier sessions on 2026-11-05 and 2026-11-06. May contain
+> was done in earlier sessions on 2026-11-05 and 2026-11-06. The 2026-11-09
+> amendment records sandbox orders run in a later session (Claude Opus 5.5,
+> `claude-opus-5-5`, then Claude Haiku 5.5). May contain
 > inaccuracies or hallucinated details; verify specifics against current
 > sources before relying on them.
