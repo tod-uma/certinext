@@ -132,6 +132,16 @@ class TestDcvInfoMultiCa:
         assert info.ca == "NEWCA"
         assert not info.is_emsign
 
+    @pytest.mark.parametrize("ca", ["SSLCOM", "newca", ""])
+    def test_non_emsign_ignores_emsign_token_keys(self, ca: str) -> None:
+        """emSign token/host keys on a non-emSign payload never reach token/host (Codex review of #38)."""
+        info = DcvInfo.from_wire(
+            {"method": "dns-txt", "validatedBy": ca, "txtToken": "t", "token": "t", "dnsHost": "h", "host": "h"}
+        )
+        assert not info.is_emsign
+        assert info.token == ""
+        assert info.host == ""
+
     def test_malformed_options_are_skipped(self) -> None:
         """Non-dict entries in options are ignored rather than raising."""
         info = DcvInfo.from_wire({"validatedBy": "SSLCOM", "options": ["junk", None, {"optionId": "x"}]})
@@ -311,17 +321,30 @@ class TestAccessorMultiCa:
             ("umaine.edu", "EMSIGN"),
         ]
 
-    def test_boundary_refetch_full_page_warns(
+    def test_boundary_refetch_pages_past_a_full_page(
         self, accessor: DomainAccessor, mock_client: MagicMock, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """An exact-match re-fetch that fills a page is flagged as possibly incomplete."""
+        """An exact-match re-fetch that fills a page reads on, and recovers a row from page 2."""
         monkeypatch.setattr("certinext.domains._LIST_PAGE_SIZE", 2)
         emsign, sslcom, _ = self._rows()
-        mock_client.get.side_effect = [[emsign, sslcom], [], [emsign, sslcom]]
+        third = dict(emsign, domainId="id-third", validatedBy="NEWCA")
+        mock_client.get.side_effect = [[emsign, sslcom], [], [emsign, sslcom], [third]]
         with capture_logs() as logs:
             result = accessor.get_list()
-        assert sorted(d.id or "" for d in result) == ["id-em", "id-ssl"]
-        assert any("exact-match boundary re-fetch" in e["event"] for e in logs)
+        assert sorted(d.id or "" for d in result) == ["id-em", "id-ssl", "id-third"]
+        assert not any("exact-match boundary re-fetch" in e["event"] for e in logs)
+
+    def test_boundary_refetch_warns_at_ceiling(
+        self, accessor: DomainAccessor, mock_client: MagicMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A re-fetch whose pages never shrink stops at the ceiling and says so."""
+        monkeypatch.setattr("certinext.domains._LIST_PAGE_SIZE", 2)
+        monkeypatch.setattr("certinext.domains._MAX_LIST_PAGES", 2)
+        emsign, sslcom, _ = self._rows()
+        mock_client.get.side_effect = [[emsign, sslcom], [], [emsign, sslcom], [emsign, sslcom]]
+        with capture_logs() as logs:
+            accessor.get_list()
+        assert any("exact-match boundary re-fetch hit the page-count ceiling" in e["event"] for e in logs)
 
     def test_create_sends_ca(self, accessor: DomainAccessor, mock_client: MagicMock) -> None:
         """create(ca=...) sends the upper-cased CA in the body."""

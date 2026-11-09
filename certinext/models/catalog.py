@@ -23,6 +23,7 @@ from typing import Any
 from pydantic import AliasChoices, Field, field_validator
 
 from ._base import CertiNextModel, coerce_flag
+from .domains import EMSIGN, SSLCOM, UNKNOWN_CA
 
 
 class Product(CertiNextModel):
@@ -134,9 +135,50 @@ class ProductCategory(CertiNextModel):
             return [item for item in value if isinstance(item, dict)]
         return []
 
+    @property
+    def ca(self) -> str:
+        """Return the CA whose products this category holds, or :data:`UNKNOWN_CA`.
+
+        Products carry no CA field; the category name is the only marker
+        (sandbox 2026-11-06, prod 2026-11-09). Names are matched through an
+        explicit table, :data:`CATEGORY_CA`, case- and punctuation-
+        insensitively. An unlisted name — a new CA, or a non-CA category such
+        as ``"Private PKI Products"`` — maps to :data:`UNKNOWN_CA`, **never**
+        to emSign (ADR 0020: no "anything else is emSign" branch).
+
+        This tells you which CA a *product* belongs to. It cannot tell you
+        which CA an order will use: the API credential decides that (ADR
+        0020 amendment), and the catalog lists every category either way.
+        """
+        return CATEGORY_CA.get(_category_key(self.category_name or ""), UNKNOWN_CA)
+
     def __repr__(self) -> str:
         """Return a concise developer representation."""
         return f"ProductCategory(category_name={self.category_name!r}, products={len(self.products)})"
+
+
+def _category_key(name: str) -> str:
+    """Normalise a catalog category name for lookup in :data:`CATEGORY_CA`.
+
+    Args:
+        name: The wire ``categoryName``.
+
+    Returns:
+        The name lower-cased with everything but letters and digits removed.
+    """
+    return "".join(ch for ch in name.lower() if ch.isalnum())
+
+
+CATEGORY_CA: dict[str, str] = {
+    _category_key("SSL/TLS Certificates"): EMSIGN,
+    _category_key("SSL.com"): SSLCOM,
+}
+"""Catalog category name (normalised by :func:`_category_key`) to CA name.
+
+Seen in both environments: ``"SSL/TLS Certificates"`` holds the emSign
+(InCommon-branded) products and ``"SSL.com"`` holds codes 1011-1020. Add a
+row when the vendor adds a CA category; until then its products report
+:data:`UNKNOWN_CA`."""
 
 
 class CustomField(CertiNextModel):

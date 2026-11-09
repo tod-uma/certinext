@@ -169,6 +169,10 @@ class SslAccessor:
             product_code: Optional CERTInext product code sent as the
                 ``X-Product-Code`` header to select a specific catalog product.
                 ``None`` lets the API pick the default product for the variant.
+                On an SSL.com-bound credential, pass the *InCommon* code: the
+                vendor translates it (``970`` → SSL.com DV ``1011``), while an
+                SSL.com code itself is rejected with EMS-1162 (ADR 0020
+                amendment).
 
         Returns:
             :class:`SslOrder` wrapping the API response.

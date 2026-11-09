@@ -48,7 +48,7 @@ Errors:
     ``.field_errors`` surfaces the ``errors`` array.
 """
 
-from .accounts import AccountAccessor, AccountInfo, Group, Organization
+from .accounts import AccountAccessor, AccountInfo, CaLevelValidation, Group, Organization, OrgCaValidation
 from .catalog import CatalogAccessor, CustomField, Product, ProductCategory
 from .client import CertiNextClient, TimeoutSpec
 from .csr import CsrInfo
@@ -185,8 +185,10 @@ __all__ = [
     # Accounts
     "AccountAccessor",
     "AccountInfo",
+    "CaLevelValidation",
     "Group",
     "Organization",
+    "OrgCaValidation",
     # Catalog
     "CatalogAccessor",
     "CustomField",

@@ -363,8 +363,9 @@ def test_probe_r08_dcv_payload_keys(probe_env: str, client: CertiNextClient, bas
     Non-emSign domains (``validatedBy`` present -- SSL.com since 2026-11-05,
     GitLab #38) carry no token key by design; their challenge is
     ``recordName``/``recordValue``. For those the probe instead requires that
-    :meth:`DcvInfo.from_wire` yields a non-empty ``record_value``, which is the
-    silent-empty-challenge failure #38 fixed.
+    :meth:`DcvInfo.from_wire` yields a non-empty ``record_value`` whenever a
+    challenge is expected (the domain is PENDING or the payload sends a
+    ``recordValue``), which is the silent-empty-challenge failure #38 fixed.
     """
     _sandbox_only(probe_env)
     token_keys = {"txtToken", "fileToken", "token", "dnsContents"}
@@ -391,7 +392,12 @@ def test_probe_r08_dcv_payload_keys(probe_env: str, client: CertiNextClient, bas
             unmodelled[str(domain.id)] = extra
         info = DcvInfo.from_wire(body)
         if not info.is_emsign:
-            if not info.record_value:
+            # Same rule as the emSign token (#29): a VERIFIED record has no
+            # pending challenge — sandbox 2026-11-09, an order-created SSL.com
+            # record came back as {"method": "dns-persist", "options": []}.
+            # Only a PENDING domain, or a recordValue the parse dropped, is drift.
+            challenge_expected = (domain.dcv_status or "").upper() == "PENDING" or bool(body.get("recordValue"))
+            if challenge_expected and not info.record_value:
                 empty_challenge.append(f"{domain.id} ({info.ca})")
             continue
         present_token = token_keys & set(body)

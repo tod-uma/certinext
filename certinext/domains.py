@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import re
+from datetime import datetime, timezone
 from typing import Any
 
 import structlog
@@ -345,24 +346,45 @@ class DomainAccessor:
         # A name held once per CA ties under sortBy=domainName; a tie straddling
         # a page boundary can drop a row. Re-fetch each boundary name exactly.
         for name in sorted(boundary_names):
-            result = self._client.get(
-                _BASE,
-                params={**filters, "search": name, "exactMatch": "true", "limit": _LIST_PAGE_SIZE},
-            )
-            rows = _extract_domain_rows(result)
-            if len(rows) >= _LIST_PAGE_SIZE:
-                # One row per CA per name means this cannot fill a page today;
-                # if it ever does, tied rows past the page may be missing.
-                log.warning(
-                    "exact-match boundary re-fetch filled a whole page; results may be incomplete",
-                    domain=name,
-                    count=len(rows),
-                )
             _add([
-                r for r in rows
+                r for r in self._get_exact_rows(name, filters)
                 if isinstance(r, dict) and str(r.get("domainName", "")).lower() == name.lower()
             ])
         return domains
+
+    def _get_exact_rows(self, name: str, filters: dict[str, Any]) -> list[Any]:
+        """Return every raw row an exact-match search finds for one name, paging to the end.
+
+        One row per CA per name means a single page suffices today, but the
+        loop keeps the boundary re-fetch complete if that ever changes (Codex
+        review of #38). It is bounded by :data:`_MAX_LIST_PAGES` and warns
+        when it stops early.
+
+        Args:
+            name: The domain name to search for exactly.
+            filters: Server-side filter params from :func:`_filter_params`.
+
+        Returns:
+            All raw rows returned across the pages, in server order.
+        """
+        rows: list[Any] = []
+        params: dict[str, Any] = {
+            **filters, "search": name, "exactMatch": "true",
+            "sortBy": "domainName", "sortDir": "asc", "limit": _LIST_PAGE_SIZE,
+        }
+        offset = 0
+        for _ in range(_MAX_LIST_PAGES):
+            page = _extract_domain_rows(self._client.get(_BASE, params={**params, "offset": offset}))
+            rows.extend(page)
+            if len(page) < _LIST_PAGE_SIZE:
+                return rows
+            offset += _LIST_PAGE_SIZE
+        log.warning(
+            "exact-match boundary re-fetch hit the page-count ceiling; results may be incomplete",
+            domain=name,
+            count=len(rows),
+        )
+        return rows
 
     def get_pending_dcv(self, search: str | None = None, pattern: str | None = None) -> list[Domain]:
         """Return all active domains that have not yet completed DCV verification.
@@ -459,6 +481,90 @@ class DomainAccessor:
         if not isinstance(result, dict):
             raise ValueError(f"Unexpected list response for domain {domain_id_or_name!r}")
         return Domain.from_payload(self._client, result)
+
+    def find_covering(self, name: str, ca: str, domains: list[Domain] | None = None) -> Domain | None:
+        """Return the domain record that lets ``ca`` issue for ``name``, or ``None``.
+
+        A record covers ``name`` when it is that name or a parent of it
+        (``*.`` is stripped from a wildcard name and a wildcard record
+        first), belongs to ``ca``, is
+        ``ACTIVE`` and DCV ``VERIFIED``, and its DCV has not expired. The
+        closest such record wins.
+
+        **This check is deliberately liberal.** A list row cannot say whether
+        a parent's validation reaches subdomains: emSign inherits by account
+        setting, and an SSL.com ``dns-persist`` record covers subdomains while
+        an exact-name option does not. A wrongly passed check costs a vendor
+        reject at order time; a wrongly failed one would block issuance, so
+        parents are assumed to cover their subdomains.
+
+        Args:
+            name: A certificate name (CN or SAN), e.g. ``www.maine.edu`` or
+                ``*.maine.edu``.
+            ca: The CA that will issue, e.g. ``"SSLCOM"``. The API credential
+                picks the CA (ADR 0020 amendment), so this is the caller's
+                statement of which CA its credential is bound to.
+            domains: Records to search, e.g. from one
+                ``get_list(validated_by=ca)`` call reused across names. When
+                ``None`` that list is fetched.
+
+        Returns:
+            The covering :class:`Domain`, or ``None``.
+
+        Raises:
+            CertiNextAPIError: On a non-2xx API response while fetching.
+        """
+        wanted_ca = ca.strip().upper()
+        if domains is None:
+            domains = self.get_list(validated_by=wanted_ca)
+        target = name.strip().lower().removeprefix("*.").rstrip(".")
+        now = datetime.now(timezone.utc)
+        best: Domain | None = None
+        best_len = -1
+        for d in domains:
+            # A record can itself be a wildcard: an SSL.com wildcard order
+            # auto-creates one named "*.<cn>" (sandbox 2026-11-09).
+            record = (d.name or "").strip().lower().removeprefix("*.").rstrip(".")
+            if not record or d.ca != wanted_ca:
+                continue
+            if d.status != "ACTIVE" or d.dcv_status != "VERIFIED":
+                continue
+            if d.dcv_expires is not None and d.dcv_expires <= now:
+                continue
+            if target != record and not target.endswith("." + record):
+                continue
+            if len(record) > best_len:
+                best, best_len = d, len(record)
+        return best
+
+    def uncovered_names(self, names: list[str], ca: str) -> list[str]:
+        """Return the names no domain record of ``ca`` covers: an order pre-flight.
+
+        Fetches ``ca``'s records once and applies :meth:`find_covering` to
+        each name. An empty result means the order may go ahead; see
+        :meth:`find_covering` for why the check errs towards passing.
+
+        Args:
+            names: The certificate's CN and SANs.
+            ca: The CA the calling credential issues from, e.g. ``"SSLCOM"``.
+
+        Returns:
+            The uncovered names, in input order and without duplicates.
+
+        Raises:
+            CertiNextAPIError: On a non-2xx API response.
+        """
+        domains = self.get_list(validated_by=ca)
+        seen: set[str] = set()
+        uncovered: list[str] = []
+        for n in names:
+            key = n.strip().lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            if self.find_covering(n, ca, domains) is None:
+                uncovered.append(n)
+        return uncovered
 
     def create(
         self,

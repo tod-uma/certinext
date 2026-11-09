@@ -24,9 +24,14 @@ re-exported here for backward compatibility.
 
 from typing import Any
 
+import structlog
+
 from .client import CertiNextClient
 from .exceptions import CertiNextAPIError  # noqa: F401 — referenced in Raises docstrings
 from .models.catalog import CustomField, Product, ProductCategory
+from .models.domains import UNKNOWN_CA
+
+log = structlog.get_logger()
 
 __all__ = ["CatalogAccessor", "CustomField", "Product", "ProductCategory"]
 
@@ -75,6 +80,42 @@ class CatalogAccessor:
             products = result.get("products", [])
             raw = products if isinstance(products, list) else []
         return [ProductCategory.model_validate(item) for item in raw if isinstance(item, dict)]
+
+    def ca_by_product_code(self) -> dict[str, str]:
+        """Return a map of product code → CA name, from one catalog read.
+
+        Use it to label orders by CA: join
+        :attr:`~certinext.orders.OrderRecord.product_code` against it.
+        ``OrderRecord.issuer_ca`` cannot do this, because emSign issues from
+        *InCommon*-branded intermediates whose names never mention emSign.
+
+        The join works for SSL.com orders placed with an InCommon product
+        code: the vendor translates the code (sandbox 2026-11-09: ``970`` →
+        ``1011``, ``971`` → ``1012``) and the orders report records the
+        SSL.com code.
+
+        Returns:
+            ``{product_code: ca}`` with ``ca`` from :attr:`ProductCategory.ca`
+            (:data:`~certinext.models.domains.UNKNOWN_CA` for an unmapped
+            category). A code listed under categories of two different CAs
+            maps to ``UNKNOWN_CA``, since category order cannot say which is
+            right.
+
+        Raises:
+            CertiNextAPIError: On a non-2xx API response. Provides ``.status_code`` and ``.body``.
+        """
+        result: dict[str, str] = {}
+        for cat in self.list_products():
+            for p in cat.products:
+                if not p.product_code:
+                    continue
+                seen = result.get(p.product_code)
+                if seen is None:
+                    result[p.product_code] = cat.ca
+                elif seen != cat.ca:
+                    log.warning("product_code_in_two_cas", product_code=p.product_code, cas=[seen, cat.ca])
+                    result[p.product_code] = UNKNOWN_CA
+        return result
 
     def get_custom_fields(self, product_code: str) -> list[CustomField]:
         """Return the custom field definitions for a specific product.

@@ -369,12 +369,14 @@ class TestCertIssuance:
                 )
 
         # When the intermediate is absent we fall back to an issuer-name check:
-        # assert the leaf's issuer looks like a CertiNext/InCommon/emSign CA cert.
+        # assert the leaf's issuer looks like a CertiNext/InCommon/emSign/SSL.com CA
+        # cert. The API credential picks the CA (ADR 0020 amendment), so a
+        # credential bound to SSL.com issues from "SSL.com TLS Issuing ... - STG".
         leaf_issuer_cn_attrs = leaf.issuer.get_attributes_for_oid(NameOID.COMMON_NAME)
         assert leaf_issuer_cn_attrs, "Leaf cert has no issuer CN"
         raw = leaf_issuer_cn_attrs[0].value
         leaf_issuer_cn = raw.decode() if isinstance(raw, bytes) else raw
-        known_ca_keywords = ("InCommon", "emSign", "Staging", "CertiNext")
+        known_ca_keywords = ("InCommon", "emSign", "Staging", "CertiNext", "SSL.com")
         assert any(kw in leaf_issuer_cn for kw in known_ca_keywords), (
             f"Leaf cert issuer {leaf_issuer_cn!r} does not look like a CertiNext sandbox CA"
         )

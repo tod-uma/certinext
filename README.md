@@ -1786,6 +1786,40 @@ else:
 sess.domain.create("newdomain.example.com", dcv_method="dns-persist", ca="SSLCOM")
 ```
 
+**Ordering from SSL.com: the API credential picks the CA.** Each REST
+credential is bound to one CA on the portal's API Credentials page, and an
+order goes to that CA. No request field routes it (ADR 0020 amendment,
+GitLab #39). To issue from SSL.com, use a credential profile switched to
+SSL.com.
+
+> **Known issue: EMS-1162 with SSL.com product codes.** Sending an SSL.com
+> code (1011-1020) as `product_code` (the `X-Product-Code` header) returns
+> 422 `[EMS-1162] Invalid Product Code`, even on an SSL.com credential.
+> **Send the InCommon code instead.** On an SSL.com credential the vendor
+> translates InCommon codes into the matching SSL.com product: `970` (DV)
+> issued an SSL.com DV certificate, and `971` (DV Wildcard) issued an SSL.com
+> wildcard (sandbox, 2026-11-09). With `product_code` unset you get the default
+> DV. The OV, UCC and 30/45/90-day codes have not been tried yet, and the
+> vendor hasn't confirmed this behaviour (#39). Also, the SSL.com
+> certificate's lifetime is set by the CA, not by `validity_years`: the
+> staging certificate lasted 90 days on `validity_years=1`.
+
+Before ordering, check that the CA your credential uses has validated every
+name. `uncovered_names()` is that pre-flight. It fetches the CA's domain
+records once and treats a parent as covering its subdomains and wildcards.
+It errs towards passing, because a list row can't show per-option scope: a
+wrong pass costs a vendor reject, while a wrong block would stop issuance.
+
+```python
+names = ["www.maine.edu", "*.its.maine.edu"]
+missing = sess.domain.uncovered_names(names, ca="SSLCOM")
+if missing:
+    raise SystemExit(f"not validated for SSL.com: {missing}")
+order = sess.ssl.create_dv(...)          # no product_code for SSL.com
+
+record = sess.domain.find_covering("www.maine.edu", "SSLCOM")   # the Domain, or None
+```
+
 <details>
 <summary>Domain properties and DcvInfo fields</summary>
 
@@ -2030,6 +2064,29 @@ returned by `get_organization()` already has the detail loaded. On a
 detached `Organization` (no attached client) or if the fetch fails, these
 properties return `None`/empty rather than raising.
 
+**Validation with SSL.com.** OV and EV certificates from SSL.com need the
+organization validated by SSL.com as well.
+
+```python
+# Only organizations SSL.com OV certificates may use right now
+orgs = sess.accounts.list_organizations(validated_by="SSLCOM", product_variant="ov")
+
+for lvl in orgs[0].ca_levels("SSLCOM"):          # read from the list row, no extra call
+    print(lvl.level, lvl.status, lvl.usable, lvl.valid_till)
+
+val = sess.accounts.get_ca_validation("1234567")  # status, levels, what's missing
+print(val.status, val.usable("OV"), val.missing, val.ev_missing)
+val = sess.accounts.sync_ca_validation("1234567") # re-read from SSL.com (POST, cache only)
+
+# Starts real vetting with SSL.com. The agreement flag has no default on purpose.
+sess.accounts.submit_ca_validation("1234567", levels=["EV"], subscriber_agreement_accepted=True)
+```
+
+`OrgCaValidation` keeps the contact's name, phone and email out of its
+fields. They're still in `val.as_dict()`, so keep that out of logs. Its
+timestamps parse as naive datetimes, because the API sends them without an
+offset and hasn't said which zone they're in.
+
 ### Working with the catalog
 
 `sess.catalog` lists available certificate products and their custom fields.
@@ -2044,7 +2101,19 @@ for cat in categories:
 fields = sess.catalog.get_custom_fields("842")
 for f in fields:
     print(f.field_name, f.required)
+
+# Which CA each product belongs to, e.g. to label orders by CA
+cas = sess.catalog.ca_by_product_code()          # {"823": "EMSIGN", "1011": "SSLCOM", ...}
+for row in sess.orders.get_list():
+    print(row.common_name, cas.get(row.product_code or "", "UNKNOWN"))
 ```
+
+Products have no CA field, so `ProductCategory.ca` reads the category name:
+`"SSL/TLS Certificates"` is emSign and `"SSL.com"` is SSL.com. Any other
+category is `"UNKNOWN"`, never assumed to be emSign. Join on `product_code`,
+not `issuer_ca`: emSign issues from InCommon-branded intermediates whose
+names don't mention emSign. The catalog lists every category whichever CA
+your credential uses, so it can't tell you where an order will go.
 
 ### Working with the ledger
 

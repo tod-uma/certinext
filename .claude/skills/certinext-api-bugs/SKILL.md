@@ -1,7 +1,44 @@
 ---
 name: certinext-api-bugs
-description: Known CertiNext vendor API bugs affecting domain listing and filtering. Use when editing certinext/domains.py, dcv_update.py, or README.md sections about listing or filtering domains.
+description: Known CertiNext vendor API bugs and quirks in certificate ordering (SSL.com, X-Product-Code, EMS-1162) and in domain listing and filtering. Use when editing certinext/ssl_certificates.py, certinext/domains.py, certinext/cli/issue_cert.py, dcv_update.py, or README.md sections about ordering certificates or listing domains, or when an order fails with EMS-1162 Invalid Product Code.
 ---
+
+## Ordering from SSL.com (GitLab #39, vendor #187868, ADR 0020 amendment)
+
+**The API credential picks the CA, not the request.** A REST credential is
+bound to one CA connector on the portal's API Credentials page. Nothing in
+`POST /ssl-certificates` routes an order, so don't add a `ca=` argument that
+pretends to.
+
+**Never put an SSL.com code in `X-Product-Code`; send the InCommon code.**
+SSL.com codes (1011-1020, catalog category `"SSL.com"`) in that header return
+422 `[EMS-1162] Invalid Product Code`, even on a credential bound to SSL.com.
+On that credential the vendor *translates* InCommon codes per product. In
+sandbox on 2026-11-09, `970` (InCommon DV) issued SSL.com DV and was reported
+as `1011`, and `971` (InCommon DV Wildcard) issued an SSL.com wildcard,
+reported as `1012`. No header gives the default DV. Don't "fix" a caller that
+sends `970` to an SSL.com credential: that is the supported way to pick a
+product. EMS-1162 on an emSign-bound credential means a configuration problem:
+switch the credential, don't retry. Untested: the OV, UCC and 30/45/90-day
+codes, and what an InCommon code with no SSL.com equivalent does. The vendor
+hasn't confirmed the translation yet.
+
+**The catalog can't show a credential's CA.** It lists both categories
+either way. `ProductCategory.ca` says which CA a *product* belongs to;
+label orders by joining `OrderRecord.product_code` to
+`catalog.ca_by_product_code()`. That still works for translated orders,
+because the report records the SSL.com code. Don't read a code's catalog CA as
+"where an order with it goes": `970` is in the emSign category but issues from
+SSL.com on an SSL.com credential. Don't use `issuer_ca` either: emSign issues
+from InCommon-branded intermediates whose names never say emSign.
+
+**`validity_years` is not the lifetime.** The SSL.com staging cert lasted 90
+days on `validityYears: 1`.
+
+When the vendor answers #187868, update this section, README "More than one
+CA", and close or retitle #39.
+
+## Domain listing and filtering
 
 The following CertiNext API bugs were confirmed by vendor support on 2026-05-20. Vendor will notify when fixed.
 
@@ -63,7 +100,8 @@ and one of them is silently skipped. `_get_all_domains()` therefore
 re-fetches every name that sits on a page boundary with
 `search=<name>&exactMatch=true` (in both prod and sandbox specs) and merges
 the results by id. That costs one extra GET per 200 rows. Don't remove it as
-redundant.
+redundant. The re-fetch itself pages until a short page (Codex review
+of #38), so a name with more than 200 rows is still complete.
 
 **`validatedBy` list filter** was in the sandbox spec only as of 2026-11-05.
 `get_list(validated_by=...)` sends it and then filters again client-side,
