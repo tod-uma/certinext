@@ -26,7 +26,12 @@ from typing import Any, cast
 from pydantic import Field, PrivateAttr, field_validator
 
 from ..client import CertiNextClient
-from ._base import CertiNextModel
+from ._base import CertiNextModel, _LenientDatetime
+
+# Org CA-validation timestamps arrive as "YYYY-MM-DD HH:MM:SS" with no offset
+# (sandbox 2026-11-09) and the vendor has not said which zone they are in, so
+# they parse as naive datetimes (_base: use the UTC variant only once confirmed).
+_NAIVE_NOTE = "naive datetime; the wire carries no offset and its zone is unconfirmed"
 
 _ORGS_BASE = "/api/certinext/v2/organizations"
 
@@ -362,6 +367,37 @@ class Organization(CertiNextModel):
             return raw
         return []
 
+    def ca_levels(self, ca: str = "SSLCOM") -> list["CaLevelValidation"]:
+        """Return this organization's per-level validation with a non-emSign CA.
+
+        Reads the ``caValidations.<ca>`` block, which the org list rows and the
+        detail response both carry on an SSL.com account (observed in the
+        sandbox 2026-11-09). The detail endpoint is fetched only when the
+        block is missing from what this object already holds.
+
+        Args:
+            ca: CA name, case-insensitive (``"SSLCOM"``). Matched against the
+                wire key with dots and case removed, so ``"ssl.com"`` works.
+
+        Returns:
+            One :class:`CaLevelValidation` per level (``OV``, ``EV``) in wire
+            order; an empty list when the account has no such block.
+        """
+        block = (self._raw or {}).get("caValidations")
+        if not isinstance(block, dict):
+            block = self._detail_get("caValidations")
+        if not isinstance(block, dict):
+            return []
+        wanted = _ca_key(ca)
+        per_ca = next((v for k, v in block.items() if _ca_key(k) == wanted), None)
+        if not isinstance(per_ca, dict):
+            return []
+        return [
+            CaLevelValidation.model_validate({**value, "level": key.upper()})
+            for key, value in per_ca.items()
+            if isinstance(value, dict)
+        ]
+
     def as_dict(self) -> dict[str, Any]:
         """Return the raw API response dict (fetches detail data if not yet loaded)."""
         self._ensure_detail()
@@ -372,4 +408,185 @@ class Organization(CertiNextModel):
         return (
             f"Organization(organization_number={self.organization_number!r}, "
             f"organization_name={self.organization_name!r})"
+        )
+
+
+def _ca_key(ca: str) -> str:
+    """Normalise a CA name for comparison with wire keys and path segments.
+
+    The org endpoints spell SSL.com as ``sslcom`` (path, ``caValidations``
+    key, ``ca`` field) while the domain endpoints use ``SSLCOM``.
+
+    Args:
+        ca: A CA name in any of those spellings.
+
+    Returns:
+        The name lower-cased with dots, dashes and underscores removed.
+    """
+    return ca.lower().replace(".", "").replace("-", "").replace("_", "")
+
+
+class CaLevelValidation(CertiNextModel):
+    """One validation level (OV or EV) of an organization with a non-emSign CA.
+
+    Built by :meth:`Organization.ca_levels` and
+    :attr:`OrgCaValidation.levels`. Status values seen in the sandbox
+    (2026-11-09): ``VALIDATED`` and ``NOT_SUBMITTED``; kept as ``str`` so new
+    vendor states pass through.
+
+    Example::
+
+        for lvl in org.ca_levels("SSLCOM"):
+            print(lvl.level, lvl.status, lvl.usable, lvl.valid_till)
+    """
+
+    level: str | None = Field(default=None, description='Validation level, upper case (``"OV"``, ``"EV"``).')
+    status: str | None = Field(default=None, description='CA status, e.g. ``"VALIDATED"``, ``"NOT_SUBMITTED"``.')
+    usable: bool = Field(
+        default=False,
+        description="True when certificates at this level may use the organization now.",
+    )
+    valid_till: _LenientDatetime = Field(
+        default=None,
+        alias="validTill",
+        description=f"When the CA's validation lapses ({_NAIVE_NOTE}), or ``None`` when absent or blank.",
+    )
+
+    def __repr__(self) -> str:
+        """Return a concise developer representation."""
+        return f"CaLevelValidation(level={self.level!r}, status={self.status!r}, usable={self.usable!r})"
+
+
+class OrgCaValidation(CertiNextModel):
+    """An organization's validation with a non-emSign CA (SSL.com today).
+
+    Returned by :meth:`~certinext.accounts.AccountAccessor.get_ca_validation`,
+    :meth:`~certinext.accounts.AccountAccessor.sync_ca_validation` and
+    :meth:`~certinext.accounts.AccountAccessor.submit_ca_validation`.
+
+    The ``readiness`` block's ``missing`` lists are exposed as fields. Its
+    ``current`` values and the ``contact`` block hold a person's name, phone
+    and email, so they are **not** model fields; read them through
+    :meth:`as_dict` when needed, and keep them out of logs and fixtures.
+
+    Example::
+
+        val = sess.accounts.get_ca_validation("1234567")
+        if val.usable("OV"):
+            ...
+        elif val.missing:
+            print("Fix before submitting:", val.missing)
+    """
+
+    organization_number: str | None = Field(default=None, alias="organizationNumber", description="Organization ID.")
+    ca: str | None = Field(default=None, description='Wire CA name (``"sslcom"``).')
+    status: str | None = Field(default=None, description='Overall status, e.g. ``"VALIDATED"``.')
+    enabled: bool | None = Field(default=None, description="Whether the CA is enabled for this organization.")
+    subscriber_agreement_accepted: bool | None = Field(
+        default=None, alias="subscriberAgreementAccepted", description="Whether the CA's agreement was accepted.",
+    )
+    levels: list[CaLevelValidation] = Field(default_factory=list, description="Per-level validation state.")
+    default_levels: list[str] = Field(
+        default_factory=list, alias="defaultLevels", description="Levels a submit with no ``levels`` requests.",
+    )
+    validated_at: _LenientDatetime = Field(
+        default=None, alias="validatedAt", description=f"When validated ({_NAIVE_NOTE}).",
+    )
+    submitted_at: _LenientDatetime = Field(
+        default=None, alias="submittedAt", description=f"When submitted ({_NAIVE_NOTE}).",
+    )
+    last_synced_at: _LenientDatetime = Field(
+        default=None, alias="lastSyncedAt", description=f"When last re-read from the CA ({_NAIVE_NOTE}).",
+    )
+    last_error: str | None = Field(default=None, alias="lastError", description="Last CA error, or empty.")
+
+    @field_validator("levels", mode="before")
+    @classmethod
+    def _levels_keep_dict_rows(cls, value: Any) -> list[Any]:
+        """Drop non-dict entries from the wire ``levels`` list (ADR 0005).
+
+        Args:
+            value: The raw wire value for ``levels``.
+
+        Returns:
+            The dict entries, or ``[]`` for non-list input.
+        """
+        return [v for v in value if isinstance(v, dict)] if isinstance(value, list) else []
+
+    def _readiness(self) -> dict[str, Any]:
+        """Return the raw ``readiness`` block, or an empty dict.
+
+        Returns:
+            The block as sent by the API.
+        """
+        block = (self._raw or {}).get("readiness")
+        return block if isinstance(block, dict) else {}
+
+    def _readiness_list(self, key: str) -> list[str]:
+        """Return one of the ``readiness`` string lists.
+
+        Args:
+            key: The wire key (``missing``, ``evMissing``, ``softMissing``).
+
+        Returns:
+            The list's string entries; ``[]`` when absent.
+        """
+        value = self._readiness().get(key)
+        return [str(v) for v in value] if isinstance(value, list) else []
+
+    @property
+    def ready(self) -> bool | None:
+        """Whether the organization can be submitted for OV; ``None`` when unknown."""
+        value = self._readiness().get("ready")
+        return value if isinstance(value, bool) else None
+
+    @property
+    def ev_ready(self) -> bool | None:
+        """Whether the organization can be submitted for EV; ``None`` when unknown."""
+        value = self._readiness().get("evReady")
+        return value if isinstance(value, bool) else None
+
+    @property
+    def missing(self) -> list[str]:
+        """Items that block a submit (human-readable labels from the API)."""
+        return self._readiness_list("missing")
+
+    @property
+    def ev_missing(self) -> list[str]:
+        """Items that block an EV submit, e.g. ``"Business category"``."""
+        return self._readiness_list("evMissing")
+
+    @property
+    def soft_missing(self) -> list[str]:
+        """Recommended but non-blocking items."""
+        return self._readiness_list("softMissing")
+
+    def level(self, name: str) -> CaLevelValidation | None:
+        """Return the entry of :attr:`levels` for one level, or ``None``.
+
+        Args:
+            name: ``"OV"`` or ``"EV"``, case-insensitive.
+
+        Returns:
+            The matching level, or ``None`` when the CA reports none.
+        """
+        return next((lvl for lvl in self.levels if (lvl.level or "").upper() == name.upper()), None)
+
+    def usable(self, name: str) -> bool:
+        """Return True when certificates at this level may use the organization now.
+
+        Args:
+            name: ``"OV"`` or ``"EV"``, case-insensitive.
+
+        Returns:
+            The level's ``usable`` flag; ``False`` when the level is absent.
+        """
+        lvl = self.level(name)
+        return bool(lvl and lvl.usable)
+
+    def __repr__(self) -> str:
+        """Return a concise developer representation."""
+        return (
+            f"OrgCaValidation(organization_number={self.organization_number!r}, ca={self.ca!r}, "
+            f"status={self.status!r})"
         )

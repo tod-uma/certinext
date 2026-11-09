@@ -665,12 +665,16 @@ class TestDomainAccessorListPagination:
             [_domain_row(1), emsign],  # page 1 ends on the tied name
             [emsign, other],  # tie re-ordered: emsign repeated, sslcom skipped
             [],
-            [emsign, sslcom],  # exact re-fetch of maine.edu returns both records
+            [emsign, sslcom],  # exact re-fetch of maine.edu returns both records (a full page)
+            [],  # ...so it pages on, to an empty page
             [],  # exact re-fetch of maine.edux
         ]
         mock_client.get.side_effect = pages
         result = accessor.get_list()
         assert sorted(d.id or "" for d in result) == ["id-1", "id-em", "id-ssl", "id-x"]
+        # The exact re-fetch paged: its second request asked for offset 2.
+        refetch = [c.kwargs["params"] for c in mock_client.get.call_args_list if "exactMatch" in c.kwargs["params"]]
+        assert [(p["search"], p["offset"]) for p in refetch] == [("maine.edu", 0), ("maine.edu", 2), ("maine.edux", 0)]
 
     def test_stops_at_defensive_page_ceiling(
         self, accessor: DomainAccessor, mock_client: MagicMock, monkeypatch: pytest.MonkeyPatch
@@ -686,9 +690,10 @@ class TestDomainAccessorListPagination:
         mock_client.get.side_effect = _next_page
         result = accessor.get_list()
         # 3 pages * page size 2; the 3 boundary re-fetches return only
-        # differently-named rows, which the exact-name check discards.
+        # differently-named rows, which the exact-name check discards. Each
+        # re-fetch also never shrinks, so it too stops at the 3-page ceiling.
         assert len(result) == 6
-        assert mock_client.get.call_count == 6
+        assert mock_client.get.call_count == 3 + 3 * 3
 
 
 class TestDomainAccessorGetPendingDcv:

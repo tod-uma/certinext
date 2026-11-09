@@ -76,6 +76,29 @@ class CatalogAccessor:
             raw = products if isinstance(products, list) else []
         return [ProductCategory.model_validate(item) for item in raw if isinstance(item, dict)]
 
+    def ca_by_product_code(self) -> dict[str, str]:
+        """Return a map of product code → CA name, from one catalog read.
+
+        Use it to label orders by CA: join
+        :attr:`~certinext.orders.OrderRecord.product_code` against it.
+        ``OrderRecord.issuer_ca`` cannot do this, because emSign issues from
+        *InCommon*-branded intermediates whose names never mention emSign.
+
+        Returns:
+            ``{product_code: ca}`` with ``ca`` from :attr:`ProductCategory.ca`
+            (:data:`~certinext.models.domains.UNKNOWN_CA` for an unmapped
+            category). A code listed under two categories keeps the first.
+
+        Raises:
+            CertiNextAPIError: On a non-2xx API response. Provides ``.status_code`` and ``.body``.
+        """
+        result: dict[str, str] = {}
+        for cat in self.list_products():
+            for p in cat.products:
+                if p.product_code:
+                    result.setdefault(p.product_code, cat.ca)
+        return result
+
     def get_custom_fields(self, product_code: str) -> list[CustomField]:
         """Return the custom field definitions for a specific product.
 

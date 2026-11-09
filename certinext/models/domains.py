@@ -281,6 +281,10 @@ class DcvInfo(BaseModel):
         SSL.com keys (``validatedBy``, ``caStatus``, ``recordName``,
         ``recordValue``, ``optionId``, ``options``) map to their own fields
         and never feed :attr:`token` / :attr:`host` — see the class docstring.
+        The token and host chains are read **only for an emSign payload**: if
+        a non-emSign payload ever carried one of those keys, :attr:`token`
+        and :attr:`host` still stay ``""`` so no caller can publish it as an
+        emSign challenge (Codex review of #38).
 
         Args:
             raw: The raw API response dict from the DCV endpoint.
@@ -289,8 +293,10 @@ class DcvInfo(BaseModel):
             The normalised DcvInfo.
         """
         method = (raw.get("dcvMethod") or raw.get("method") or "").upper()
-        token = raw.get("txtToken") or raw.get("fileToken") or raw.get("token") or raw.get("dnsContents") or ""
-        host = raw.get("dnsHost") or raw.get("host") or ""
+        token = host = ""
+        if _normalise_ca(raw.get("validatedBy")) == EMSIGN:
+            token = raw.get("txtToken") or raw.get("fileToken") or raw.get("token") or raw.get("dnsContents") or ""
+            host = raw.get("dnsHost") or raw.get("host") or ""
         raw_options = raw.get("options")
         options = [
             DcvOption.model_validate(o) for o in (raw_options if isinstance(raw_options, list) else [])
