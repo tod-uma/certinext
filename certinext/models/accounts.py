@@ -23,7 +23,7 @@ property.
 
 from typing import Any, cast
 
-from pydantic import Field, PrivateAttr, field_validator
+from pydantic import ConfigDict, Field, PrivateAttr, field_validator
 
 from ..client import CertiNextClient
 from ._base import CertiNextModel, _LenientDatetime
@@ -468,6 +468,9 @@ class OrgCaValidation(CertiNextModel):
     ``current`` values and the ``contact`` block hold a person's name, phone
     and email, so they are **not** model fields; read them through
     :meth:`as_dict` when needed, and keep them out of logs and fixtures.
+    Unlike other models this one ignores unknown wire keys (ADR 0005's
+    retention lives on in :meth:`as_dict` only), so ``model_dump()``,
+    ``str()`` and ``repr()`` never carry that contact data.
 
     Example::
 
@@ -477,6 +480,8 @@ class OrgCaValidation(CertiNextModel):
         elif val.missing:
             print("Fix before submitting:", val.missing)
     """
+
+    model_config = ConfigDict(extra="ignore", populate_by_name=True, coerce_numbers_to_str=True)
 
     organization_number: str | None = Field(default=None, alias="organizationNumber", description="Organization ID.")
     ca: str | None = Field(default=None, description='Wire CA name (``"sslcom"``).')

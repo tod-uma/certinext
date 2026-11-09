@@ -28,7 +28,7 @@ import structlog
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 
 from ..client import CertiNextClient
-from ._base import CertiNextModel, _LenientDatetime
+from ._base import CertiNextModel, _LenientDatetime, _LenientDatetimeUTC
 
 log = structlog.get_logger()
 
@@ -447,11 +447,13 @@ class Domain(CertiNextModel):
         alias="verifiedAt",
         description="Timestamp when DCV was last completed, or ``None`` when not yet verified.",
     )
-    dcv_expires: _LenientDatetime = Field(
+    dcv_expires: _LenientDatetimeUTC = Field(
         default=None,
         alias="validTill",
         description=(
-            "DCV token expiry as a timezone-aware UTC datetime, or ``None``. "
+            "DCV token expiry as a timezone-aware UTC datetime, or ``None``; a "
+            "value without an offset is read as UTC so comparisons never mix "
+            "naive and aware datetimes. "
             "Only present after DCV has been completed; ``None`` for domains "
             "in PENDING or REJECTED state."
         ),

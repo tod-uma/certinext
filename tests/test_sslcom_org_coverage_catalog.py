@@ -123,6 +123,13 @@ class TestOrgCaValidationModel:
         assert "Placeholder Person" not in repr(v)
         assert v.as_dict()["contact"]["name"] == "Placeholder Person"
 
+    @pytest.mark.parametrize("render", [repr, str, lambda m: str(m.model_dump()), lambda m: m.model_dump_json()])
+    def test_contact_pii_not_serialized(self, render: Any) -> None:
+        """No standard rendering carries contact or readiness.current values (Codex review of b63a312)."""
+        out = render(OrgCaValidation.model_validate(SSLCOM_VALIDATION))
+        for value in ("Placeholder Person", "x@example.invalid", "+10000000000", "REG-PLACEHOLDER"):
+            assert value not in out
+
     def test_lenient_on_junk(self) -> None:
         """Missing blocks and junk level rows degrade instead of raising (ADR 0005)."""
         v = OrgCaValidation.model_validate({"levels": ["junk", {"level": "OV"}], "readiness": "x"})
@@ -268,6 +275,17 @@ class TestFindCovering:
         """Wrong CA, inactive, unverified and expired records never cover."""
         assert DomainAccessor(client).find_covering("www.maine.edu", "SSLCOM", [row]) is None
 
+    @pytest.mark.parametrize(
+        ("valid_till", "covers"),
+        [("2099-12-31 00:00:00", True), ("2000-01-01 00:00:00", False)],
+        ids=["future", "past"],
+    )
+    def test_offset_free_valid_till(self, client: MagicMock, valid_till: str, covers: bool) -> None:
+        """An offset-free validTill is read as UTC instead of raising on comparison (Codex review of b63a312)."""
+        row = _dom("maine.edu", validTill=valid_till)
+        assert row.dcv_expires is not None and row.dcv_expires.tzinfo is not None
+        assert (DomainAccessor(client).find_covering("www.maine.edu", "SSLCOM", [row]) is not None) is covers
+
     def test_emsign_ca(self, client: MagicMock) -> None:
         """The same rule works for emSign records (no validatedBy)."""
         assert DomainAccessor(client).find_covering("a.maine.edu", "EMSIGN", [_dom("maine.edu", ca=None)]) is not None
@@ -313,7 +331,7 @@ class TestCatalogCa:
         assert ProductCategory.model_validate({"categoryName": name}).ca == ca
 
     def test_ca_by_product_code(self, client: MagicMock) -> None:
-        """One catalog read yields a code → CA map; first category wins on a repeat."""
+        """One catalog read yields a code → CA map; a code under two CAs is UNKNOWN, not first-wins."""
         client.get.return_value = {
             "products": [
                 {"categoryName": "SSL/TLS Certificates", "products": [{"productCode": "823"}, {"productCode": "955"}]},
@@ -322,5 +340,15 @@ class TestCatalogCa:
             ]
         }
         assert CatalogAccessor(client).ca_by_product_code() == {
-            "823": "EMSIGN", "955": "EMSIGN", "1011": "SSLCOM", "900": "UNKNOWN",
+            "823": "UNKNOWN", "955": "EMSIGN", "1011": "SSLCOM", "900": "UNKNOWN",
         }
+
+    def test_repeat_within_one_ca_keeps_ca(self, client: MagicMock) -> None:
+        """A code listed twice under the same CA's categories is not ambiguous."""
+        client.get.return_value = {
+            "products": [
+                {"categoryName": "SSL.com", "products": [{"productCode": "1011"}]},
+                {"categoryName": "SSLCOM", "products": [{"productCode": "1011"}]},
+            ]
+        }
+        assert CatalogAccessor(client).ca_by_product_code() == {"1011": "SSLCOM"}
