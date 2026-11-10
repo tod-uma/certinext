@@ -434,11 +434,18 @@ class CaLevelValidation(CertiNextModel):
     (2026-11-09): ``VALIDATED`` and ``NOT_SUBMITTED``; kept as ``str`` so new
     vendor states pass through.
 
+    Like :class:`OrgCaValidation`, unknown wire keys are ignored rather than
+    retained (:meth:`as_dict` still has them), so a contact field the vendor
+    might add to a level row can't reach ``model_dump()`` or ``--json``
+    output through the parent's ``levels``.
+
     Example::
 
         for lvl in org.ca_levels("SSLCOM"):
             print(lvl.level, lvl.status, lvl.usable, lvl.valid_till)
     """
+
+    model_config = ConfigDict(extra="ignore", populate_by_name=True, coerce_numbers_to_str=True)
 
     level: str | None = Field(default=None, description='Validation level, upper case (``"OV"``, ``"EV"``).')
     status: str | None = Field(default=None, description='CA status, e.g. ``"VALIDATED"``, ``"NOT_SUBMITTED"``.')

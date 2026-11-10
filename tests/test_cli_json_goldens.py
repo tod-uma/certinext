@@ -126,6 +126,11 @@ _ROUTES: dict[str, Any] = {
     f"{_API}/domains/{_DOMAIN_ID}/dcv": {**SAMPLE_DCV_PENDING_WITH_TOKEN, "tokenExpiry": "2026-08-01T00:00:00Z"},
     f"{_API}/reports/orders": _ORDERS,
     f"{_API}/reports/ledger": _LEDGER,
+    # list-certificates joins productCode through the catalog for its ca column.
+    f"{_API}/catalog/products": [
+        {"categoryName": "SSL/TLS Certificates", "products": [{"productCode": "955"}, {"productCode": "970"}]},
+        {"categoryName": "SSL.com", "products": [{"productCode": "1011"}]},
+    ],
 }
 
 

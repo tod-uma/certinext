@@ -1,0 +1,17 @@
+                                                                                                    
+ Usage: certinext ca-validation [OPTIONS] ORG                                                       
+                                                                                                    
+ Show an organization's SSL.com validation status.                                                  
+                                                                                                    
+ Lists the overall status, each level (OV, EV) with its expiry, and any                             
+ items still missing before the organization can be submitted.                                      
+                                                                                                    
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    ORG      TEXT  Organization number [required]                                               │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --ca          CA  Non-emSign CA to show [default: SSLCOM]                                        │
+│ --sync            Re-read the status from the CA first (updates CertiNext's cached copy only)    │
+│ --help            Show this message and exit.                                                    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+

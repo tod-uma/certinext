@@ -1,12 +1,17 @@
                                                                                                     
- Usage: certinext domains verify-dcv [OPTIONS] ID                                                   
+ Usage: certinext domains verify-dcv [OPTIONS] NAME_OR_ID                                           
                                                                                                     
  Trigger DCV verification for a domain.                                                             
                                                                                                     
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│ *    ID      TEXT  Domain ID [required]                                                          │
+│ *    NAME_OR_ID      TEXT  Domain name (e.g. maine.edu) or domain ID [required]                  │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --help          Show this message and exit.                                                      │
+│ --validated-by        CA  Only consider records validated by this CA (e.g. SSLCOM, EMSIGN). An   │
+│                           organization can hold the same name once per CA; a name with more than │
+│                           one record is refused unless this (or a domain ID) picks one.          │
+│ --option-id           ID  SSL.com domains only: check this validation option instead of the      │
+│                           selected one (IDs are listed by get-dcv)                               │
+│ --help                    Show this message and exit.                                            │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 

@@ -34,6 +34,7 @@ except ModuleNotFoundError:  # pragma: no cover - typer built against real click
 # Command modules register themselves on the app at import time.
 from certinext.cli import (  # noqa: F401
     accounts,
+    ca_validation,
     domain_cert_count,
     domains,
     healthcheck,

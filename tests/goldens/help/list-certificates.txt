@@ -3,6 +3,10 @@
                                                                                                     
  List SSL/TLS certificate orders from the CertiNext orders report.                                  
                                                                                                     
+ The ``ca`` column (and JSON key) names the issuing CA, joined from each                            
+ order's product code through the catalog: the issuer name can't tell,                              
+ because emSign issues from InCommon-branded intermediates.                                         
+                                                                                                    
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --status        STATUS  Filter by certificate status (e.g. issued, expired, pending-dcv,         │
 │                         pending-csr, revoked, cancelled)                                         │

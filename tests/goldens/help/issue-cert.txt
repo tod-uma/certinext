@@ -27,6 +27,14 @@
 │                                                   codes with 'certinext setup defaults'.         │
 │                                                   Default: the API's default product for the     │
 │                                                   --type.                                        │
+│ --ca                             CA               The CA this profile's API credential issues    │
+│                                                   from (e.g. SSLCOM). The credential, not this   │
+│                                                   flag, picks the CA; with it set, every CN/SAN  │
+│                                                   must be covered by a verified domain record of │
+│                                                   that CA before the order is placed. Storable   │
+│                                                   per profile as 'ca'. Default: no check.        │
+│ --skip-preflight                                  Place the order even when the --ca             │
+│                                                   domain-coverage check fails or would fail      │
 │ --prevetting-token               TOKEN            Organization Consent Token for OV/EV orders.   │
 │                                                   When provided, the CA auto-approves without a  │
 │                                                   manual approver step. Retrieve from the        │
