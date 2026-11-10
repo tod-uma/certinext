@@ -840,7 +840,10 @@ certinext domains get-dcv maine.edu --validated-by SSLCOM
 
 Trigger DCV verification for a domain, by name or ID. For an SSL.com domain,
 `--option-id` checks a different option from the `get-dcv` list instead of
-the selected one.
+the selected one. Unlike the read commands, a name held under more than one
+CA is refused (exit 2) rather than resolved to the emSign record: pass
+`--validated-by` or the domain ID. `deactivate` refuses such a name the
+same way.
 
 ```bash
 certinext domains verify-dcv DOMAIN_ID

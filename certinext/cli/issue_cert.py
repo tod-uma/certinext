@@ -146,19 +146,26 @@ def resolve_order_defaults(
         org_id: Explicit ``--org-id`` value, or None.
         validity: Explicit ``--validity`` value, or None.
         product: Explicit ``--product`` value, or None.
-        ca: Explicit ``--ca`` value, or None. Upper-cased.
+        ca: Explicit ``--ca`` value, or None. Stripped and upper-cased
+            before it is compared with the stored value, so a blank flag can
+            never override a configured CA.
 
     Returns:
         The resolved :class:`OrderDefaults`.
 
     Raises:
         ValueError: When a required value (``--requestor-name`` or
-            ``--requestor-phone``) is missing from every source. The message
-            names the missing flags.
+            ``--requestor-phone``) is missing from every source, or when
+            ``--ca`` is given but blank (``--skip-preflight`` is the way to
+            turn the check off). The message names the offending flags.
     """
     def _requestor(cli_value: str | None, env_var: str, key: str) -> str:
         """Resolve one requestor field: CLI, then env, then stored config."""
         return cli_value or os.environ.get(env_var, "") or str(cfg.get(key, "") or "")
+
+    if ca is not None and not ca.strip():
+        raise ValueError("--ca must name a CA (use --skip-preflight to skip the coverage check)")
+    explicit_ca = ca.strip().upper() if ca is not None else None
 
     resolved = OrderDefaults(
         requestor_name=_requestor(requestor_name, "CERTINEXT_REQUESTOR_NAME", "requestor_name"),
@@ -172,7 +179,7 @@ def resolve_order_defaults(
         org_id=org_id or (str(cfg["org_id"]) if cfg.get("org_id") else None),
         validity=validity if validity is not None else int(cfg.get("validity") or 1),
         product=product or (str(cfg["product"]) if cfg.get("product") else None),
-        ca=(ca or str(cfg.get("ca") or "")).strip().upper() or None,
+        ca=explicit_ca or str(cfg.get("ca") or "").strip().upper() or None,
     )
 
     missing = [
@@ -1153,19 +1160,21 @@ def issue_cert(
                 f"got: {values.requestor_phone!r}"
             )
 
-        conn_profile = profile or ("sandbox" if sandbox else None)
-
+        # Saved defaults and the keyring prevetting token both belong to the
+        # profile whose credential the session uses, which honours
+        # CERTINEXT_PROFILE (cli_support.resolve_connection); config_profile
+        # resolves the same way.
         # Save defaults before any network work so a failed issuance never
         # loses the entered values.
         if save_defaults_flag:
-            _maybe_save_defaults(values, conn_profile)
+            _maybe_save_defaults(values, config_profile)
 
         sess = session(ctx)
 
         # Resolve the prevetting token: flag, then keyring, then environment.
         resolved_token = prevetting_token
         if not resolved_token:
-            svc = keyring_service("certinext", conn_profile)
+            svc = keyring_service("certinext", config_profile)
             resolved_token = (
                 keyring_get(svc, "CERTINEXT_PREVETTING_TOKEN")
                 or os.environ.get("CERTINEXT_PREVETTING_TOKEN")

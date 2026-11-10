@@ -8,8 +8,8 @@
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --validated-by        CA  Only consider records validated by this CA (e.g. SSLCOM, EMSIGN). An   │
-│                           organization can hold the same name once per CA; without this a name   │
-│                           lookup returns the emSign record and warns.                            │
+│                           organization can hold the same name once per CA; a name with more than │
+│                           one record is refused unless this (or a domain ID) picks one.          │
 │ --option-id           ID  SSL.com domains only: check this validation option instead of the      │
 │                           selected one (IDs are listed by get-dcv)                               │
 │ --help                    Show this message and exit.                                            │

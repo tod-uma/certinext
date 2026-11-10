@@ -22,18 +22,22 @@ renders the answer, not the wire.
 import json
 from collections.abc import Iterator
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
 import structlog
 
+from certinext._keyring import keyring_service
+from certinext.cli import issue_cert
 from certinext.cli import main as cli_main
 from certinext.cli.issue_cert import _leaf_issuer, _preflight_coverage, resolve_order_defaults
 from certinext.exceptions import CertiNextAPIError
 from certinext.models.accounts import OrgCaValidation
 from certinext.models.domains import DcvInfo
 from certinext.models.orders import OrderRecord
+from tests.test_csr import _make_csr
 
 _SSLCOM_DCV: dict[str, Any] = {
     "dcvMethod": "dns-persist",
@@ -81,19 +85,32 @@ _CA_VALIDATION: dict[str, Any] = {
 
 
 @pytest.fixture(autouse=True)
-def _uncached_structlog() -> Iterator[None]:
-    """Reset structlog around each test so no module logger gets cached.
+def _uncached_structlog(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Keep every module logger uncached while these tests run.
 
     ``setup_logging`` (run by every ``cli_main`` call) configures
     ``cache_logger_on_first_use=True``. A module logger first used under
-    that config, such as ``issue_cert.log`` from the pre-flight tests here,
-    stays bound for the rest of the process, and later
+    that config, such as ``issue_cert.log`` from the whole-command
+    issue-cert tests here, stays bound for the rest of the process —
+    :func:`structlog.reset_defaults` cannot undo it — and later
     :func:`structlog.testing.capture_logs` tests in other modules then see
-    no events. Defaults never cache.
+    no events. So ``structlog.configure`` is wrapped to force caching off,
+    and the config is reset before and after each test.
+
+    Args:
+        monkeypatch: The pytest monkeypatch fixture.
 
     Yields:
         Nothing; resets before and after the test.
     """
+    real_configure = structlog.configure
+
+    def configure_uncached(*args: Any, **kwargs: Any) -> None:
+        """Pass through to ``structlog.configure`` with caching disabled."""
+        kwargs["cache_logger_on_first_use"] = False
+        real_configure(*args, **kwargs)
+
+    monkeypatch.setattr(structlog, "configure", configure_uncached)
     structlog.reset_defaults()
     yield
     structlog.reset_defaults()
@@ -164,6 +181,54 @@ def test_create_ca_twice_is_a_usage_error(sess: MagicMock) -> None:
     sess.domain.create.assert_not_called()
 
 
+def _named(name: str, ca: str) -> MagicMock:
+    """Build a stand-in domain record with a name and a CA.
+
+    Args:
+        name: The domain name.
+        ca: The record's CA (``Domain.ca``).
+
+    Returns:
+        A MagicMock carrying ``name`` and ``ca``.
+    """
+    rec = MagicMock()
+    rec.name, rec.ca = name, ca
+    return rec
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [["domains", "verify-dcv", "example.edu"], ["domains", "deactivate", "example.edu", "--yes"]],
+)
+def test_write_refuses_name_held_under_two_cas(
+    sess: MagicMock, capsys: pytest.CaptureFixture[str], argv: list[str]
+) -> None:
+    """A write on a name with one record per CA is a usage error, not an emSign default."""
+    sess.domain.get_list.return_value = [_named("example.edu", "EMSIGN"), _named("Example.edu", "SSLCOM")]
+    assert cli_main(argv) == 2
+    assert "EMSIGN, SSLCOM" in capsys.readouterr().err
+    sess.domain.get.assert_not_called()
+    for rec in sess.domain.get_list.return_value:
+        rec.verify.assert_not_called()
+        rec.deactivate.assert_not_called()
+
+
+def test_verify_dcv_single_name_match_is_used(sess: MagicMock) -> None:
+    """One record for the name: it is verified directly, with no second lookup."""
+    only = _named("example.edu", "SSLCOM")
+    sess.domain.get_list.return_value = [_named("other.edu", "EMSIGN"), only]
+    assert cli_main(["domains", "verify-dcv", "example.edu"]) == 0
+    only.verify.assert_called_once_with(option_id=None)
+    sess.domain.get.assert_not_called()
+
+
+def test_verify_dcv_unknown_name_falls_through_to_get(sess: MagicMock) -> None:
+    """No match: the library lookup runs so its not-found error is the one reported."""
+    sess.domain.get_list.return_value = []
+    assert cli_main(["domains", "verify-dcv", "example.edu"]) == 0
+    sess.domain.get.assert_called_once_with("example.edu", validated_by=None)
+
+
 def test_get_dcv_sslcom_options_table(sess: MagicMock, capsys: pytest.CaptureFixture[str]) -> None:
     """The human form lists every option, stars the selected one and hides emSign fields."""
     sess.domain.get.return_value.get_dcv.return_value = DcvInfo.from_wire(_SSLCOM_DCV)
@@ -228,6 +293,17 @@ def test_ca_validation_json_has_no_pii(sess: MagicMock, capsys: pytest.CaptureFi
     assert "Jane" not in raw and "example.invalid" not in raw
 
 
+def test_ca_validation_json_drops_level_extras(sess: MagicMock, capsys: pytest.CaptureFixture[str]) -> None:
+    """An unknown key inside a level row (e.g. a contact) never reaches ``--json``."""
+    payload = json.loads(json.dumps(_CA_VALIDATION))
+    payload["levels"][0]["contactEmail"] = "jane@example.invalid"
+    val = OrgCaValidation.model_validate(payload)
+    assert "contactEmail" not in json.dumps(val.model_dump(mode="json"))
+    sess.accounts.get_ca_validation.return_value = val
+    assert cli_main(["ca-validation", "ORG-001", "--json"]) == 0
+    assert "example.invalid" not in capsys.readouterr().out
+
+
 def test_ca_validation_sync(sess: MagicMock) -> None:
     """``--sync`` calls the sync endpoint instead of the plain read."""
     sess.accounts.sync_ca_validation.return_value = _ca_val()
@@ -290,6 +366,139 @@ def test_resolve_ca_cli_beats_config() -> None:
 def test_resolve_ca_default_none() -> None:
     """With no source the pre-flight is off."""
     assert resolve_order_defaults(dict(_REQUIRED)).ca is None
+
+
+@pytest.mark.parametrize("blank", ["", " ", "\t"])
+def test_resolve_blank_ca_is_rejected(blank: str) -> None:
+    """A blank ``--ca`` is an error, never a silent override of the stored CA."""
+    with pytest.raises(ValueError, match="--ca"):
+        resolve_order_defaults({**_REQUIRED, "ca": "SSLCOM"}, ca=blank)
+
+
+class _OrderPlaced(Exception):
+    """Raised by the fake order creator to stop issue-cert before the workflow phase."""
+
+
+def _issue_cert(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    *extra: str,
+    config: str = "",
+    uncovered: list[str] | None = None,
+    env: dict[str, str] | None = None,
+    keyring_get: Any = None,
+    prevetting_token: str | None = "tok",
+) -> tuple[int, MagicMock, list[dict[str, Any]]]:
+    """Run ``certinext issue-cert`` end to end, offline, up to order creation.
+
+    The session is a MagicMock whose ``domain.uncovered_names`` returns
+    ``uncovered``; the config file holds ``config``; order creation is a fake
+    that records its keyword arguments and stops the command.
+
+    Args:
+        monkeypatch: The pytest monkeypatch fixture.
+        tmp_path: Per-test directory for the CSR and config file.
+        *extra: Additional command-line arguments.
+        config: TOML written to the config file.
+        uncovered: What the pre-flight's coverage read reports as uncovered.
+        env: Environment variables set after the certinext ones are cleared.
+        keyring_get: Replacement for the keyring read (default: finds nothing).
+        prevetting_token: ``--prevetting-token`` value, or None to omit the
+            flag so the keyring is consulted.
+
+    Returns:
+        ``(exit_code, session_mock, create_calls)``.
+    """
+    for var in ("CERTINEXT_PROFILE", "CERTINEXT_REQUESTOR_NAME", "CERTINEXT_REQUESTOR_EMAIL",
+                "CERTINEXT_REQUESTOR_PHONE", "CERTINEXT_PREVETTING_TOKEN"):
+        monkeypatch.delenv(var, raising=False)
+    for var, value in (env or {}).items():
+        monkeypatch.setenv(var, value)
+    cfg_path = tmp_path / "config.toml"
+    cfg_path.write_text(config)
+    monkeypatch.setenv("CERTINEXT_CONFIG", str(cfg_path))
+    mock = MagicMock()
+    mock.domain.uncovered_names.return_value = uncovered or []
+    monkeypatch.setattr(issue_cert, "session", lambda ctx: mock)
+    monkeypatch.setattr(issue_cert, "keyring_get", keyring_get or (lambda *a: None))
+    calls: list[dict[str, Any]] = []
+
+    def fake_create(sess: object, values: object, **kwargs: Any) -> None:
+        calls.append(kwargs)
+        raise _OrderPlaced
+
+    monkeypatch.setattr(issue_cert, "_create_order", fake_create)
+    csr_path = tmp_path / "req.csr"
+    csr_path.write_text(_make_csr(cn="a.example.edu", sans=["a.example.edu", "b.example.edu"]))
+    token = ["--prevetting-token", prevetting_token] if prevetting_token else []
+    argv = ["issue-cert", str(csr_path), "--no-domain-check", *token,
+            "--requestor-name", "Test User", "--requestor-email", "test@example.edu",
+            "--requestor-phone", "+12075550100", *extra]
+    try:
+        code = cli_main(argv)
+    except _OrderPlaced:
+        code = 0
+    except SystemExit as exc:
+        code = exc.code if isinstance(exc.code, int) else 1
+    return code, mock, calls
+
+
+def test_cli_blank_ca_flag_does_not_skip_configured_preflight(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """``--ca " "`` with a stored CA is a usage error before any API read or order."""
+    code, mock, calls = _issue_cert(
+        monkeypatch, tmp_path, "--ca", " ", config='[defaults]\nca = "SSLCOM"\n',
+    )
+    assert code == 2
+    mock.domain.uncovered_names.assert_not_called()
+    assert calls == []
+
+
+def test_cli_ca_flag_refuses_uncovered_names(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """``--ca`` checks the CN and SANs from the CSR and refuses before ordering."""
+    code, mock, calls = _issue_cert(monkeypatch, tmp_path, "--ca", "sslcom", uncovered=["b.example.edu"])
+    assert code == 1
+    mock.domain.uncovered_names.assert_called_once_with(["a.example.edu", "b.example.edu"], "SSLCOM")
+    assert calls == []
+
+
+def test_cli_configured_ca_runs_preflight_then_orders(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """A profile ``ca`` alone turns the pre-flight on; covered names reach order creation."""
+    code, mock, calls = _issue_cert(monkeypatch, tmp_path, config='[defaults]\nca = "sslcom"\n')
+    assert code == 0
+    mock.domain.uncovered_names.assert_called_once_with(["a.example.edu", "b.example.edu"], "SSLCOM")
+    assert len(calls) == 1
+
+
+def test_cli_skip_preflight_skips_configured_ca(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """``--skip-preflight`` is the way to turn a stored CA's check off."""
+    code, mock, calls = _issue_cert(
+        monkeypatch, tmp_path, "--skip-preflight", config='[defaults]\nca = "SSLCOM"\n',
+    )
+    assert code == 0
+    mock.domain.uncovered_names.assert_not_called()
+    assert len(calls) == 1
+
+
+def test_cli_env_profile_owns_saved_defaults_and_token(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """With ``CERTINEXT_PROFILE`` set, saves and keyring reads use that profile, not the default."""
+    saved: list[str | None] = []
+    services: list[str] = []
+    monkeypatch.setattr(issue_cert, "_maybe_save_defaults", lambda values, profile: saved.append(profile))
+
+    def recording_keyring_get(svc: str, key: str) -> None:
+        services.append(svc)
+
+    code, _mock, calls = _issue_cert(
+        monkeypatch, tmp_path, "--save-defaults",
+        env={"CERTINEXT_PROFILE": "sslcom"}, keyring_get=recording_keyring_get, prevetting_token=None,
+    )
+    assert code == 0 and len(calls) == 1
+    assert saved == ["sslcom"]
+    assert services == [keyring_service("certinext", "sslcom")]
 
 
 def test_preflight_passes() -> None:

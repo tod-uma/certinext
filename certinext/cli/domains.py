@@ -55,13 +55,24 @@ _VALIDATED_BY_HELP = (
 )
 
 
-def _validated_by_option() -> Any:
+_VALIDATED_BY_WRITE_HELP = (
+    "Only consider records validated by this CA (e.g. SSLCOM, EMSIGN). An "
+    "organization can hold the same name once per CA; a name with more than "
+    "one record is refused unless this (or a domain ID) picks one."
+)
+
+
+def _validated_by_option(help_text: str = _VALIDATED_BY_HELP) -> Any:
     """Build the shared ``--validated-by`` option (one fresh instance per command).
+
+    Args:
+        help_text: The option's help; write commands pass their own wording
+            because they refuse an ambiguous name instead of falling back.
 
     Returns:
         A typer option defaulting to ``None``.
     """
-    return typer.Option(None, "--validated-by", metavar="CA", help=_VALIDATED_BY_HELP)
+    return typer.Option(None, "--validated-by", metavar="CA", help=help_text)
 
 
 def _lookup(ctx: typer.Context, name_or_id: str, validated_by: str | None) -> Domain:
@@ -76,6 +87,43 @@ def _lookup(ctx: typer.Context, name_or_id: str, validated_by: str | None) -> Do
         The matching :class:`Domain`.
     """
     return session(ctx).domain.get(name_or_id, validated_by=validated_by)
+
+
+def _lookup_for_write(
+    ctx: typer.Context, name_or_id: str, validated_by: str | None, *, hint: str,
+) -> Domain:
+    """Fetch the one domain a write command acts on, refusing an ambiguous name.
+
+    :meth:`~certinext.domains.DomainAccessor.get` resolves a name held under
+    several CAs to the emSign record with only a warning. That suits reads,
+    but a write (verify, deactivate, change method) would then silently act
+    on the emSign record when the operator meant SSL.com, so here a name
+    with more than one record and no ``validated_by`` is a usage error. IDs,
+    a single match and an explicit ``validated_by`` behave as in
+    :func:`_lookup`.
+
+    Args:
+        ctx: The typer context (for the session and ``ctx.fail``).
+        name_or_id: A domain name (contains a dot) or an opaque domain ID.
+        validated_by: The CA to pick when a name has one record per CA.
+        hint: What the operator should pass instead, for the error message.
+
+    Returns:
+        The matching :class:`Domain`.
+
+    Raises:
+        click.UsageError: Via ``ctx.fail`` (exit 2) when the name matches
+            more than one record and ``validated_by`` is not given.
+    """
+    if validated_by is None and "." in name_or_id:
+        name = name_or_id.lower()
+        matches = [d for d in session(ctx).domain.get_list() if (d.name or "").lower() == name]
+        if len(matches) == 1:
+            return matches[0]
+        if len(matches) > 1:
+            cas = ", ".join(sorted(d.ca for d in matches))
+            ctx.fail(f"{name_or_id!r} matches {len(matches)} domain records (CAs: {cas}); {hint}")
+    return _lookup(ctx, name_or_id, validated_by)
 
 
 def _show_dcv(ctx: typer.Context, info: DcvInfo) -> None:
@@ -245,7 +293,8 @@ def deactivate_domain(
         if confirm != "y":
             print("Aborted.", file=sys.stderr)
             return
-    _show_domain(ctx, session(ctx).domain.get(domain_id).deactivate())
+    domain = _lookup_for_write(ctx, domain_id, None, hint="pass the domain ID (see 'domains list')")
+    _show_domain(ctx, domain.deactivate())
 
 
 @domains_app.command("get-dcv")
@@ -266,7 +315,7 @@ def verify_dcv(
     domain_id: str = typer.Argument(
         ..., metavar="NAME_OR_ID", help="Domain name (e.g. maine.edu) or domain ID",
     ),
-    validated_by: Optional[str] = _validated_by_option(),
+    validated_by: Optional[str] = _validated_by_option(_VALIDATED_BY_WRITE_HELP),
     option_id: Optional[str] = typer.Option(
         None, "--option-id", metavar="ID",
         help=(
@@ -276,7 +325,8 @@ def verify_dcv(
     ),
 ) -> None:
     """Trigger DCV verification for a domain."""
-    result = _lookup(ctx, domain_id, validated_by).verify(option_id=option_id)
+    domain = _lookup_for_write(ctx, domain_id, validated_by, hint="pass --validated-by CA or the domain ID")
+    result = domain.verify(option_id=option_id)
     print(result)
     if ctx.obj.output_json:
         _show_data(ctx, result.raw)
