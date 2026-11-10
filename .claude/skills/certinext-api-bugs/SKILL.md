@@ -1,6 +1,6 @@
 ---
 name: certinext-api-bugs
-description: Known CertiNext vendor API bugs and quirks in certificate ordering (SSL.com, X-Product-Code, EMS-1162) and in domain listing and filtering. Use when editing certinext/ssl_certificates.py, certinext/domains.py, certinext/cli/issue_cert.py, dcv_update.py, or README.md sections about ordering certificates or listing domains, or when an order fails with EMS-1162 Invalid Product Code.
+description: Known CertiNext vendor API bugs and quirks in certificate ordering (SSL.com, X-Product-Code, EMS-1162) and in domain listing and filtering. Use when editing certinext/ssl_certificates.py, certinext/domains.py, certinext/cli/issue_cert.py, dcv_update.py, or README.md sections about ordering certificates or listing domains, or when an order fails with EMS-1162 Invalid Product Code. Also when creating SSL.com domain records or debugging dns-persist DCV (a 400 on create, a verify that 422s with MPIC failed, or `policy=wildcard`).
 ---
 
 ## Ordering from SSL.com (GitLab #39, vendor #187868, ADR 0020 amendment)
@@ -35,6 +35,27 @@ from InCommon-branded intermediates whose names never say emSign.
 
 **`validity_years` is not the lifetime.** The SSL.com staging cert lasted 90
 days on `validityYears: 1`.
+
+### SSL.com domain records and dns-persist DCV (seen 2026-11-10, sandbox + prod)
+
+- **An emSign domain record does not give you an SSL.com one.** Each apex
+  needs its own SSL.com record:
+  `certinext-domains create <apex> --ca SSLCOM organization_id=<numeric org id> dcv_method=dns-persist`.
+  Without both `organization_id` and `dcv_method` the create returns 400. It
+  comes back `PENDING` with `DNS-PERSIST` selected.
+- **SSL.com validates on its own.** A PENDING record usually turns VERIFIED
+  within minutes of `_validation-persist.<apex>` being public, before any
+  `POST /dcv/verify`. A verify right after publishing can 422 with
+  `caMessage: "Multi-perspective inspection (MPIC) check failed"` or "Expected
+  DNS record not found". That's propagation, so re-run rather than debug it.
+  Don't query public resolvers for the name before publishing it: the cached
+  NXDOMAIN keeps it invisible there for the negative-cache TTL.
+- **The persist `recordValue` has no `; policy=wildcard`**, and the option
+  says `exactName: true`. draft-ietf-acme-dns-persist-01 §5.1/§6.2 reads that
+  as exact-FQDN-only, with no subdomains and no wildcards. Subdomain issuance
+  has worked in practice anyway (sandbox and prod, 2026-11-10), so don't add
+  the parameter preemptively. If a subdomain or wildcard order ever fails DCV,
+  appending it is the first thing to try. Ask #187868 why it's omitted.
 
 When the vendor answers #187868, update this section, README "More than one
 CA", and close or retitle #39.
