@@ -152,7 +152,11 @@ of the decisions above.
     `971`, it issued an SSL.com wildcard certificate, recorded as `1012`. The
     vendor translates InCommon codes into SSL.com codes product by product.
   - All were sandbox requests on 2026-11-09. The OV, UCC and 30/45/90-day
-    InCommon codes have not been tried.
+    InCommon codes had not been tried then.
+  - Added 2026-11-10: with InCommon OV code `955`, a sandbox `issue-cert`
+    order issued an SSL.com OV certificate (CA/B OV policy, issued by SSL.com
+    OV TLS Issuing ECC CA 1 - STG), and the orders report recorded `1015`. The
+    UCC and 30/45/90-day codes are still untried.
 - **The catalog cannot show a credential's CA.** After the switch,
   `GET /catalog/products` still listed the emSign products and the `SSL.com`
   category (codes 1011–1020). The category name is the only CA marker on a

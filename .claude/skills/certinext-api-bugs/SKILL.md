@@ -16,10 +16,11 @@ SSL.com codes (1011-1020, catalog category `"SSL.com"`) in that header return
 On that credential the vendor *translates* InCommon codes per product. In
 sandbox on 2026-11-09, `970` (InCommon DV) issued SSL.com DV and was reported
 as `1011`, and `971` (InCommon DV Wildcard) issued an SSL.com wildcard,
-reported as `1012`. No header gives the default DV. Don't "fix" a caller that
+reported as `1012`. On 2026-11-10, `955` (InCommon OV) issued SSL.com OV,
+reported as `1015`. No header gives the default DV. Don't "fix" a caller that
 sends `970` to an SSL.com credential: that is the supported way to pick a
 product. EMS-1162 on an emSign-bound credential means a configuration problem:
-switch the credential, don't retry. Untested: the OV, UCC and 30/45/90-day
+switch the credential, don't retry. Untested: the UCC and 30/45/90-day
 codes, and what an InCommon code with no SSL.com equivalent does. The vendor
 hasn't confirmed the translation yet.
 
