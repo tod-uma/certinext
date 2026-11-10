@@ -50,6 +50,13 @@ days on `validityYears: 1`.
   DNS record not found". That's propagation, so re-run rather than debug it.
   Don't query public resolvers for the name before publishing it: the cached
   NXDOMAIN keeps it invisible there for the negative-cache TTL.
+- **A record can come back with no `DNS-PERSIST` option**, offering only
+  DNS-TXT and HTTP. ums-certinext-scripts then reports `no-persist-option`.
+  Re-running doesn't help. Deleting the domain record and re-creating it with
+  `dcv_method=dns-persist` (portal, or the create above) gave a working persist
+  option, and the existing public TXT validated it at once (one prod apex,
+  2026-11-10, during a prod API slowdown). The cause is unconfirmed; Tod
+  suspects vendor overload at create time.
 - **The persist `recordValue` has no `; policy=wildcard`**, and the option
   says `exactName: true`. draft-ietf-acme-dns-persist-01 §5.1/§6.2 reads that
   as exact-FQDN-only, with no subdomains and no wildcards. Subdomain issuance
