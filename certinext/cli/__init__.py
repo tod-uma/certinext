@@ -22,7 +22,12 @@ registration side effect on :data:`certinext.cli._app.app`.
 
 import sys
 
+import httpx
+import structlog
 from typer import Abort
+
+from certinext.cli_support import log_caught_exception
+from certinext.exceptions import TRANSIENT_STATUS_CODES, CertiNextAPIError, CertiNextAuthError
 
 try:
     # typer >= 0.21 vendors click as typer._click and no longer depends on
@@ -50,6 +55,8 @@ from certinext.cli import (  # noqa: F401
 from certinext.cli._app import app
 
 __all__ = ["app", "main"]
+
+log = structlog.get_logger(__name__)
 
 # Every shared option now lives on the single root callback (ADR 0009), not
 # on a per-group callback — so Click would otherwise only accept them before
@@ -123,6 +130,11 @@ def main(args: list[str] | None = None) -> int:
     130 with ``Aborted.`` on stderr, and a command's ``SystemExit`` (e.g.
     healthcheck's monitoring-relevant codes) propagates untouched.
 
+    A command that lets a CertiNext outage escape (see
+    :func:`_vendor_failure`) exits 1 with one log line instead of a
+    traceback; 1 is what the uncaught exception exited with anyway. Any other
+    exception still propagates with its traceback, since it is a bug.
+
     Args:
         args: CLI arguments; None reads ``sys.argv[1:]`` (the console-script
             case). Alias entry points pass the subcommand pre-selected.
@@ -140,4 +152,37 @@ def main(args: list[str] | None = None) -> int:
     except ClickException as exc:
         exc.show()
         return exc.exit_code
+    except (CertiNextAuthError, CertiNextAPIError, httpx.TransportError) as exc:
+        failure = _vendor_failure(exc)
+        if failure is None:
+            raise
+        event, summary = failure
+        log_caught_exception(log, event, exc, error=summary)
+        return 1
     return result if isinstance(result, int) else 0
+
+
+def _vendor_failure(exc: Exception) -> tuple[str, str] | None:
+    """Describe an escaped exception that means CertiNext itself failed.
+
+    Args:
+        exc: A token, API, or transport error that no command handled.
+
+    Returns:
+        ``(event, summary)`` for the log line: the event says what to do,
+        the summary is one line without any HTML error page. ``None`` for an
+        API error below 500, which points at the request (a bug or a vendor
+        contract change) and keeps its traceback.
+    """
+    if isinstance(exc, CertiNextAuthError):
+        if exc.transient:
+            return "CertiNext is unavailable; try again later", exc.summary
+        if exc.status_code in (400, 401, 403):
+            return "CertiNext refused the credentials; check the profile", exc.summary
+        return "CertiNext token request failed", exc.summary
+    if isinstance(exc, httpx.TransportError):
+        return "Could not reach CertiNext; try again later", str(exc) or type(exc).__name__
+    if isinstance(exc, CertiNextAPIError) and exc.status_code >= 500:
+        state = "unavailable" if exc.status_code in TRANSIENT_STATUS_CODES else "failing"
+        return f"CertiNext is {state}; try again later", f"HTTP {exc.status_code}"
+    return None
