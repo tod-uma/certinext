@@ -19,9 +19,11 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import MagicMock, patch
 
+import httpx
 import pytest
 
 from certinext.auth import OAuth2ClientCredentials
+from certinext.exceptions import CertiNextAuthError
 
 
 def _make_auth(client_id: str = "test-account", client_secret: str = "test-secret") -> OAuth2ClientCredentials:
@@ -146,6 +148,84 @@ class TestFetchTokenErrors:
         with patch("certinext.auth.httpx.post", return_value=bad_resp):
             with pytest.raises(RuntimeError, match="non-JSON"):
                 auth.get_token()
+
+
+def _status_response(status: int, reason: str) -> MagicMock:
+    """Return a mock non-2xx token response with an HTML body (a gateway error page)."""
+    resp = MagicMock()
+    resp.is_success = False
+    resp.status_code = status
+    resp.reason_phrase = reason
+    resp.url = "https://us-api.certinext.io/oauth/token"
+    resp.text = "<html><center><h1>502 Bad Gateway</h1></center></html>"
+    return resp
+
+
+class TestTokenRetry:
+    """Transient token failures are retried; others fail at once; a recent failure is re-raised."""
+
+    def test_retries_a_gateway_error_then_succeeds(self) -> None:
+        """A 502 is retried after the first delay, and the next success is used."""
+        auth = _make_auth()
+        posts = [_status_response(502, "Bad Gateway"), _mock_token_response("ok")]
+        with patch("certinext.auth.httpx.post", side_effect=posts) as mock_post, \
+                patch("certinext.auth.time.sleep") as sleep:
+            assert auth.get_token() == "ok"
+        assert mock_post.call_count == 2
+        assert [c.args[0] for c in sleep.call_args_list] == [2.0]
+
+    def test_gives_up_after_two_retries(self) -> None:
+        """Three 503s raise a transient CertiNextAuthError carrying the status, still a RuntimeError."""
+        auth = _make_auth()
+        with patch("certinext.auth.httpx.post", return_value=_status_response(503, "Service Unavailable")) \
+                as mock_post, patch("certinext.auth.time.sleep") as sleep:
+            with pytest.raises(CertiNextAuthError, match="Token request failed: 503") as info:
+                auth.get_token()
+        assert isinstance(info.value, RuntimeError)
+        assert (info.value.status_code, info.value.transient) == (503, True)
+        assert info.value.summary == "token request: 503 Service Unavailable"
+        assert mock_post.call_count == 3
+        assert [c.args[0] for c in sleep.call_args_list] == [2.0, 5.0]
+
+    def test_retries_a_transport_error(self) -> None:
+        """A read timeout is retried; three in a row re-raise the httpx error unchanged."""
+        auth = _make_auth()
+        timeout = httpx.ReadTimeout("The read operation timed out")
+        with patch("certinext.auth.httpx.post", side_effect=[timeout, _mock_token_response("ok")]), \
+                patch("certinext.auth.time.sleep"):
+            assert auth.get_token() == "ok"
+
+        auth = _make_auth()
+        with patch("certinext.auth.httpx.post", side_effect=timeout) as mock_post, \
+                patch("certinext.auth.time.sleep"):
+            with pytest.raises(httpx.ReadTimeout):
+                auth.get_token()
+        assert mock_post.call_count == 3
+
+    def test_does_not_retry_a_credentials_error(self) -> None:
+        """401 cannot be fixed by retrying: one request, no sleep, not transient."""
+        auth = _make_auth()
+        with patch("certinext.auth.httpx.post", return_value=_status_response(401, "Unauthorized")) \
+                as mock_post, patch("certinext.auth.time.sleep") as sleep:
+            with pytest.raises(CertiNextAuthError) as info:
+                auth.get_token()
+        assert mock_post.call_count == 1 and not sleep.called
+        assert not info.value.transient
+
+    def test_recent_failure_is_reraised_without_a_request(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Within the hold-off a second caller fails at once; after it, a new fetch is tried."""
+        auth = _make_auth()
+        with patch("certinext.auth.httpx.post", return_value=_status_response(401, "Unauthorized")) \
+                as mock_post:
+            with pytest.raises(CertiNextAuthError):
+                auth.get_token()
+            with pytest.raises(CertiNextAuthError):
+                auth.get_token()
+        assert mock_post.call_count == 1
+
+        monkeypatch.setattr("certinext.auth._FAILURE_HOLDOFF", 0.0)
+        with patch("certinext.auth.httpx.post", return_value=_mock_token_response("ok")):
+            assert auth.get_token() == "ok"
 
 
 class TestInvalidate:

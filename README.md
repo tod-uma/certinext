@@ -2541,6 +2541,28 @@ except httpx.HTTPError as exc:        # timeout, DNS, connection refused, ...
 > transport failures, as above. Code that already caught `CertiNextAPIError`
 > needs no changes.
 
+#### Token failures and outages
+
+The OAuth token is fetched on the first API call and again before it expires,
+so a token failure can surface from any call. A token endpoint that answers
+with an error raises `CertiNextAuthError`: a `RuntimeError` (what it was before
+1.4.0rc9, so `except RuntimeError:` still works) with `.status_code`,
+`.transient` (502/503/504) and a one-line `.summary`. It is deliberately not a
+`CertiNextAPIError`, because a handler that degrades one feature on an API
+error should not quietly carry on without a token. An unreachable token
+endpoint raises the `httpx` transport error, as before.
+
+The token request is the one request the library retries: twice, after 2 s
+and 5 s, on a transport error or a 502/503/504. API calls are never retried.
+After a failed fetch, `get_token()` re-raises that failure for 10 seconds
+instead of trying again, so parallel workers stop together.
+
+The `certinext` command turns an outage that a subcommand does not handle (a
+token failure, a transport error, or an API 5xx) into one log line and exit 1,
+for example `CertiNext is unavailable; try again later error='token request:
+502 Bad Gateway'`. The full traceback still goes to the debug-log sidecar. A
+4xx API error that escapes keeps its traceback, since it points at a bug.
+
 #### A timed-out certificate order
 
 When a create call (`sess.ssl.create_dv()`, `create_ov()`, ...) gets no

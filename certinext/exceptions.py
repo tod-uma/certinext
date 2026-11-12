@@ -152,6 +152,50 @@ class CertiNextRateLimitError(CertiNextAPIError):
         super().__init__(status_code, body, *args, response=response)
 
 
+#: HTTP statuses that mean CertiNext (or its gateway) is down or overloaded,
+#: not that the request was wrong. Worth retrying later.
+TRANSIENT_STATUS_CODES = frozenset({502, 503, 504})
+
+
+class CertiNextAuthError(RuntimeError):
+    """Raised when the OAuth token endpoint refuses or fails a token request.
+
+    Subclasses :exc:`RuntimeError`, which the token fetch raised before
+    1.4.0rc9, so existing ``except RuntimeError`` handlers keep working. The
+    message is unchanged too (status, URL and raw body); the healthcheck
+    classifies auth failures by matching it.
+
+    It is deliberately *not* a :class:`CertiNextAPIError`: handlers that
+    catch API errors to degrade one feature must opt in to token failures,
+    since a failed token request affects every later call, not one.
+
+    Attributes:
+        status_code: The token endpoint's HTTP status.
+        reason: Its reason phrase (e.g. ``"Bad Gateway"``).
+    """
+
+    def __init__(self, message: str, status_code: int, reason: str = "") -> None:
+        """
+        Args:
+            message: The full error message.
+            status_code: The HTTP status the token endpoint returned.
+            reason: The HTTP reason phrase.
+        """
+        self.status_code = status_code
+        self.reason = reason
+        super().__init__(message)
+
+    @property
+    def transient(self) -> bool:
+        """Whether the status means the service is down or overloaded (502/503/504)."""
+        return self.status_code in TRANSIENT_STATUS_CODES
+
+    @property
+    def summary(self) -> str:
+        """One line without the response body, e.g. ``"token request: 502 Bad Gateway"``."""
+        return f"token request: {self.status_code} {self.reason}".rstrip()
+
+
 class CertiNextTimeoutError(TimeoutError):
     """Raised when polling for order issuance exceeds the configured wait limit.
 
