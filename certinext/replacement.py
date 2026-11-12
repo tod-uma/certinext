@@ -455,6 +455,10 @@ class ReportRow:
         possibly_replaced_by: As ``replaced_by``, but matched on the common
             name alone because this row's SANs are unknown. Informational:
             the row stays :attr:`outstanding`.
+        renewed: Superseded by a newer covering certificate that itself
+            needs replacing, which carries the work forward. Narrower than
+            ``superseded``: a newer certificate whose verdict is unknown,
+            conflicting, or OK without an evaluated CA carries nothing.
     """
 
     facts: CertificateFacts
@@ -464,6 +468,7 @@ class ReportRow:
     replaced_by: str | None = None
     replaced_by_ca: str | None = None
     possibly_replaced_by: str | None = None
+    renewed: bool = False
 
     @property
     def verdict(self) -> Verdict:
@@ -475,15 +480,17 @@ class ReportRow:
         """Whether this row is replacement work still to do.
 
         True when it needs replacing and nothing newer is *confirmed* to
-        account for it: no ``replaced_by`` and not ``superseded`` (a newer
+        account for it: no ``replaced_by`` and not ``renewed`` (a newer
         sibling that still needs replacing carries the work, so it is not
-        counted twice). A common-name match alone never clears a row:
+        counted twice). Being ``superseded`` alone is not enough, since the
+        newer certificate may be neither a replacement nor counted itself.
+        A common-name match alone never clears a row:
         ``possibly_replaced_by`` and ``possibly_superseded`` leave it
         outstanding, since the newer certificate may lack some of its SANs.
         The count may therefore overstate the work without inspection, but
         never understates it.
         """
-        return self.verdict.needs_replacing and not (self.replaced_by or self.superseded)
+        return self.verdict.needs_replacing and not (self.replaced_by or self.renewed)
 
     def days_left(self, now: dt.datetime) -> int:
         """Return whole days until expiry.
@@ -533,6 +540,7 @@ class ReportRow:
             "replaced_by": self.replaced_by,
             "replaced_by_ca": self.replaced_by_ca,
             "possibly_replaced_by": self.possibly_replaced_by,
+            "renewed": self.renewed,
             "outstanding": self.outstanding,
             "ordered_by_name": f.ordered_by_name,
             "ordered_by_email": f.ordered_by_email,
@@ -638,14 +646,17 @@ class ReplacementReport:
             latest_only: Drop superseded rows.
             expiring_within: Keep only rows expiring within this many days.
             outstanding: Keep only :attr:`ReportRow.outstanding` rows (the
-                work still to do). Implies ``latest_only``, since an
-                outstanding row is never superseded.
+                work still to do). Already de-duplicated: a row renewed by a
+                newer one that still needs replacing is not outstanding. A
+                row superseded only by a certificate that carries nothing
+                (unknown verdict, unmapped CA) is kept unless ``latest_only``
+                is also set.
 
         Returns:
             Matching rows, soonest expiry first.
         """
         rows = self.rows
-        if latest_only or outstanding:
+        if latest_only:
             rows = [r for r in rows if not r.superseded]
         if outstanding:
             rows = [r for r in rows if r.outstanding]
@@ -696,8 +707,8 @@ class ReplacementReport:
             (outstanding rows with only a CN match to a passing certificate;
             a subset of ``outstanding``), ``superseded``,
             ``possibly_superseded``, and ``errors``. Rows needing replacement
-            split exactly into ``outstanding``, ``replaced``, and superseded
-            rows without a replacement.
+            split exactly into ``outstanding``, ``replaced``, and
+            :attr:`ReportRow.renewed` rows without a replacement.
         """
         verdicts = Counter(r.verdict for r in rows)
         summary = {
@@ -923,7 +934,11 @@ def mark_superseded(rows: list[ReportRow]) -> None:
 
     In the same pass, a row whose own verdict is not :attr:`Verdict.OK` gets
     ``replaced_by``/``replaced_by_ca`` from the **newest** covering row whose
-    verdict is OK (``possibly_replaced_by`` on a CN-only match). Rows must
+    verdict is OK (``possibly_replaced_by`` on a CN-only match). When the
+    ``ca`` signal is active, a coverer counts only if its CA was evaluated:
+    with another signal active, an unmapped product code can still score OK
+    without showing the certificate left the distrusted CA. ``renewed`` is
+    set when a covering row (SANs known) itself needs replacing. Rows must
     therefore be classified first. Flags are reset and set in place, so
     calling this again on the same rows is safe.
 
@@ -940,7 +955,7 @@ def mark_superseded(rows: list[ReportRow]) -> None:
             by_name[name].append(row)
 
     for row in rows:
-        row.superseded = row.possibly_superseded = False
+        row.superseded = row.possibly_superseded = row.renewed = False
         row.replaced_by = row.replaced_by_ca = row.possibly_replaced_by = None
         names = row.facts.names()
         if not names:
@@ -954,10 +969,15 @@ def mark_superseded(rows: list[ReportRow]) -> None:
         known = row.facts.sans_known
         if known:
             row.superseded = bool(coverers)
+            row.renewed = any(o.verdict.needs_replacing for o in coverers)
         else:
             row.possibly_superseded = bool(coverers)
 
-        passing = [o for o in coverers if o.verdict is Verdict.OK]
+        # OK with the ca signal unevaluated (an unmapped product code) proves no CA move.
+        passing = [
+            o for o in coverers
+            if o.verdict is Verdict.OK and "ca" not in o.classification.unevaluated
+        ]
         if row.verdict is Verdict.OK or not passing:
             continue
         newest = max(passing, key=recency)

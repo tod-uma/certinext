@@ -865,7 +865,7 @@ def test_newer_emsign_cert_supersedes_but_does_not_replace() -> None:
     old = _ca_row("ORDER-00001", 60, "EMSIGN", ["a.example.edu"])
     new = _ca_row("ORDER-00002", 5, "EMSIGN", ["a.example.edu"])
     rp.mark_superseded([old, new])
-    assert old.superseded and old.replaced_by is None and not old.outstanding
+    assert old.superseded and old.renewed and old.replaced_by is None and not old.outstanding
     assert new.outstanding
 
 
@@ -888,6 +888,40 @@ def test_cn_only_sslcom_match_is_possibly_replaced() -> None:
     rp.mark_superseded([old, new])
     assert (old.replaced_by, old.possibly_replaced_by) == (None, "ORDER-00002")
     assert old.possibly_superseded and old.outstanding
+
+
+def test_coverer_with_unevaluated_ca_is_not_a_replacement() -> None:
+    """An OK coverer whose CA is unmapped proves no CA move (external review finding 2).
+
+    With ca plus issuer active, a newer cert with an unmapped product code and
+    a non-matching issuer scores OK on the issuer alone; it must not count as
+    the emSign cert's replacement.
+    """
+    criteria = CA_CRITERIA.with_overrides(issuers=[BAD_INT])
+    sans = ["a.example.edu"]
+    insp = rp.Inspection("RSA", 2048, "RSA 2048", sans, GOOD_INT, [GOOD_INT, GOOD_ROOT])
+    old_insp = rp.Inspection("RSA", 2048, "RSA 2048", sans, BAD_INT, [BAD_INT])
+    old_f = _facts(order_number="ORDER-00001", common_name=sans[0], order_date=NOW - dt.timedelta(days=60),
+                   ca="EMSIGN", issuer=BAD_INT, inspection=old_insp)
+    new_f = _facts(order_number="ORDER-00002", common_name=sans[0], order_date=NOW - dt.timedelta(days=5),
+                   ca=None, issuer=GOOD_INT, inspection=insp)
+    old = rp.ReportRow(facts=old_f, classification=rp.classify(old_f, criteria))
+    new = rp.ReportRow(facts=new_f, classification=rp.classify(new_f, criteria))
+    assert (old.verdict, new.verdict, new.classification.unevaluated) == (rp.Verdict.REPLACE, rp.Verdict.OK, ["ca"])
+    rp.mark_superseded([old, new])
+    # Superseded (CA-blind), but neither replaced nor renewed: the work stays counted.
+    assert old.superseded and old.replaced_by is None and not old.renewed and old.outstanding
+    report = rp.ReplacementReport(criteria=criteria, rows=[old, new], inspected=True, started_at=NOW)
+    assert report.select(outstanding=True) == [old]
+
+
+def test_unknown_coverer_does_not_carry_the_work() -> None:
+    """A newer cert with an unmapped CA (UNKNOWN) supersedes but does not clear the emSign row."""
+    old = _ca_row("ORDER-00001", 60, "EMSIGN", ["a.example.edu"])
+    new = _ca_row("ORDER-00002", 5, "UNKNOWN", ["a.example.edu"])
+    rp.mark_superseded([old, new])
+    assert new.verdict is rp.Verdict.UNKNOWN
+    assert old.superseded and not old.renewed and old.outstanding
 
 
 def test_newest_sslcom_coverer_wins() -> None:
@@ -935,7 +969,7 @@ def test_migration_counts_and_outstanding_filter() -> None:
     # The CN-only match (ORDER-00003) stays outstanding; possibly_replaced is a subset of it.
     assert (summary["outstanding"], summary["replaced"], summary["possibly_replaced"]) == (3, 1, 1)
     # outstanding + replaced + superseded-without-replacement partitions needs_replacing.
-    renewed = sum(1 for r in rows if r.verdict.needs_replacing and r.superseded and not r.replaced_by)
+    renewed = sum(1 for r in rows if r.verdict.needs_replacing and r.renewed and not r.replaced_by)
     assert summary["outstanding"] + summary["replaced"] + renewed == summary["needs_replacing"]
     assert sorted(r.facts.order_number for r in report.select(outstanding=True)) == [
         "ORDER-00003", "ORDER-00006", "ORDER-00007",

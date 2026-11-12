@@ -294,7 +294,7 @@ def _summary_line(summary: dict[str, int], report: rp.ReplacementReport) -> str:
         how = "SANs unknown" if report.inspected else "confirm with --inspect"
         outstanding_part += f" ({summary['possibly_replaced']} possibly replaced; {how})"
     parts = [outstanding_part, f"{summary['replaced']} replaced"]
-    # The rest of needs_replacing: superseded by a newer cert that itself still needs replacing.
+    # The rest of needs_replacing: renewed by a newer cert that itself still needs replacing.
     renewed = summary["needs_replacing"] - summary["outstanding"] - summary["replaced"]
     if renewed:
         parts.append(f"{renewed} superseded by newer certificates that also need replacing")
@@ -428,8 +428,8 @@ def replacement_report(
         False, "--outstanding",
         help=(
             "Only certificates still to replace: no confirmed replacement by a newer passing "
-            "certificate and not superseded. CN-only matches stay listed (replaced_by "
-            "'maybe:<order>'). Implies --latest-only; --all has no effect"
+            "certificate and not renewed by a newer one that still needs replacing. CN-only "
+            "matches stay listed (replaced_by 'maybe:<order>'). --all has no effect"
         ),
     ),
     issued_since: Optional[dt.datetime] = typer.Option(

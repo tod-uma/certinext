@@ -60,11 +60,12 @@
 │                                                                    replace: no confirmed         │
 │                                                                    replacement by a newer        │
 │                                                                    passing certificate and not   │
-│                                                                    superseded. CN-only matches   │
-│                                                                    stay listed (replaced_by      │
-│                                                                    'maybe:<order>'). Implies     │
-│                                                                    --latest-only; --all has no   │
-│                                                                    effect                        │
+│                                                                    renewed by a newer one that   │
+│                                                                    still needs replacing.        │
+│                                                                    CN-only matches stay listed   │
+│                                                                    (replaced_by                  │
+│                                                                    'maybe:<order>'). --all has   │
+│                                                                    no effect                     │
 │ --issued-since                       DATE                          Only orders placed on or      │
 │                                                                    after DATE (YYYY-MM-DD, UTC)  │
 │ --originator                         NAME                          Only orders from this         │
