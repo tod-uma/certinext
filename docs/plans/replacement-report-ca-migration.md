@@ -93,12 +93,15 @@ Valid issued orders grouped by CA (through `catalog.ca_by_product_code()`):
 
 5. **Migration counts in the summary.** `summarize()` adds:
    - `replaced`: needs replacing and has `replaced_by`.
-   - `possibly_replaced`.
-   - `outstanding`: needs replacing, with no `replaced_by`, `possibly_replaced_by` or `superseded`. This is
-     the work left to do.
+   - `possibly_replaced`: outstanding rows whose only replacement evidence is a CN match.
+   - `outstanding`: needs replacing, with no `replaced_by` and not `superseded`. This is the work left to do.
+     **Amended 2026-11-12 (external review, finding 1):** a CN-only match (`possibly_replaced_by`) no longer
+     clears a row. It originally did. Without `--inspect`, an SSL.com cert with the same CN but fewer SANs then
+     hid real work: prod's 87 CN-only matches dropped out of the headline and out of the `--outstanding` list.
+     Only confirmed coverage removes work, so the count may over-state but never under-state.
 
-   The text summary line leads with the outstanding count. Example: `412 emSign certificates outstanding;
-   82 replaced (31 unconfirmed without --inspect); 0 unknown`.
+   The text summary line leads with the outstanding count. Example: `443 EMSIGN certificates outstanding
+   (31 possibly replaced; confirm with --inspect); 51 replaced; 494 of 552 valid certificates need replacing`.
 
 6. **New CLI controls, all in the existing style:**
    - `--ca CA` (repeatable). It replaces `cas`, the same way `--issuer` replaces `issuers`.
@@ -191,7 +194,8 @@ Valid issued orders grouped by CA (through `catalog.ca_by_product_code()`):
 > - **Pulled forward from Phase 2:** `_summary_line` no longer lists `ca` in its "not inspected; use --inspect"
 >   hint (it printed on every default run). The rest of `_summary_line` is still Phase 2.
 > - Known limit, as decided (Decision 5): without `--inspect`, an emSign cert and its newer emSign renewal are
->   only `possibly_superseded`, so both count as `outstanding`. Run with `--inspect --cache` for accurate counts.
+>   only `possibly_superseded`, so both count as `outstanding`. The same now holds for an emSign cert with a
+>   same-CN SSL.com cert (Decision 5 as amended). Run with `--inspect --cache` for accurate counts.
 
 ### Phase 2 — CLI (`certinext/cli/replacement_report.py`)
 

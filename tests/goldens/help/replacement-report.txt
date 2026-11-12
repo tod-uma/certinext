@@ -57,10 +57,12 @@
 │                                                                    matches are kept and marked   │
 │                                                                    'maybe'                       │
 │ --outstanding                                                      Only certificates still to    │
-│                                                                    replace: not replaced (or     │
-│                                                                    possibly replaced) by a newer │
+│                                                                    replace: no confirmed         │
+│                                                                    replacement by a newer        │
 │                                                                    passing certificate and not   │
-│                                                                    superseded. Implies           │
+│                                                                    superseded. CN-only matches   │
+│                                                                    stay listed (replaced_by      │
+│                                                                    'maybe:<order>'). Implies     │
 │                                                                    --latest-only; --all has no   │
 │                                                                    effect                        │
 │ --issued-since                       DATE                          Only orders placed on or      │

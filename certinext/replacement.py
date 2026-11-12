@@ -453,7 +453,8 @@ class ReportRow:
             Only set on rows whose own verdict is not OK.
         replaced_by_ca: That certificate's CA (:attr:`CertificateFacts.ca`).
         possibly_replaced_by: As ``replaced_by``, but matched on the common
-            name alone because this row's SANs are unknown.
+            name alone because this row's SANs are unknown. Informational:
+            the row stays :attr:`outstanding`.
     """
 
     facts: CertificateFacts
@@ -473,14 +474,16 @@ class ReportRow:
     def outstanding(self) -> bool:
         """Whether this row is replacement work still to do.
 
-        True when it needs replacing and nothing newer accounts for it: no
-        ``replaced_by``, no ``possibly_replaced_by``, and not ``superseded``
-        (a newer sibling that still needs replacing carries the work, so it
-        is not counted twice). ``possibly_superseded`` does not exclude a row.
+        True when it needs replacing and nothing newer is *confirmed* to
+        account for it: no ``replaced_by`` and not ``superseded`` (a newer
+        sibling that still needs replacing carries the work, so it is not
+        counted twice). A common-name match alone never clears a row:
+        ``possibly_replaced_by`` and ``possibly_superseded`` leave it
+        outstanding, since the newer certificate may lack some of its SANs.
+        The count may therefore overstate the work without inspection, but
+        never understates it.
         """
-        return self.verdict.needs_replacing and not (
-            self.replaced_by or self.possibly_replaced_by or self.superseded
-        )
+        return self.verdict.needs_replacing and not (self.replaced_by or self.superseded)
 
     def days_left(self, now: dt.datetime) -> int:
         """Return whole days until expiry.
@@ -688,10 +691,13 @@ class ReplacementReport:
         Returns:
             Counts keyed ``valid``, ``needs_replacing``, one key per
             :class:`Verdict` value, ``outstanding`` (needs replacing and
-            nothing newer accounts for it), ``replaced`` (needs replacing and
-            has ``replaced_by``), ``possibly_replaced`` (needs replacing and
-            only a CN match), ``superseded``, ``possibly_superseded``, and
-            ``errors``.
+            nothing newer is confirmed to account for it), ``replaced``
+            (needs replacing and has ``replaced_by``), ``possibly_replaced``
+            (outstanding rows with only a CN match to a passing certificate;
+            a subset of ``outstanding``), ``superseded``,
+            ``possibly_superseded``, and ``errors``. Rows needing replacement
+            split exactly into ``outstanding``, ``replaced``, and superseded
+            rows without a replacement.
         """
         verdicts = Counter(r.verdict for r in rows)
         summary = {

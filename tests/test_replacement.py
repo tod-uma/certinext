@@ -878,12 +878,16 @@ def test_partial_sslcom_coverage_is_not_a_replacement() -> None:
 
 
 def test_cn_only_sslcom_match_is_possibly_replaced() -> None:
-    """Without known SANs on the old cert, a same-CN SSL.com cert is only a possible replacement."""
+    """Without known SANs on the old cert, a same-CN SSL.com cert is only a possible replacement.
+
+    It stays outstanding: the SSL.com cert may lack SANs the emSign cert has
+    (external review finding 1), so a CN match must never clear the work.
+    """
     old = _ca_row("ORDER-00001", 60, "EMSIGN")
     new = _ca_row("ORDER-00002", 5, "SSLCOM")
     rp.mark_superseded([old, new])
     assert (old.replaced_by, old.possibly_replaced_by) == (None, "ORDER-00002")
-    assert old.possibly_superseded and not old.outstanding
+    assert old.possibly_superseded and old.outstanding
 
 
 def test_newest_sslcom_coverer_wins() -> None:
@@ -928,12 +932,18 @@ def test_migration_counts_and_outstanding_filter() -> None:
 
     summary = report.summarize(rows)
     assert summary["needs_replacing"] == 5
-    assert (summary["outstanding"], summary["replaced"], summary["possibly_replaced"]) == (2, 1, 1)
-    assert sorted(r.facts.order_number for r in report.select(outstanding=True)) == ["ORDER-00006", "ORDER-00007"]
+    # The CN-only match (ORDER-00003) stays outstanding; possibly_replaced is a subset of it.
+    assert (summary["outstanding"], summary["replaced"], summary["possibly_replaced"]) == (3, 1, 1)
+    # outstanding + replaced + superseded-without-replacement partitions needs_replacing.
+    renewed = sum(1 for r in rows if r.verdict.needs_replacing and r.superseded and not r.replaced_by)
+    assert summary["outstanding"] + summary["replaced"] + renewed == summary["needs_replacing"]
+    assert sorted(r.facts.order_number for r in report.select(outstanding=True)) == [
+        "ORDER-00003", "ORDER-00006", "ORDER-00007",
+    ]
     assert report.select(outstanding=True, include_ok=True) == report.select(outstanding=True)
 
     by_ca = {b["ca"]: b for b in report.breakdown(rows, "ca")}
-    assert (by_ca["EMSIGN"]["valid"], by_ca["EMSIGN"]["outstanding"], by_ca["EMSIGN"]["replaced"]) == (5, 2, 1)
+    assert (by_ca["EMSIGN"]["valid"], by_ca["EMSIGN"]["outstanding"], by_ca["EMSIGN"]["replaced"]) == (5, 3, 1)
     assert by_ca["SSLCOM"]["ok"] == 2
     assert "possibly_replaced" not in by_ca["EMSIGN"]
 
@@ -1563,13 +1573,13 @@ def _migration_routes(*, replaced: bool = True) -> dict[str, Any]:
 
 
 def test_cli_table_shows_ca_and_possible_replacement(run_cli: Callable[..., tuple[int, str, str]]) -> None:
-    """Uninspected, a same-CN SSL.com cert is 'maybe:<order>' and the summary leads with outstanding."""
+    """Uninspected, a same-CN SSL.com cert is 'maybe:<order>' and the row still counts as outstanding."""
     code, out, _ = run_cli([], routes=_migration_routes())
     assert code == 0
     assert "EMSIGN" in out and "maybe:ORDER-00005" in out
     assert out.strip().splitlines()[-1] == (
-        "0 EMSIGN certificates outstanding; 1 replaced (1 unconfirmed without --inspect); "
-        "1 of 3 valid certificates need replacing"
+        "1 EMSIGN certificates outstanding (1 possibly replaced; confirm with --inspect); "
+        "0 replaced; 1 of 3 valid certificates need replacing"
     )
 
 
@@ -1597,10 +1607,14 @@ def test_cli_inspected_json_and_csv_carry_replacement(run_cli: Callable[..., tup
 
 
 def test_cli_outstanding_lists_only_work_left(run_cli: Callable[..., tuple[int, str, str]]) -> None:
-    """--outstanding drops replaced rows (and ignores --all); without a replacement the row stays."""
-    code, out, _ = run_cli(["--outstanding", "--all"], routes=_migration_routes())
+    """--outstanding drops confirmed replacements (and ignores --all); CN-only matches stay listed."""
+    code, out, _ = run_cli(["--outstanding", "--all", "--inspect"], routes=_migration_routes())
     assert code == 0
     assert "(no certificates match)" in out
+
+    code, out, _ = run_cli(["--outstanding", "--all"], routes=_migration_routes())
+    assert code == 0
+    assert "ORDER-00001" in out and "maybe:ORDER-00005" in out
 
     code, out, _ = run_cli(["--outstanding", "--json"], routes=_migration_routes(replaced=False))
     doc = json.loads(out)

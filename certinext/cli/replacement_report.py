@@ -276,9 +276,11 @@ def _summary_line(summary: dict[str, int], report: rp.ReplacementReport) -> str:
         report: The report (for criteria and inspection state).
 
     Returns:
-        Migration progress first, e.g. ``"412 EMSIGN certificates
-        outstanding; 82 replaced (31 unconfirmed without --inspect); 494 of
-        552 valid certificates need replacing"``. The CA names appear only
+        Migration progress first, e.g. ``"443 EMSIGN certificates
+        outstanding (31 possibly replaced; confirm with --inspect); 51
+        replaced; 494 of 552 valid certificates need replacing"``. Possible
+        (CN-only) replacements stay in the outstanding count, so it never
+        understates the work. The CA names appear only
         when the ``ca`` signal is the only one active. Conflicts are shown
         when more than one signal is active (or any occurred), then unknowns,
         errors, a note on signals that were not evaluated and, when the cache
@@ -287,14 +289,13 @@ def _summary_line(summary: dict[str, int], report: rp.ReplacementReport) -> str:
     criteria = report.criteria
     signals = criteria.active_signals()
     label = f"{'/'.join(criteria.cas)} " if signals == ["ca"] else ""
-    replaced = summary["replaced"] + summary["possibly_replaced"]
-    replaced_part = f"{replaced} replaced"
+    outstanding_part = f"{summary['outstanding']} {label}certificates outstanding"
     if summary["possibly_replaced"]:
-        why = "SANs unknown" if report.inspected else "without --inspect"
-        replaced_part += f" ({summary['possibly_replaced']} unconfirmed {why})"
-    parts = [f"{summary['outstanding']} {label}certificates outstanding", replaced_part]
+        how = "SANs unknown" if report.inspected else "confirm with --inspect"
+        outstanding_part += f" ({summary['possibly_replaced']} possibly replaced; {how})"
+    parts = [outstanding_part, f"{summary['replaced']} replaced"]
     # The rest of needs_replacing: superseded by a newer cert that itself still needs replacing.
-    renewed = summary["needs_replacing"] - summary["outstanding"] - replaced
+    renewed = summary["needs_replacing"] - summary["outstanding"] - summary["replaced"]
     if renewed:
         parts.append(f"{renewed} superseded by newer certificates that also need replacing")
     parts.append(f"{summary['needs_replacing']} of {summary['valid']} valid certificates need replacing")
@@ -426,8 +427,9 @@ def replacement_report(
     outstanding: bool = typer.Option(
         False, "--outstanding",
         help=(
-            "Only certificates still to replace: not replaced (or possibly replaced) by a newer "
-            "passing certificate and not superseded. Implies --latest-only; --all has no effect"
+            "Only certificates still to replace: no confirmed replacement by a newer passing "
+            "certificate and not superseded. CN-only matches stay listed (replaced_by "
+            "'maybe:<order>'). Implies --latest-only; --all has no effect"
         ),
     ),
     issued_since: Optional[dt.datetime] = typer.Option(
