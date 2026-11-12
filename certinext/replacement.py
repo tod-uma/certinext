@@ -647,7 +647,10 @@ class ReplacementReport:
             latest_only: Drop superseded rows.
             expiring_within: Keep only rows expiring within this many days.
             outstanding: Keep only :attr:`ReportRow.outstanding` rows (the
-                work still to do). Already de-duplicated: a row renewed by a
+                work still to do). A summary over this population always
+                reads "0 replaced", so callers wanting migration progress
+                should leave it off and filter only the rows they list
+                (as the CLI does). Already de-duplicated: a row renewed by a
                 newer one that still needs replacing is not outstanding. A
                 row superseded only by a certificate that carries nothing
                 (unknown verdict, unmapped CA) is kept unless ``latest_only``

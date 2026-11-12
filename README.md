@@ -1073,7 +1073,7 @@ intermediate, so their key type matches while their chain is trusted.
 --chain-ca CN             Distrusted CA name in the chain; repeatable, replaces config
 --disable-signal SIGNAL   Turn off ca, issuer, key, or chain for this run; repeatable
 --csv                     CSV on stdout (summary on stderr)
---json                    JSON on stdout: times, criteria, cache, summary, certificates, incomplete, breakdown
+--json                    JSON on stdout: times, criteria, cache, summary, summary_scope, certificates, incomplete, breakdown
 -o, --output FILE         Write the table, JSON, or CSV to FILE (UTF-8) instead of stdout
 ```
 
@@ -1135,6 +1135,14 @@ that leads with the work left, such as:
 A further `N superseded by newer certificates that also need replacing` part
 appears when renewed rows account for the rest, so the counts add up.
 Conflicts are shown when more than one signal is active.
+
+The summary and `--group-by` counts ignore `--outstanding` and `--all`: those
+choose which rows are *listed*, so the actionable list still shows how many
+were replaced. `--latest-only` and `--expiring-within` do narrow the counts, and
+the summary then ends with, for example, `counts cover only certificates
+expiring within 30 days`; the JSON `summary_scope` records the same. Before
+1.4.0rc8, `--outstanding` also narrowed the counts, so its summary always read
+`0 replaced`.
 
 `--json` and `--csv` rows carry every field, including `ca`, `product_code`,
 `replaced_by`, `replaced_by_ca`, `possibly_replaced_by`, `superseded`,
