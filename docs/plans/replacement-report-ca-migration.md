@@ -8,7 +8,9 @@ implements-adr: [0021]
 
 **Status:** in progress. Approved by Tod 2026-11-12. Phase 0 is done: !147 merged, v1.4.0rc6 released (GitLab,
 GitHub and PyPI verified), and branch `feat/replacement-report-ca-migration` was cut with a bump to 1.4.0rc7.
-This file supersedes the plan-mode draft (moved from `~/.claude/plans/`).
+**Phase 1 is done (2026-11-12)**; see the "Done" note under Phase 1 for what was pulled forward from Phases 2–3.
+**Next: Phase 2 (CLI)**, which now also includes the 30-day cache default and `--cache-max-age` (Decision 8,
+added 2026-11-12). This file supersedes the plan-mode draft (moved from `~/.claude/plans/`).
 
 ## Context
 
@@ -118,9 +120,30 @@ Valid issued orders grouped by CA (through `catalog.ca_by_product_code()`):
    aliases of the `ECC_G3_*` names, with a docstring saying they are no longer defaults (removal at 2.0).
    README shows the G3 recipe as a `[replacement]` config example.
 
-8. **Record it as ADR 0021**, "replacement-report defaults to the CA signal; replaced means covered by a
+8. **The inspection cache keeps entries for 30 days by default, and `--cache-max-age DAYS` overrides that**
+   (Tod, 2026-11-12). `DEFAULT_MAX_AGE` in `certinext/_inspection_cache.py` goes from 7 to 30 days. The new
+   flag implies `--cache`, exactly as `--refresh-cache`/`--cache-dir` do, and accepts 1 or more days. When the
+   **chain** signal is active and the max age is over 7 days, the run logs a warning that a re-rooted chain
+   may be shown stale, and that `--refresh-cache` gives a live answer.
+   <details><summary>Why relax ADR 0019's 7-day bound</summary>
+
+   - CertiNext is heavily overloaded (Tod, 2026-11-12). A cold `--inspect` run is about 20 minutes of
+     per-certificate GETs, and with a 7-day bound every weekly migration check does one. Avoiding that load
+     is the goal.
+   - The 7-day bound guarded one risk: CertiNext changing a certificate's served **chain** without changing
+     its serial (ADR 0019, "Consequences"). Under the new default criteria (Decision 1) the chain signal is
+     off. The cache now feeds SANs (for `replaced_by`), key type and the orderer. Entries are keyed by order
+     number and serial, so SANs and key can't change for an entry. Only the orderer name/email can go stale,
+     and it doesn't affect the verdict.
+   - The warning keeps the original risk visible for anyone who turns the chain signal back on (G3 mode).
+   - Pruning follows the max age, so a single run with a short `--cache-max-age` deletes older entries that
+     a later run could have reused. Accepted, and the help text says so.
+   </details>
+
+9. **Record it as ADR 0021**, "replacement-report defaults to the CA signal; replaced means covered by a
    passing cert". It amends ADR 0018's defaults section: add a "Superseded in part by 0021" note there rather
-   than rewriting it. Use the `adr` skill.
+   than rewriting it. ADR 0021 also records Decision 8 (30-day cache default) and amends ADR 0019's
+   "Bounded age" bullet and its 7-day "Consequences" item the same way. Use the `adr` skill.
 
 ## Implementation
 
@@ -152,6 +175,23 @@ Valid issued orders grouped by CA (through `catalog.ca_by_product_code()`):
   `group_by="ca"`. `population()`/`select()` gain an `outstanding` option.
 - Constants and `__all__` per Decision 7. Every new or changed function gets a full docstring.
 
+> **Done 2026-11-12.** Implemented as above, plus these choices and pull-forwards:
+>
+> - `replaced_by` is set only on rows whose own verdict is **not** OK (an SSL.com cert covered by a newer
+>   SSL.com cert isn't "replaced"). `mark_superseded()` now resets all flags first, so a second call is safe.
+> - `ReportRow.outstanding` is a property and is also in `to_dict()` (`"outstanding"`), for the planned
+>   certinext-zabbix follow-up. `breakdown()` keeps `outstanding`/`replaced` and drops `possibly_replaced`.
+> - The catalog read lives in `_read_ca_map(sess, required=...)`; it catches `CertiNextAPIError` and
+>   `httpx.HTTPError`.
+> - **Pulled forward from Phase 3** to keep the suite green: the fake catalog route (`_catalog()`, wrapped in
+>   `{"products": [...]}` because `_FakeApi` treats a bare list of dicts as a response queue), test `CRITERIA`
+>   pinned to `cas=[]`, `G3_CONFIG`/`NO_CA_CONFIG` for the CLI tests, and all the library cases listed in
+>   Phase 3 except the CLI JSON/CSV/summary ones.
+> - **Pulled forward from Phase 2:** `_summary_line` no longer lists `ca` in its "not inspected; use --inspect"
+>   hint (it printed on every default run). The rest of `_summary_line` is still Phase 2.
+> - Known limit, as decided (Decision 5): without `--inspect`, an emSign cert and its newer emSign renewal are
+>   only `possibly_superseded`, so both count as `outstanding`. Run with `--inspect --cache` for accurate counts.
+
 ### Phase 2 — CLI (`certinext/cli/replacement_report.py`)
 
 - Options: `--ca`, `--outstanding`, `--issued-since` (a `typer` `datetime` option, date-only format, read as
@@ -160,6 +200,16 @@ Valid issued orders grouped by CA (through `catalog.ca_by_product_code()`):
   following the `superseded` `yes/maybe` convention.
 - `_summary_line` (lines 234-267): lead with outstanding/replaced (Decision 5).
 - `_config.replacement_criteria()` (lines 171-206): accept `cas` in the `[replacement]` table.
+- Cache lifetime (Decision 8):
+  - `certinext/_inspection_cache.py`: `DEFAULT_MAX_AGE = dt.timedelta(days=30)`.
+  - `--cache-max-age DAYS` (`typer` int option, `min=1`), defaulting to `DEFAULT_MAX_AGE.days`. Add it to
+    the implies-`--cache` set in the cache-mode resolver (lines ~120–145, beside `--refresh-cache`/
+    `--cache-dir`, including the `--no-cache` conflict check and its error message). Pass
+    `max_age=dt.timedelta(days=N)` where the CLI builds `InspectionCache` (line ~184).
+  - The terminal prompt (line ~160) and `--cache` help (line ~343) currently interpolate `_MAX_AGE_DAYS`.
+    Show the effective value, and state in the help that pruning uses it too.
+  - Warn on stderr when `"chain" in criteria.active_signals()` and the max age is over 7 days (see the
+    Decision 8 rationale for the wording).
 - Regenerate the help golden `tests/goldens/help/replacement-report.txt`.
 
 ### Phase 3 — tests (`tests/test_replacement.py`)
@@ -177,6 +227,12 @@ Valid issued orders grouped by CA (through `catalog.ca_by_product_code()`):
   - `outstanding` counts and the filter.
   - `--issued-since`.
   - CLI JSON/CSV fields and the summary line.
+  - Cache lifetime: the default is 30 days (an entry 20 days old is a hit). `--cache-max-age 3` makes it a
+    miss, prunes it, and reports `max_age_days: 3` in the JSON `cache` block and "up to 3 days old" in the
+    summary. `--cache-max-age` alone turns the cache on without prompting. `--no-cache --cache-max-age 3`
+    exits 2. The chain-signal warning appears only when the chain signal is active and the max age is over 7.
+    The existing cache tests live in `tests/test_replacement.py` (there is no separate cache test file).
+    It, `certinext/_inspection_cache.py` and `README.md` contain hard-coded 7-day references; update each.
 - Update existing tests that assumed the G3 defaults: give them explicit G3 criteria using the `ECC_G3_*`
   constants, rather than rewriting their expectations.
 
@@ -187,15 +243,21 @@ Valid issued orders grouped by CA (through `catalog.ca_by_product_code()`):
   `certinext replacement-report --inspect --cache --outstanding --group-by originator` and
   `--json -o …` for tracking over time.
 - README library section (lines 2092-2117): add `cas`, `replaced_by` and the new constants.
-- ADR 0021, plus an amendment note on ADR 0018 and an index row.
+- README cache section: 30-day default, `--cache-max-age`, the pruning caveat, and the chain-signal caveat.
+  Search the README and `llms.txt`/`AGENTS.md` for "7 days" and update every hit about the cache.
+- ADR 0021, plus amendment notes on ADR 0018 (defaults) and ADR 0019 (cache age), and an index row.
 - Changelog in the annotated tag message (feedback: tag messages carry the changelog). **BREAKING:** the
-  default criteria are now `ca=EMSIGN`, and the issuer/key/chain defaults are empty.
+  default criteria are now `ca=EMSIGN`, and the issuer/key/chain defaults are empty. Also note the cache
+  default moving from 7 to 30 days. Existing entries become valid for longer at once, since age comes from
+  each entry's `fetched_at`.
 
 ## Verification
 
 > **Prod load (Tod, 2026-11-12):** CertiNext is having load issues. **Every `--inspect` run passes `--cache`**
-> (and keeps `--workers` at 4 or lower). Do a single cold run, then reuse the cache (7-day max age) for every
-> rerun. Never pass `--refresh-cache` during verification. A run without `--inspect` reads only the paged orders
+> (and keeps `--workers` at 4 or lower). Do a single cold run, then reuse the cache for every rerun (30-day
+> max age once Phase 2 lands; 7 days before that). Never pass `--refresh-cache`, and never pass a small
+> `--cache-max-age` against the production cache, because it prunes the entries and forces another cold run.
+> Test `--cache-max-age` against a throwaway `--cache-dir` in the scratchpad. A run without `--inspect` reads only the paged orders
 > report, the catalog and the groups, so it needs no cache.
 
 1. Gates: `uv run --extra dev pytest`, `ruff check`, `mypy certinext`, `pyright`. **Don't run `ruff format`**
