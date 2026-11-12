@@ -1056,17 +1056,19 @@ def test_cli_empty_catalog_exits_1(run_cli: Callable[..., tuple[int, str, str]])
 
 def test_unmapped_codes_and_unknown_ca_names_are_warned(monkeypatch: pytest.MonkeyPatch) -> None:
     """A partial catalog and a mistyped --ca are named in warnings, not left as quiet 'unknown'."""
+    # Replace the module logger outright: capture_logs() misses a logger cached by an earlier test.
+    logger = structlog.testing.CapturingLogger()
+    monkeypatch.setattr(rp, "log", logger)
     sess, _ = _session(monkeypatch, _ca_routes())
-    with structlog.testing.capture_logs() as logs:
-        rp.build_report(sess, CA_CRITERIA.with_overrides(cas=["EMSIGN", "SSL.COM"]), now=NOW)
-    warnings = {e["event"]: e for e in logs if e["log_level"] == "warning"}
+    rp.build_report(sess, CA_CRITERIA.with_overrides(cas=["EMSIGN", "SSL.COM"]), now=NOW)
+    warnings = {c.args[0]: c.kwargs for c in logger.calls if c.method_name == "warning"}
     unmapped = warnings["Orders with a product code the catalog does not list; their CA is unknown"]
     assert (unmapped["orders"], unmapped["product_codes"]) == (1, "999")
     assert warnings["Requested CA not named by the product catalog; it matches nothing"]["cas"] == "SSL.COM"
 
-    with structlog.testing.capture_logs() as logs:
-        rp.build_report(sess, CRITERIA, now=NOW)  # ca signal off: nothing to warn about
-    assert not [e for e in logs if e["log_level"] == "warning"]
+    logger.calls.clear()
+    rp.build_report(sess, CRITERIA, now=NOW)  # ca signal off: nothing to warn about
+    assert not [c for c in logger.calls if c.method_name == "warning"]
 
 
 def test_issued_since_filters_on_order_date(monkeypatch: pytest.MonkeyPatch) -> None:
