@@ -997,8 +997,9 @@ the count can over-state the work but never under-state it. Run with
 Older certificates whose SANs are all covered by *any* newer valid certificate
 are also marked `superseded` (shown by default, since an older copy may still
 be deployed somewhere); `--latest-only` hides them. Without `--inspect`, or
-when a certificate's inspection failed, a same-CN match is only `maybe`
-superseded, and `--latest-only` keeps those rows and prints a warning on stderr.
+when the inspection of either certificate failed, a same-CN match is only
+`maybe` superseded (or replaced): it never clears a row. `--latest-only` and
+`--outstanding` keep those rows and print a warning on stderr.
 
 `--originator` and `--group` filter before replacements are matched, so a
 replacement placed by another originator or in another group isn't seen and

@@ -891,6 +891,33 @@ def test_cn_only_sslcom_match_is_possibly_replaced() -> None:
     assert old.possibly_superseded and old.outstanding
 
 
+@pytest.mark.parametrize("coverer_ca", ["SSLCOM", "EMSIGN"])
+def test_coverer_with_unknown_sans_never_clears_the_row(coverer_ca: str) -> None:
+    """An inspected row matched only by a newer cert's CN stays outstanding.
+
+    The newer cert's inspection failed, so its names() fell back to the CN;
+    that is no proof it covers the old SANs. It is only a *possible*
+    replacement or renewal (external review rc7, finding 1).
+    """
+    old = _ca_row("ORDER-00001", 60, "EMSIGN", ["a.example.edu"])
+    new = _ca_row("ORDER-00002", 5, coverer_ca, cn="a.example.edu")
+    assert old.facts.sans_known and not new.facts.sans_known
+    rp.mark_superseded([old, new])
+    assert not (old.superseded or old.renewed or old.replaced_by)
+    assert old.possibly_superseded and old.outstanding
+    assert old.possibly_replaced_by == ("ORDER-00002" if coverer_ca == "SSLCOM" else None)
+
+
+def test_confirmed_coverer_wins_over_newer_cn_only_one() -> None:
+    """A confirmed SSL.com replacement is recorded even when a newer CN-only match exists."""
+    old = _ca_row("ORDER-00001", 60, "EMSIGN", ["a.example.edu"])
+    confirmed = _ca_row("ORDER-00002", 20, "SSLCOM", ["a.example.edu"])
+    cn_only = _ca_row("ORDER-00003", 2, "SSLCOM", cn="a.example.edu")
+    rp.mark_superseded([old, confirmed, cn_only])
+    assert (old.replaced_by, old.possibly_replaced_by) == ("ORDER-00002", None)
+    assert old.superseded and not old.possibly_superseded and not old.outstanding
+
+
 def test_coverer_with_unevaluated_ca_is_not_a_replacement() -> None:
     """An OK coverer whose CA is unmapped proves no CA move (external review finding 2).
 
