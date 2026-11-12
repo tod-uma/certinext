@@ -261,7 +261,8 @@ def _summary_line(summary: dict[str, int], report: rp.ReplacementReport) -> str:
             f"(up to {c.max_age.days} days old{'; refreshed' if c.refreshed else ''})"
         )
     line = "; ".join(parts)
-    skipped = [s for s in report.criteria.active_signals() if s != "issuer"]
+    # ca and issuer come from the orders report and catalog; only key/chain need --inspect.
+    skipped = [s for s in report.criteria.active_signals() if s not in ("ca", "issuer")]
     if not report.inspected and skipped:
         line += f" ({'/'.join(skipped)} not inspected; use --inspect)"
     return line
