@@ -1885,9 +1885,10 @@ SSL.com.
 > **Send the InCommon code instead.** On an SSL.com credential the vendor
 > translates InCommon codes into the matching SSL.com product: `970` (DV)
 > issued an SSL.com DV certificate, and `971` (DV Wildcard) issued an SSL.com
-> wildcard (sandbox, 2026-11-09). With `product_code` unset you get the default
-> DV. The OV, UCC and 30/45/90-day codes have not been tried yet, and the
-> vendor hasn't confirmed this behaviour (#39). Also, the SSL.com
+> wildcard (sandbox, 2026-11-09). `955` (OV) issued an SSL.com OV certificate,
+> reported as product `1015` (sandbox, 2026-11-10). With `product_code` unset
+> you get the default DV. The UCC and 30/45/90-day codes have not been tried
+> yet, and the vendor hasn't confirmed this behaviour (#39). Also, the SSL.com
 > certificate's lifetime is set by the CA, not by `validity_years`: the
 > staging certificate lasted 90 days on `validity_years=1`.
 

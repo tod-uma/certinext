@@ -1,6 +1,6 @@
 ---
 name: certinext-api-bugs
-description: Known CertiNext vendor API bugs and quirks in certificate ordering (SSL.com, X-Product-Code, EMS-1162) and in domain listing and filtering. Use when editing certinext/ssl_certificates.py, certinext/domains.py, certinext/cli/issue_cert.py, dcv_update.py, or README.md sections about ordering certificates or listing domains, or when an order fails with EMS-1162 Invalid Product Code.
+description: Known CertiNext vendor API bugs and quirks in certificate ordering (SSL.com, X-Product-Code, EMS-1162) and in domain listing and filtering. Use when editing certinext/ssl_certificates.py, certinext/domains.py, certinext/cli/issue_cert.py, dcv_update.py, or README.md sections about ordering certificates or listing domains, or when an order fails with EMS-1162 Invalid Product Code. Also when creating SSL.com domain records or debugging dns-persist DCV (a 400 on create, a verify that 422s with MPIC failed, or `policy=wildcard`).
 ---
 
 ## Ordering from SSL.com (GitLab #39, vendor #187868, ADR 0020 amendment)
@@ -16,10 +16,11 @@ SSL.com codes (1011-1020, catalog category `"SSL.com"`) in that header return
 On that credential the vendor *translates* InCommon codes per product. In
 sandbox on 2026-11-09, `970` (InCommon DV) issued SSL.com DV and was reported
 as `1011`, and `971` (InCommon DV Wildcard) issued an SSL.com wildcard,
-reported as `1012`. No header gives the default DV. Don't "fix" a caller that
+reported as `1012`. On 2026-11-10, `955` (InCommon OV) issued SSL.com OV,
+reported as `1015`. No header gives the default DV. Don't "fix" a caller that
 sends `970` to an SSL.com credential: that is the supported way to pick a
 product. EMS-1162 on an emSign-bound credential means a configuration problem:
-switch the credential, don't retry. Untested: the OV, UCC and 30/45/90-day
+switch the credential, don't retry. Untested: the UCC and 30/45/90-day
 codes, and what an InCommon code with no SSL.com equivalent does. The vendor
 hasn't confirmed the translation yet.
 
@@ -34,6 +35,34 @@ from InCommon-branded intermediates whose names never say emSign.
 
 **`validity_years` is not the lifetime.** The SSL.com staging cert lasted 90
 days on `validityYears: 1`.
+
+### SSL.com domain records and dns-persist DCV (seen 2026-11-10, sandbox + prod)
+
+- **An emSign domain record does not give you an SSL.com one.** Each apex
+  needs its own SSL.com record:
+  `certinext-domains create <apex> --ca SSLCOM organization_id=<numeric org id> dcv_method=dns-persist`.
+  Without both `organization_id` and `dcv_method` the create returns 400. It
+  comes back `PENDING` with `DNS-PERSIST` selected.
+- **SSL.com validates on its own.** A PENDING record usually turns VERIFIED
+  within minutes of `_validation-persist.<apex>` being public, before any
+  `POST /dcv/verify`. A verify right after publishing can 422 with
+  `caMessage: "Multi-perspective inspection (MPIC) check failed"` or "Expected
+  DNS record not found". That's propagation, so re-run rather than debug it.
+  Don't query public resolvers for the name before publishing it: the cached
+  NXDOMAIN keeps it invisible there for the negative-cache TTL.
+- **A record can come back with no `DNS-PERSIST` option**, offering only
+  DNS-TXT and HTTP. ums-certinext-scripts then reports `no-persist-option`.
+  Re-running doesn't help. Deleting the domain record and re-creating it with
+  `dcv_method=dns-persist` (portal, or the create above) gave a working persist
+  option, and the existing public TXT validated it at once (one prod apex,
+  2026-11-10, during a prod API slowdown). The cause is unconfirmed; Tod
+  suspects vendor overload at create time.
+- **The persist `recordValue` has no `; policy=wildcard`**, and the option
+  says `exactName: true`. draft-ietf-acme-dns-persist-01 §5.1/§6.2 reads that
+  as exact-FQDN-only, with no subdomains and no wildcards. Subdomain issuance
+  has worked in practice anyway (sandbox and prod, 2026-11-10), so don't add
+  the parameter preemptively. If a subdomain or wildcard order ever fails DCV,
+  appending it is the first thing to try. Ask #187868 why it's omitted.
 
 When the vendor answers #187868, update this section, README "More than one
 CA", and close or retitle #39.

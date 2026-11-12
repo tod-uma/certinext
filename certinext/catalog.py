@@ -90,9 +90,9 @@ class CatalogAccessor:
         *InCommon*-branded intermediates whose names never mention emSign.
 
         The join works for SSL.com orders placed with an InCommon product
-        code: the vendor translates the code (sandbox 2026-11-09: ``970`` →
-        ``1011``, ``971`` → ``1012``) and the orders report records the
-        SSL.com code.
+        code: the vendor translates the code (sandbox: ``970`` → ``1011``
+        and ``971`` → ``1012`` on 2026-11-09, ``955`` → ``1015`` on
+        2026-11-10) and the orders report records the SSL.com code.
 
         Returns:
             ``{product_code: ca}`` with ``ca`` from :attr:`ProductCategory.ca`
