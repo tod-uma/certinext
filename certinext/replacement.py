@@ -1210,6 +1210,13 @@ def _inspect_into(
 
     Raises:
         ImportError: If ``cryptography`` is missing (fatal for every row).
+        CertiNextAuthError: If the token endpoint refuses or fails the
+            token request (after its retries). Deliberately not recorded per
+            row: every later download would fail the same way. The run stops
+            instead, and downloads already cached make a rerun cheap. A
+            token request that cannot reach the endpoint at all raises an
+            ``httpx`` transport error, which is recorded per row like any
+            other; the token's failure hold-off makes those rows fail fast.
     """
     if cache is not None and _inspect_from_cache(facts, cache):
         return
@@ -1393,7 +1400,7 @@ def build_report(
                 # A timed wait, so Ctrl+C reaches this thread on Windows too.
                 done, pending = wait(pending, timeout=0.5, return_when=FIRST_COMPLETED)
                 for future in (f for f in futures if f in done):  # submission order, not set order
-                    future.result()  # re-raise ImportError, the one fatal case
+                    future.result()  # re-raise the fatal cases: ImportError, no token
                     if on_progress:
                         on_progress(futures[future])
         finally:

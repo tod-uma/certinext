@@ -46,6 +46,11 @@ Errors:
     (429). All carry ``.status_code`` (int) and ``.body`` (dict or str). When
     the body is RFC 7807 JSON, ``.ems_code`` extracts the ``EMS-xxx`` code and
     ``.field_errors`` surfaces the ``errors`` array.
+
+    A failed OAuth token request raises :class:`CertiNextAuthError` (a
+    :class:`RuntimeError`, not an API error) with ``.status_code`` and
+    ``.transient`` (502/503/504). The token request alone is retried twice
+    on a transport error or a transient status; API calls are not retried.
 """
 
 from .accounts import AccountAccessor, AccountInfo, CaLevelValidation, Group, Organization, OrgCaValidation
@@ -67,6 +72,7 @@ from .domains import (
 )
 from .exceptions import (
     CertiNextAPIError,
+    CertiNextAuthError,
     CertiNextConflictError,
     CertiNextCreateTimeoutError,
     CertiNextNotFoundError,
@@ -172,6 +178,7 @@ __all__ = [
     "CsrInfo",
     # Exceptions
     "CertiNextAPIError",
+    "CertiNextAuthError",
     "CertiNextConflictError",
     "CertiNextNotFoundError",
     "CertiNextRateLimitError",
