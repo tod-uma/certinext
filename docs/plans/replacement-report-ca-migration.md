@@ -10,8 +10,8 @@ implements-adr: [0021]
 GitHub and PyPI verified), and branch `feat/replacement-report-ca-migration` was cut with a bump to 1.4.0rc7.
 **Phase 1 is done (2026-11-12)**; see the "Done" note under Phase 1 for what was pulled forward from Phases 2–3.
 **Phase 2 is done (2026-11-12)**, including the Phase 3 CLI tests; see its "Done" note. The Codex external review
-of Phases 1 and 2 was **processed on 2026-11-12**; see "External review" after Phase 3. **Next: Phase 4 (docs + ADR
-0021)**, then Verification 3–5.
+of Phases 1 and 2 was **processed on 2026-11-12**; see "External review" after Phase 3. **Phase 4 is done
+(2026-11-12)**; see its "Done" note. **Next: Verification 3–5** (prod, read-only), then MR and the rc7 tag.
 This file supersedes the plan-mode draft (moved from `~/.claude/plans/`).
 
 ## Context
@@ -307,6 +307,27 @@ Verification 2's prod figures (407 outstanding) date from before finding 1. Expe
   default criteria are now `ca=EMSIGN`, and the issuer/key/chain defaults are empty. Also note the cache
   default moving from 7 to 30 days. Existing entries become valid for longer at once, since age comes from
   each entry's `fetched_at`.
+
+> **Done 2026-11-12.** CI pipeline 55949 on `9fea4ad` was green first.
+>
+> - ADR 0021 written (options and outcome per Decisions 1–4, 5-as-amended, 8; `renewed`; the output-shape
+>   additions listed as breaking). ADR 0018/0019 got 0011-style "superseded in part" notes; index rows updated.
+> - README CLI section rewritten: CA-migration intro, `ca` signal row, a "Replaced, renewed and outstanding"
+>   subsection, a "Legacy: ECC G3 criteria" recipe, new flags in the argument block, a 30-day cache section
+>   (`--cache-max-age`, pruning and chain caveats), an "Output" subsection with columns, JSON/CSV fields and the
+>   summary shape, and the monitoring recipe. `--outstanding` is documented as **not** implying `--latest-only`
+>   (the review changed that; Decision 6's bullet is stale on this point).
+> - README library section: `cas`, `select(outstanding=True)`, `replaced_by`, summary keys, `breakdown(..., "ca")`,
+>   catalog failure exceptions, `issued_since=`, and the `ECC_G3_*`/`DEFAULT_*` constants. The example was run
+>   against the code.
+> - `llms.txt` and `AGENTS.md` had no "7 days" or replacement-report hits; nothing to change.
+> - `--issued-since` filters before replacement matching like `--originator`/`--group`, but needs no caveat: a
+>   replacement is always newer than the row it replaces, so it is never filtered out when that row is kept.
+> - Tag changelog (rc7) must list as **BREAKING**: default criteria `ca=EMSIGN` with issuer/key/chain empty; new
+>   row fields `ca`, `replaced_by`, `replaced_by_ca`, `possibly_replaced_by`, `renewed`, `outstanding`; summary
+>   keys `outstanding`/`replaced`/`possibly_replaced`; table columns `ca`/`replaced_by`; the summary line's new
+>   shape. Also: cache default 7 → 30 days, `--cache-max-age`, `--outstanding`, `--issued-since`, `--ca`, and
+>   exit 1 on an empty catalog.
 
 ## Verification
 

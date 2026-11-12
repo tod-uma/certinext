@@ -939,48 +939,75 @@ certinext list-certificates --sandbox --json
 ### certinext replacement-report
 
 `certinext replacement-report` lists every **currently valid** certificate that
-still needs replacing after a CA loses browser trust. It is read-only.
+still needs replacing after a CA loses browser trust, and tracks which ones
+have already been replaced. It is read-only.
 
-The defaults describe the October 2026 eMudhra ECC distrust: Mozilla removed
-`emSign ECC Root CA - G3` from NSS ([bug 2083449](https://bugzilla.mozilla.org/show_bug.cgi?id=2083449)),
-which untrusts ECDSA certificates issued by `InCommon Intermediate CA - OVG3C`.
+The defaults describe the **emSign → SSL.com migration**. eMudhra is leaving
+certificate issuance: Chrome and Firefox reject emSign certificates issued on or
+after 2026-11-16, and Apple distrusts the `emSign Root CA - G1` root on
+2026-11-30. So by default **every valid emSign certificate needs replacing**,
+and a newer SSL.com certificate that covers its names counts as its
+replacement. (Before 1.4.0rc7 the defaults described the October 2026 ECC G3
+distrust; see [the legacy recipe](#legacy-ecc-g3-criteria) to get that back.)
 
 "Valid" means the orders report lists the order as `issued` (which excludes
 revoked, expired and cancelled orders) and its expiry is still in the future.
 
-Each certificate is checked against three **signals**:
+Each certificate is checked against up to four **signals**:
 
 | Signal | Default | Source | Needs `--inspect` |
 |---|---|---|---|
-| `issuer` | `InCommon Intermediate CA - OVG3C` | orders report `issuerCA` | no |
-| `key` | `EC` | leaf public key, parsed locally | yes |
-| `chain` | `emSign ECC Root CA - G3` | CA names in the chain the API serves | yes |
+| `ca` | `EMSIGN` | the order's product code, mapped through the product catalog | no |
+| `issuer` | off | orders report `issuerCA` | no |
+| `key` | off | leaf public key, parsed locally | yes |
+| `chain` | off | CA names in the chain the API serves | yes |
+
+The CA comes **only** from the product code, never from the issuer name:
+emSign issues from InCommon-branded intermediates, so the name can't tell the
+CAs apart. An order whose product code the catalog doesn't map gets verdict
+`unknown` (with a warning). With the `ca` signal on, the report fails (exit 1)
+if the catalog can't be read or lists no products, rather than turning every
+row `unknown`.
 
 A certificate needs replacing when every evaluated signal matches. If evaluated
 signals **disagree**, the verdict is `conflict`: it is listed and counted
-separately for review, never silently resolved. Expect some. EC keys have been
-issued under the RSA-rooted `OVG2C` intermediate, so their key type matches
-while their chain is trusted. A CA re-rooting ECC issuance would look the same.
-Verdicts are `replace`, `conflict`, `ok`, and `unknown` (nothing could be
-evaluated).
+separately for review, never silently resolved. Verdicts are `replace`,
+`conflict`, `ok`, and `unknown` (nothing could be evaluated).
 
-The CertiNext API exposes no key-type field, so without `--inspect` only the
-issuer is checked (instant: the orders report plus one group-name lookup). `--inspect` downloads each
-certificate (two requests per certificate) to evaluate the key and chain
-signals, and adds SANs, key size, and who placed the order. `--inspect` needs
-the `csr` extra, which the CLI install above already includes.
+#### Replaced, renewed and outstanding
 
-Older certificates whose SANs are all covered by a newer valid certificate are
-marked `superseded` (shown by default, since an older copy may still be
-deployed somewhere). `--latest-only` hides them. Renewals that were never
-revoked are the usual cause. SANs are only known with `--inspect`. Without it,
-or when a certificate's inspection failed, a newer certificate with the same
-common name only marks the older one `maybe`: its extra SANs, if any, might not
-be covered. `--latest-only` keeps `maybe` rows and prints a warning on stderr.
+A certificate that needs replacing is **replaced** when a newer valid
+certificate covers all its names *and itself passes the criteria* (verdict
+`ok`, so under the defaults: a newer SSL.com certificate). The `replaced_by`
+column names the newest such order. A newer certificate that *also* needs
+replacing (an emSign cert renewed as emSign) doesn't replace it; it **renews**
+it, and the work moves to the newer copy so it isn't counted twice.
+
+**Outstanding** is what's left: needs replacing, not replaced, not renewed.
+It is the headline of the summary line, and `--outstanding` lists only those
+rows.
+
+Names are only fully known with `--inspect`. Without it, a newer certificate
+with the same common name is only a *possible* replacement, shown as
+`maybe:<order>` in `replaced_by`, because its SANs might not cover the older
+one's. **A possible replacement never clears a row**: it stays outstanding, so
+the count can over-state the work but never under-state it. Run with
+`--inspect --cache` to confirm them.
+
+Older certificates whose SANs are all covered by *any* newer valid certificate
+are also marked `superseded` (shown by default, since an older copy may still
+be deployed somewhere); `--latest-only` hides them. Without `--inspect`, or
+when a certificate's inspection failed, a same-CN match is only `maybe`
+superseded, and `--latest-only` keeps those rows and prints a warning on stderr.
+
+`--originator` and `--group` filter before replacements are matched, so a
+replacement placed by another originator or in another group isn't seen and
+its predecessor stays outstanding. Run unfiltered for the true count.
 
 The `origin` column is CertiNext's own `originator`: `ACME`, `CERTInext` (portal),
 or `CERTInext API`. `--group-by group` counts certificates per account group, which
 shows which groups hold automated issuance without hardcoding any group numbers.
+`--group-by ca` shows the migration per CA.
 
 #### Changing the criteria
 
@@ -991,33 +1018,59 @@ A key you set replaces that signal's default list; an empty list turns the signa
 
 ```toml
 [replacement]
-issuers   = ["InCommon Intermediate CA - OVG3C"]   # issuing-CA common names, case-insensitive
-key_types = ["EC"]                                  # EC | RSA | Ed25519 | Ed448 | DSA
-chain_cas = ["emSign ECC Root CA - G3"]             # distrusted CA names anywhere in the chain
+cas       = ["EMSIGN"]                              # CA codes from the product catalog: EMSIGN | SSLCOM
+issuers   = []                                      # issuing-CA common names, case-insensitive
+key_types = []                                      # EC | RSA | Ed25519 | Ed448 | DSA
+chain_cas = []                                      # distrusted CA names anywhere in the chain
 ```
 
-Flags override the file for one run: `--issuer`, `--key-type` and `--chain-ca`
-(repeatable, each replaces that list) and `--disable-signal issuer|key|chain`.
-An invalid `[replacement]` table exits 2 rather than falling back to defaults.
+Flags override the file for one run: `--ca`, `--issuer`, `--key-type` and
+`--chain-ca` (repeatable, each replaces that list) and
+`--disable-signal ca|issuer|key|chain`. An invalid `[replacement]` table exits 2
+rather than falling back to defaults. A `--ca` name the catalog doesn't know
+logs a warning (it would match nothing).
+
+##### Legacy: ECC G3 criteria
+
+The October 2026 ECC G3 distrust (Mozilla removed `emSign ECC Root CA - G3` from
+NSS, [bug 2083449](https://bugzilla.mozilla.org/show_bug.cgi?id=2083449)) was
+the default before 1.4.0rc7. To classify on it again:
+
+```toml
+[replacement]
+cas       = []
+issuers   = ["InCommon Intermediate CA - OVG3C"]
+key_types = ["EC"]
+chain_cas = ["emSign ECC Root CA - G3"]
+```
+
+or, for one run: `--disable-signal ca --issuer "InCommon Intermediate CA - OVG3C"
+--key-type EC --chain-ca "emSign ECC Root CA - G3" --inspect`. Expect some
+`conflict` rows: EC keys have been issued under the RSA-rooted `OVG2C`
+intermediate, so their key type matches while their chain is trusted.
 
 #### Arguments
 
 ```
---inspect                 Download and parse each certificate (key + chain signals, SANs, ordered by)
+--inspect                 Download and parse each certificate (SANs to confirm replacements, key + chain signals, ordered by)
 --workers N               Certificates to download at once with --inspect (default 4, max 16)
---cache / --no-cache      Reuse --inspect downloads up to 7 days old (asks on a terminal if neither)
+--cache / --no-cache      Reuse --inspect downloads up to 30 days old (asks on a terminal if neither)
+--cache-max-age DAYS      Trust cached downloads up to DAYS days old (default 30; implies --cache; also the pruning age)
 --refresh-cache           Re-download everything and rewrite the cache (implies --cache)
 --cache-dir DIR           Keep the cache in DIR (implies --cache)
 --all                     Also list certificates that do not need replacing (measure progress)
 --latest-only             Hide superseded certificates (needs --inspect; 'maybe' rows are kept)
+--outstanding             Only certificates still to replace (CN-only 'maybe' replacements stay listed)
+--issued-since DATE       Only orders placed on or after DATE (YYYY-MM-DD, UTC)
 --originator NAME         Only this originator (ACME, CERTInext, "CERTInext API"); repeatable
 --group GROUP             Only this account group, by number or name; repeatable
 --expiring-within DAYS    Only certificates expiring within DAYS days
---group-by FIELD          Also print counts per originator, group, or issuer
+--group-by FIELD          Also print counts per originator, group, issuer, or ca
+--ca CA                   Issuing CA (EMSIGN, SSLCOM) that needs replacing; repeatable, replaces config
 --issuer CN               Issuing-CA name that needs replacing; repeatable, replaces config
 --key-type TYPE           Key type that needs replacing; repeatable, replaces config
 --chain-ca CN             Distrusted CA name in the chain; repeatable, replaces config
---disable-signal SIGNAL   Turn off issuer, key, or chain for this run; repeatable
+--disable-signal SIGNAL   Turn off ca, issuer, key, or chain for this run; repeatable
 --csv                     CSV on stdout (summary on stderr)
 --json                    JSON on stdout: times, criteria, cache, summary, certificates, incomplete, breakdown
 -o, --output FILE         Write the table, JSON, or CSV to FILE (UTF-8) instead of stdout
@@ -1033,7 +1086,8 @@ inspection error. Use `--workers 1` for the old sequential behaviour.
 
 Even in parallel, a full `--inspect` takes about 20 minutes, and a certificate's
 contents rarely change between runs. `--cache` keeps each download on disk and
-reuses it for up to 7 days, so a repeat run takes about a minute. It is opt-in:
+reuses it for up to **30 days**, so a repeat run takes about a minute. It is
+opt-in:
 
 - With neither `--cache` nor `--no-cache`, the command asks on a terminal
   (Enter means no). In a scheduled job or a pipe it stays off without asking.
@@ -1044,9 +1098,19 @@ reuses it for up to 7 days, so a repeat run takes about a minute. It is opt-in:
 - Errors are never cached: failed or rate-limited requests, unparseable
   certificates, and downloads with no chain. The cache stores the raw
   download, which is parsed again each run.
+- `--cache-max-age DAYS` changes the age bound for one run (and turns the
+  cache on). Each run also **deletes** entries older than the bound, so a short
+  value throws away entries a later run could have reused.
+- The `chain` signal (off by default) is the one thing a cache can get wrong:
+  if CertiNext re-roots a chain without changing the serial, a cached run
+  shows the old chain. With the chain signal on and a bound over 7 days, the
+  run warns; `--refresh-cache` or `--no-cache` gives a live answer.
 - The summary line says how many inspections came from the cache, and
-  `--json` has a `cache` block (`hits`, `misses`, `dir`, ...).
+  `--json` has a `cache` block (`hits`, `misses`, `max_age_days`, `dir`, ...).
 - `--refresh-cache` ignores what is there, downloads everything, and saves it.
+
+Before 1.4.0rc7 the bound was 7 days. Existing entries become usable for longer
+at once, since an entry's age comes from when it was downloaded.
 
 The cache holds who placed each order (names and emails), so it lives in a
 per-user directory: `%LOCALAPPDATA%\certinext\cache\replacement-inspect` on
@@ -1055,20 +1119,42 @@ Windows, `$XDG_CACHE_HOME/certinext/replacement-inspect` (default
 Production and sandbox entries go in separate `production`/`sandbox`
 subdirectories. Delete the directory to clear it.
 
+#### Output
+
+The table has `verdict`, `ca`, `common_name`, `issuer`, `valid_to`, `days`,
+`order`, `origin`, `group`, `superseded` (`yes`/`maybe`) and `replaced_by`
+(an order number, or `maybe:<order>`) columns; `--inspect` adds `sans`, `key`
+and `ordered_by`. It is sorted by expiry, soonest first, and ends with a summary
+that leads with the work left, such as:
+
+```text
+443 EMSIGN certificates outstanding (31 possibly replaced; confirm with --inspect); 51 replaced; 494 of 552 valid certificates need replacing
+```
+
+A further `N superseded by newer certificates that also need replacing` part
+appears when renewed rows account for the rest, so the counts add up.
+Conflicts are shown when more than one signal is active.
+
+`--json` and `--csv` rows carry every field, including `ca`, `product_code`,
+`replaced_by`, `replaced_by_ca`, `possibly_replaced_by`, `superseded`,
+`possibly_superseded`, `renewed` and `outstanding`. The JSON `summary` has
+`outstanding`, `replaced` and `possibly_replaced` (a subset of `outstanding`)
+alongside the verdict counts.
+
+Exit codes are 0 on success, 1 if the report is incomplete or (with the `ca`
+signal on) the product catalog lists no products, and 2 for a usage or config
+error. The report is incomplete when a certificate could not be inspected
+(including a download with no chain), or when an issued order has no order
+number or expiry date. Incomplete orders are logged and listed under
+`incomplete` in `--json` rather than dropped. A `--group` filter fails outright
+if group names cannot be looked up, rather than silently matching on numbers
+alone.
+
 `--output` is the safe way to save a report on Windows: PowerShell 5.1's `>`
 writes UTF-16, which most JSON and CSV tools reject. The path is checked before
 the report is built. If the file still cannot be opened at the end (for
 example, a CSV left open in Excel), the report goes to stdout instead and the
 command exits 1, so a long `--inspect` run is not lost.
-
-The table is sorted by expiry, soonest first, and ends with a summary such as
-`297 of 573 valid certificates need replacing; 19 conflicts to review`. Exit codes are 0 on
-success, 1 if the report is incomplete, and 2 for a usage or config error. The
-report is incomplete when a certificate could not be inspected (including a
-download with no chain), or when an issued order has no order number or expiry
-date. Those orders are logged and listed under `incomplete` in `--json` rather
-than dropped. A `--group` filter fails outright if group names cannot be
-looked up, rather than silently matching on numbers alone.
 
 `--json` records when the run started (`started_at`, also the "now" used for
 validity and `days_left`) and when it finished (`ended_at`). `generated_at` is
@@ -1078,27 +1164,28 @@ start time.
 #### Examples
 
 ```bash
-# What still needs replacing (issuer only, instant)
+# How many emSign certificates are left (instant: orders report + catalog)
 certinext replacement-report
 
-# Full audit: every signal, flag any disagreement
-certinext replacement-report --inspect
+# The actionable list, with replacements confirmed, broken down by who ordered them.
+# The first run fills the cache (~20 min); later ones take about a minute.
+certinext replacement-report --inspect --cache --outstanding --group-by originator
+
+# Track progress over time: save each run
+certinext replacement-report --inspect --cache --all --json -o replacement-2026-11-20.json
+
+# Migration per CA
+certinext replacement-report --all --group-by ca
+
+# emSign certificates issued after the browser cutoff (untrusted from day one;
+# usually an ACME client still on an emSign account)
+certinext replacement-report --ca EMSIGN --issued-since 2026-11-16
 
 # Orders the ACME proxy log never sees: portal and API orders
-certinext replacement-report --originator CERTInext --originator "CERTInext API" --inspect
+certinext replacement-report --originator CERTInext --originator "CERTInext API" --inspect --cache
 
-# Migration progress: newest copy per name, broken down by issuer
-certinext replacement-report --inspect --all --latest-only --group-by issuer
-
-# A later event: classify on a different intermediate, ignore key type
-certinext replacement-report --issuer "Example Intermediate CA" --disable-signal key
-
-certinext replacement-report --inspect --csv -o replace.csv
-certinext replacement-report --inspect --json -o replace.json
-
-# Work through the list: the first run fills the cache, later ones take about a minute
-certinext replacement-report --inspect --latest-only --cache
-certinext replacement-report --inspect --latest-only --cache --cache-dir D:\certinext-cache
+certinext replacement-report --inspect --cache --csv -o replace.csv
+certinext replacement-report --inspect --cache --cache-dir D:\certinext-cache
 ```
 
 ---
@@ -2096,23 +2183,40 @@ repr(o)       # OrderRecord(order_number='ORD-001', common_name='example.org', .
 ```python
 from certinext.replacement import ReplacementCriteria, build_report
 
-criteria = ReplacementCriteria()                         # eMudhra ECC distrust defaults
-criteria = criteria.with_overrides(disable=["key"])      # per-run changes
+criteria = ReplacementCriteria()                         # cas=["EMSIGN"]; issuer/key/chain lists empty
+criteria = criteria.with_overrides(cas=["EMSIGN"])       # per-run changes (also issuers=, disable=[...])
 report = build_report(sess, criteria, inspect=True)      # read-only; inspect downloads each cert
 report = build_report(sess, criteria, inspect=True, workers=4)  # 4 downloads at once (default 1);
                                                          # a 429 pauses every worker
-for row in report.select(latest_only=True):
-    print(row.verdict.value, row.facts.common_name, row.facts.valid_to)
-print(report.summarize(report.population()))
+for row in report.select(outstanding=True):              # the work left to do
+    print(row.verdict.value, row.facts.ca, row.facts.common_name, row.facts.valid_to)
+for row in report.rows:
+    if row.replaced_by:                                  # newest covering cert with verdict OK
+        print(row.facts.order_number, "->", row.replaced_by, row.replaced_by_ca)
+summary = report.summarize(report.population())
+print(summary["outstanding"], summary["replaced"], summary["possibly_replaced"])
+print(report.breakdown(report.population(), "ca"))
 print(report.started_at, report.ended_at)                # started_at is also the validity "now"
 
 from pathlib import Path
 from certinext.replacement import InspectionCache
 
-cache = InspectionCache(Path("cache"), refresh=False)    # reuse downloads up to 7 days old
+cache = InspectionCache(Path("cache"), refresh=False)    # reuse downloads up to 30 days old
 report = build_report(sess, criteria, inspect=True, cache=cache)
 print(report.cache.hits, report.cache.misses)            # None when no cache was passed
 ```
+
+With the `ca` signal active, `build_report` raises `CertiNextAPIError` if the
+product catalog can't be read and `ValueError` if it lists no products.
+`ReportRow.outstanding` is true when a row needs replacing and has neither a
+`replaced_by` nor a `renewed` flag; a CN-only `possibly_replaced_by` never
+clears it. Pass `issued_since=` to keep only orders placed on or after a time.
+
+For the ECC G3 criteria that were the defaults before 1.4.0rc7, use the
+`ECC_G3_ISSUERS`, `ECC_G3_KEY_TYPES` and `ECC_G3_CHAIN_CAS` constants with
+`cas=[]`. `DEFAULT_ISSUERS`/`DEFAULT_KEY_TYPES`/`DEFAULT_CHAIN_CAS` are still
+exported as aliases of those, but are no longer the defaults (removal at 2.0);
+`DEFAULT_CAS` is `("EMSIGN",)`.
 
 `ReplacementReport.generated_at` was renamed to `started_at` in 1.3.0rc5.
 
