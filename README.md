@@ -997,8 +997,9 @@ the count can over-state the work but never under-state it. Run with
 Older certificates whose SANs are all covered by *any* newer valid certificate
 are also marked `superseded` (shown by default, since an older copy may still
 be deployed somewhere); `--latest-only` hides them. Without `--inspect`, or
-when a certificate's inspection failed, a same-CN match is only `maybe`
-superseded, and `--latest-only` keeps those rows and prints a warning on stderr.
+when the inspection of either certificate failed, a same-CN match is only
+`maybe` superseded (or replaced): it never clears a row. `--latest-only` and
+`--outstanding` keep those rows and print a warning on stderr.
 
 `--originator` and `--group` filter before replacements are matched, so a
 replacement placed by another originator or in another group isn't seen and
@@ -1072,7 +1073,7 @@ intermediate, so their key type matches while their chain is trusted.
 --chain-ca CN             Distrusted CA name in the chain; repeatable, replaces config
 --disable-signal SIGNAL   Turn off ca, issuer, key, or chain for this run; repeatable
 --csv                     CSV on stdout (summary on stderr)
---json                    JSON on stdout: times, criteria, cache, summary, certificates, incomplete, breakdown
+--json                    JSON on stdout: times, criteria, cache, summary, summary_scope, certificates, incomplete, breakdown
 -o, --output FILE         Write the table, JSON, or CSV to FILE (UTF-8) instead of stdout
 ```
 
@@ -1134,6 +1135,14 @@ that leads with the work left, such as:
 A further `N superseded by newer certificates that also need replacing` part
 appears when renewed rows account for the rest, so the counts add up.
 Conflicts are shown when more than one signal is active.
+
+The summary and `--group-by` counts ignore `--outstanding` and `--all`: those
+choose which rows are *listed*, so the actionable list still shows how many
+were replaced. `--latest-only` and `--expiring-within` do narrow the counts, and
+the summary then ends with, for example, `counts cover only certificates
+expiring within 30 days`; the JSON `summary_scope` records the same. Before
+1.4.0rc8, `--outstanding` also narrowed the counts, so its summary always read
+`0 replaced`.
 
 `--json` and `--csv` rows carry every field, including `ca`, `product_code`,
 `replaced_by`, `replaced_by_ca`, `possibly_replaced_by`, `superseded`,

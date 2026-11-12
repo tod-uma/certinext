@@ -445,15 +445,16 @@ class ReportRow:
         classification: How it scored against the criteria.
         superseded: Whether a newer valid certificate covers all its SANs.
         possibly_superseded: A newer valid certificate shares its common
-            name, but its SANs are unknown (not inspected, or inspection
-            failed), so coverage cannot be confirmed. Never hidden by
-            ``latest_only``.
+            name, but this row's or that certificate's SANs are unknown (not
+            inspected, or inspection failed), so coverage cannot be
+            confirmed. Never hidden by ``latest_only``.
         replaced_by: Order number of the newest valid certificate that
             covers all this row's SANs and classifies :attr:`Verdict.OK`.
             Only set on rows whose own verdict is not OK.
         replaced_by_ca: That certificate's CA (:attr:`CertificateFacts.ca`).
         possibly_replaced_by: As ``replaced_by``, but matched on the common
-            name alone because this row's SANs are unknown. Informational:
+            name alone because this row's or that certificate's SANs are
+            unknown. Informational:
             the row stays :attr:`outstanding`.
         renewed: Superseded by a newer covering certificate that itself
             needs replacing, which carries the work forward. Narrower than
@@ -646,7 +647,10 @@ class ReplacementReport:
             latest_only: Drop superseded rows.
             expiring_within: Keep only rows expiring within this many days.
             outstanding: Keep only :attr:`ReportRow.outstanding` rows (the
-                work still to do). Already de-duplicated: a row renewed by a
+                work still to do). A summary over this population always
+                reads "0 replaced", so callers wanting migration progress
+                should leave it off and filter only the rows they list
+                (as the CLI does). Already de-duplicated: a row renewed by a
                 newer one that still needs replacing is not outstanding. A
                 row superseded only by a certificate that carries nothing
                 (unknown verdict, unmapped CA) is kept unless ``latest_only``
@@ -927,18 +931,21 @@ def classify(facts: CertificateFacts, criteria: ReplacementCriteria) -> Classifi
 def mark_superseded(rows: list[ReportRow]) -> None:
     """Flag rows covered by a newer valid certificate, and record replacements.
 
-    "Newer" compares ``(order_date, valid_to)``. Only a row whose SANs are
-    known can be marked ``superseded``: a common name alone may hide extra
-    SANs the newer certificate lacks. A CN-only match sets
-    ``possibly_superseded`` instead. A row with no names is never flagged.
+    "Newer" compares ``(order_date, valid_to)``. Coverage is *confirmed* only
+    when the SANs of both this row and the newer row are known: either
+    side's common name alone may hide SANs the other lacks. A match with
+    either side CN-only sets ``possibly_superseded`` instead, and never
+    ``superseded``, ``renewed`` or ``replaced_by``, so it never clears a row
+    from :attr:`ReportRow.outstanding`. A row with no names is never flagged.
 
     In the same pass, a row whose own verdict is not :attr:`Verdict.OK` gets
-    ``replaced_by``/``replaced_by_ca`` from the **newest** covering row whose
-    verdict is OK (``possibly_replaced_by`` on a CN-only match). When the
+    ``replaced_by``/``replaced_by_ca`` from the **newest** confirmed covering
+    row whose verdict is OK, or failing that ``possibly_replaced_by`` from
+    the newest CN-only one. When the
     ``ca`` signal is active, a coverer counts only if its CA was evaluated:
     with another signal active, an unmapped product code can still score OK
     without showing the certificate left the distrusted CA. ``renewed`` is
-    set when a covering row (SANs known) itself needs replacing. Rows must
+    set when a confirmed covering row itself needs replacing. Rows must
     therefore be classified first. Flags are reset and set in place, so
     calling this again on the same rows is safe.
 
@@ -948,6 +955,17 @@ def mark_superseded(rows: list[ReportRow]) -> None:
     def recency(row: ReportRow) -> tuple[dt.datetime, dt.datetime, str]:
         f = row.facts
         return (f.order_date or dt.datetime.min.replace(tzinfo=dt.timezone.utc), f.valid_to, f.order_number)
+
+    def passing(candidates: list[ReportRow]) -> list[ReportRow]:
+        """Return the candidates that count as a replacement.
+
+        OK with the ``ca`` signal unevaluated (an unmapped product code)
+        proves no CA move, so those rows are left out.
+        """
+        return [
+            o for o in candidates
+            if o.verdict is Verdict.OK and "ca" not in o.classification.unevaluated
+        ]
 
     by_name: dict[str, list[ReportRow]] = defaultdict(list)
     for row in rows:
@@ -966,25 +984,20 @@ def mark_superseded(rows: list[ReportRow]) -> None:
             other for other in by_name[first]
             if other is not row and recency(other)[:2] > mine and names <= other.facts.names()
         ]
-        known = row.facts.sans_known
-        if known:
-            row.superseded = bool(coverers)
-            row.renewed = any(o.verdict.needs_replacing for o in coverers)
-        else:
-            row.possibly_superseded = bool(coverers)
+        # Coverage is confirmed only when both SAN sets are known: a coverer
+        # whose names() fell back to its CN may lack names this row has.
+        confirmed = [o for o in coverers if o.facts.sans_known] if row.facts.sans_known else []
+        row.superseded = bool(confirmed)
+        row.possibly_superseded = bool(coverers) and not confirmed
+        row.renewed = any(o.verdict.needs_replacing for o in confirmed)
 
-        # OK with the ca signal unevaluated (an unmapped product code) proves no CA move.
-        passing = [
-            o for o in coverers
-            if o.verdict is Verdict.OK and "ca" not in o.classification.unevaluated
-        ]
-        if row.verdict is Verdict.OK or not passing:
+        if row.verdict is Verdict.OK:
             continue
-        newest = max(passing, key=recency)
-        if known:
+        if sure := passing(confirmed):
+            newest = max(sure, key=recency)
             row.replaced_by, row.replaced_by_ca = newest.facts.order_number, newest.facts.ca
-        else:
-            row.possibly_replaced_by = newest.facts.order_number
+        elif maybe := passing(coverers):
+            row.possibly_replaced_by = max(maybe, key=recency).facts.order_number
 
 
 def _facts_from_record(

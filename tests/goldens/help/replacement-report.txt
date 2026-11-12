@@ -65,7 +65,10 @@
 │                                                                    CN-only matches stay listed   │
 │                                                                    (replaced_by                  │
 │                                                                    'maybe:<order>'). --all has   │
-│                                                                    no effect                     │
+│                                                                    no effect. The summary still  │
+│                                                                    counts every certificate, so  │
+│                                                                    it shows how many were        │
+│                                                                    replaced                      │
 │ --issued-since                       DATE                          Only orders placed on or      │
 │                                                                    after DATE (YYYY-MM-DD, UTC)  │
 │ --originator                         NAME                          Only orders from this         │

@@ -891,6 +891,33 @@ def test_cn_only_sslcom_match_is_possibly_replaced() -> None:
     assert old.possibly_superseded and old.outstanding
 
 
+@pytest.mark.parametrize("coverer_ca", ["SSLCOM", "EMSIGN"])
+def test_coverer_with_unknown_sans_never_clears_the_row(coverer_ca: str) -> None:
+    """An inspected row matched only by a newer cert's CN stays outstanding.
+
+    The newer cert's inspection failed, so its names() fell back to the CN;
+    that is no proof it covers the old SANs. It is only a *possible*
+    replacement or renewal (external review rc7, finding 1).
+    """
+    old = _ca_row("ORDER-00001", 60, "EMSIGN", ["a.example.edu"])
+    new = _ca_row("ORDER-00002", 5, coverer_ca, cn="a.example.edu")
+    assert old.facts.sans_known and not new.facts.sans_known
+    rp.mark_superseded([old, new])
+    assert not (old.superseded or old.renewed or old.replaced_by)
+    assert old.possibly_superseded and old.outstanding
+    assert old.possibly_replaced_by == ("ORDER-00002" if coverer_ca == "SSLCOM" else None)
+
+
+def test_confirmed_coverer_wins_over_newer_cn_only_one() -> None:
+    """A confirmed SSL.com replacement is recorded even when a newer CN-only match exists."""
+    old = _ca_row("ORDER-00001", 60, "EMSIGN", ["a.example.edu"])
+    confirmed = _ca_row("ORDER-00002", 20, "SSLCOM", ["a.example.edu"])
+    cn_only = _ca_row("ORDER-00003", 2, "SSLCOM", cn="a.example.edu")
+    rp.mark_superseded([old, confirmed, cn_only])
+    assert (old.replaced_by, old.possibly_replaced_by) == ("ORDER-00002", None)
+    assert old.superseded and not old.possibly_superseded and not old.outstanding
+
+
 def test_coverer_with_unevaluated_ca_is_not_a_replacement() -> None:
     """An OK coverer whose CA is unmapped proves no CA move (external review finding 2).
 
@@ -1684,6 +1711,8 @@ def test_cli_outstanding_lists_only_work_left(run_cli: Callable[..., tuple[int, 
     code, out, _ = run_cli(["--outstanding", "--all", "--inspect"], routes=_migration_routes())
     assert code == 0
     assert "(no certificates match)" in out
+    # The summary still counts the whole population: the replacement shows as progress.
+    assert "0 EMSIGN certificates outstanding; 1 replaced; 1 of 3 valid" in out
 
     code, out, _ = run_cli(["--outstanding", "--all"], routes=_migration_routes())
     assert code == 0
@@ -1692,7 +1721,44 @@ def test_cli_outstanding_lists_only_work_left(run_cli: Callable[..., tuple[int, 
     code, out, _ = run_cli(["--outstanding", "--json"], routes=_migration_routes(replaced=False))
     doc = json.loads(out)
     assert [c["order_number"] for c in doc["certificates"]] == ["ORDER-00001"]
-    assert doc["summary"]["outstanding"] == 1
+    s = doc["summary"]
+    assert (s["outstanding"], s["replaced"], s["needs_replacing"], s["valid"]) == (1, 0, 1, 2)
+    assert doc["summary_scope"] == {"latest_only": False, "expiring_within": None}
+
+
+def test_cli_outstanding_summary_and_breakdown_keep_replacements(
+    run_cli: Callable[..., tuple[int, str, str]],
+) -> None:
+    """--group-by with --outstanding still counts confirmed replacements (rc7 bug: always 0)."""
+    code, out, _ = run_cli(
+        ["--outstanding", "--inspect", "--json", "--group-by", "ca"], routes=_migration_routes()
+    )
+    assert code == 0
+    doc = json.loads(out)
+    assert doc["certificates"] == []
+    assert (doc["summary"]["outstanding"], doc["summary"]["replaced"]) == (0, 1)
+    by_ca = {b["ca"]: b for b in doc["breakdown"]}
+    assert by_ca["EMSIGN"]["replaced"] == 1
+
+
+def test_cli_outstanding_warning_names_the_flag_used(run_cli: Callable[..., tuple[int, str, str]]) -> None:
+    """The 'maybe' warning names --outstanding, not --latest-only, when only --outstanding was given."""
+    code, _, err = run_cli(["--outstanding"], routes=_migration_routes())
+    assert code == 0
+    assert "so --outstanding kept them" in err and "--latest-only" not in err
+    _, _, err = run_cli(["--outstanding", "--latest-only"], routes=_migration_routes())
+    assert "so --latest-only and --outstanding kept them" in err
+
+
+def test_cli_scoped_summary_says_so(run_cli: Callable[..., tuple[int, str, str]]) -> None:
+    """--expiring-within / --latest-only narrow the counts, and the summary line says which."""
+    code, out, _ = run_cli(["--expiring-within", "3650", "--latest-only"], routes=_migration_routes())
+    assert code == 0
+    assert out.strip().splitlines()[-1].endswith(
+        "counts cover only certificates not superseded and expiring within 3650 days"
+    )
+    code, out, _ = run_cli([], routes=_migration_routes())
+    assert "counts cover only" not in out
 
 
 def test_cli_superseded_emsign_is_counted_separately(run_cli: Callable[..., tuple[int, str, str]]) -> None:

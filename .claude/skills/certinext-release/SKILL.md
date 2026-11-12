@@ -97,6 +97,9 @@ Cut a release for certinext. The tag message is the source of truth — GitLab C
      `gh release view vX.Y.Z -R tod-uma/certinext --json tagName,isPrerelease` and
      `gh run list -R tod-uma/certinext --limit 3`.
    - **PyPI** — stable versions are visible without `--pre`; pre-releases require `pip install --pre certinext` to see.
+     Check `https://pypi.org/pypi/certinext/<ver>/json`, not the package-level `/pypi/certinext/json`: the
+     package-level page is CDN-cached and lagged minutes behind a finished upload for v1.4.0rc7, which looks
+     exactly like a failed publish. The `publish-pypi` job's conclusion is the real verdict.
 
 **Windows-on-ARM64 workstation:** the pre-commit gate runs `mypy` and the full test suite from
 `.venv`, and `uv.lock` pins a `cryptography` with no `win_arm64` wheel, so a native `uv sync`

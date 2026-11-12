@@ -267,13 +267,37 @@ def _table_row(row: rp.ReportRow, report: rp.ReplacementReport, show_errors: boo
     return out
 
 
-def _summary_line(summary: dict[str, int], report: rp.ReplacementReport) -> str:
+def _summary_scope(latest_only: bool, expiring_within: int | None) -> list[str]:
+    """Describe the filters that narrow the summary's population.
+
+    ``--outstanding`` is deliberately absent: it narrows only the listed
+    rows, so the summary still shows migration progress.
+
+    Args:
+        latest_only: Whether superseded rows were dropped.
+        expiring_within: The ``--expiring-within`` window, if any.
+
+    Returns:
+        Phrases such as ``["not superseded", "expiring within 30 days"]``;
+        empty when the summary covers every valid certificate.
+    """
+    scope = ["not superseded"] if latest_only else []
+    if expiring_within is not None:
+        scope.append(f"expiring within {expiring_within} days")
+    return scope
+
+
+def _summary_line(
+    summary: dict[str, int], report: rp.ReplacementReport, scope: list[str] | None = None
+) -> str:
     """Render the one-line summary.
 
     Args:
         summary: Output of :meth:`ReplacementReport.summarize`, plus an
             ``incomplete`` count.
         report: The report (for criteria and inspection state).
+        scope: Phrases from :func:`_summary_scope`; when given, the line
+            ends by saying the counts cover only those certificates.
 
     Returns:
         Migration progress first, e.g. ``"443 EMSIGN certificates
@@ -313,6 +337,8 @@ def _summary_line(summary: dict[str, int], report: rp.ReplacementReport) -> str:
             f"{c.hits} of {c.hits + c.misses} inspections from cache "
             f"(up to {c.max_age.days} days old{'; refreshed' if c.refreshed else ''})"
         )
+    if scope:
+        parts.append(f"counts cover only certificates {' and '.join(scope)}")
     line = "; ".join(parts)
     # ca and issuer come from the orders report and catalog; only key/chain need --inspect.
     skipped = [s for s in signals if s not in ("ca", "issuer")]
@@ -429,7 +455,8 @@ def replacement_report(
         help=(
             "Only certificates still to replace: no confirmed replacement by a newer passing "
             "certificate and not renewed by a newer one that still needs replacing. CN-only "
-            "matches stay listed (replaced_by 'maybe:<order>'). --all has no effect"
+            "matches stay listed (replaced_by 'maybe:<order>'). --all has no effect. The "
+            "summary still counts every certificate, so it shows how many were replaced"
         ),
     ),
     issued_since: Optional[dt.datetime] = typer.Option(
@@ -536,9 +563,11 @@ def replacement_report(
         log.error("Cannot build the replacement report", error=str(exc))
         raise SystemExit(1) from exc
 
-    population = report.population(
-        latest_only=latest_only, expiring_within=expiring_within, outstanding=outstanding
-    )
+    # --outstanding narrows the listed rows only: a summary over outstanding
+    # rows alone would always read "0 replaced". --latest-only and
+    # --expiring-within still scope the counts, and the summary says so.
+    population = report.population(latest_only=latest_only, expiring_within=expiring_within)
+    scope = _summary_scope(latest_only, expiring_within)
     rows = report.select(
         include_ok=include_ok, latest_only=latest_only, expiring_within=expiring_within,
         outstanding=outstanding,
@@ -547,11 +576,17 @@ def replacement_report(
     summary["incomplete"] = len(report.incomplete)
     breakdown = report.breakdown(population, group_by.value) if group_by else None
 
-    if (latest_only or outstanding) and summary["possibly_superseded"]:
+    kept_by = [flag for flag, on in (("--latest-only", latest_only), ("--outstanding", outstanding)) if on]
+    maybe = sum(1 for r in rows if r.possibly_superseded)
+    if kept_by and maybe:
+        hint = (
+            "An inspection failed; see the errors." if report.inspected
+            else "Use --inspect to check SAN coverage."
+        )
         print(
-            f"Warning: {summary['possibly_superseded']} certificates share a common name with a "
-            "newer certificate, but their SANs are unknown, so --latest-only kept them "
-            "(marked 'maybe'). Use --inspect to check SAN coverage.",
+            f"Warning: {maybe} listed certificates share a common name with a newer certificate, "
+            f"but SAN coverage is unconfirmed, so {' and '.join(kept_by)} kept them "
+            f"(marked 'maybe'). {hint}",
             file=sys.stderr,
         )
 
@@ -568,6 +603,8 @@ def replacement_report(
                 "criteria": criteria.model_dump(),
                 "cache": report.cache.to_dict() if report.cache else {"enabled": False},
                 "summary": summary,
+                # What the summary counts; --outstanding narrows certificates only.
+                "summary_scope": {"latest_only": latest_only, "expiring_within": expiring_within},
                 "certificates": [r.to_dict(report.started_at) for r in rows],
                 "incomplete": [asdict(i) for i in report.incomplete],
             }
@@ -593,12 +630,12 @@ def replacement_report(
             if breakdown:
                 console.print(rows_table(breakdown))
                 print(file=out)
-            print(_summary_line(summary, report), file=out)
+            print(_summary_line(summary, report, scope), file=out)
 
     # The summary always reaches the terminal: CSV has no room for it, and
     # with --output the data went to a file.
     if output_csv or fh:
-        print(_summary_line(summary, report), file=sys.stderr)
+        print(_summary_line(summary, report, scope), file=sys.stderr)
     if fh:
         log.info("Report written", path=str(output))
 
