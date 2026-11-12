@@ -24,6 +24,17 @@ switch the credential, don't retry. Untested: the UCC and 30/45/90-day
 codes, and what an InCommon code with no SSL.com equivalent does. The vendor
 hasn't confirmed the translation yet.
 
+**Prod uses different codes from sandbox (read and tested 2026-11-12).** The
+examples above are sandbox codes. In prod the InCommon DV codes are `842` (DV),
+`843` (wildcard), `844` (UCC) and `845` (wildcard UCC); OV is `846`-`849` and EV
+`850`/`851` (plus 30/45/90-day variants). A prod order with `842` on an
+SSL.com-bound credential issued SSL.com DV, reported as `1011`, in about 8 s
+(`--ca SSLCOM` pre-flight passed). The prod SSL.com category lists **DV only,
+`1011`-`1014`**: there is no SSL.com OV or EV in prod, so an OV/EV order has no
+SSL.com equivalent there. Untested in prod: `843`/`844`/`845` → `1012`/`1013`/
+`1014`. Don't copy a sandbox code into a prod command; list the prod catalog
+first.
+
 **The catalog can't show a credential's CA.** It lists both categories
 either way. `ProductCategory.ca` says which CA a *product* belongs to;
 label orders by joining `OrderRecord.product_code` to
