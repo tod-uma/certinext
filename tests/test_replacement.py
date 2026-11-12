@@ -39,6 +39,7 @@ from pydantic import ValidationError
 
 from certinext import replacement as rp
 from certinext._config import ConfigError, replacement_criteria
+from certinext._inspection_cache import DEFAULT_MAX_AGE
 from certinext.cli import main as cli_main
 from certinext.exceptions import CertiNextAPIError, CertiNextRateLimitError
 from certinext.models.ssl_certificates import CertificateDownload
@@ -1079,9 +1080,11 @@ def test_expired_entries_are_refetched_and_pruned(monkeypatch: pytest.MonkeyPatc
     rp.build_report(sess, CRITERIA, inspect=True, now=NOW, cache=rp.InspectionCache(tmp_path, clock=lambda: t0))
     assert len(_entries(tmp_path)) == 2
 
-    old = rp.InspectionCache(tmp_path, clock=lambda: t0 + dt.timedelta(days=8))
+    assert DEFAULT_MAX_AGE == dt.timedelta(days=30)  # ADR 0021
+    day = dt.timedelta(days=1)
+    old = rp.InspectionCache(tmp_path, clock=lambda: t0 + DEFAULT_MAX_AGE + day)
     assert old.get("ORDER-00001", "SERIAL-1") is None
-    fresh = rp.InspectionCache(tmp_path, clock=lambda: t0 + dt.timedelta(days=6))
+    fresh = rp.InspectionCache(tmp_path, clock=lambda: t0 + DEFAULT_MAX_AGE - day)
     assert fresh.get("ORDER-00001", "SERIAL-1") is not None
     assert old.prune() == 2
     assert _entries(tmp_path) == []
@@ -1415,6 +1418,11 @@ def test_cli_help_mentions_json(capsys: pytest.CaptureFixture[str], monkeypatch:
         (["--refresh-cache"], None),
         (["--inspect", "--no-cache", "--refresh-cache"], None),
         (["--inspect", "--no-cache", "--cache-dir", "cache"], None),
+        (["--inspect", "--no-cache", "--cache-max-age", "3"], None),
+        (["--cache-max-age", "3"], None),
+        (["--inspect", "--cache-max-age", "0"], None),
+        (["--disable-signal", "ca"], None),
+        (["--issued-since", "11/16/2026"], None),
     ],
 )
 def test_cli_usage_and_config_errors_exit_2(
@@ -1422,7 +1430,8 @@ def test_cli_usage_and_config_errors_exit_2(
 ) -> None:
     """Conflicting outputs, a bad --output path, no enabled signal, bad flags and a bad config all exit 2.
 
-    Also cache flags without --inspect, and --no-cache combined with a flag that implies --cache.
+    Also cache flags without --inspect, --no-cache combined with a flag that implies --cache,
+    a zero --cache-max-age, and a non-ISO --issued-since.
     """
     code, _, _ = run_cli(argv, config=config)
     assert code == 2
@@ -1486,7 +1495,7 @@ def test_cli_cache_dir_and_summary(run_cli: Callable[..., tuple[int, str, str]],
     assert len(_entries(target / "production")) == 2
     code, out, _ = run_cli(["--inspect", "--all", "--cache-dir", str(target)])
     assert code == 0
-    assert "2 of 2 inspections from cache (up to 7 days old)" in out
+    assert "2 of 2 inspections from cache (up to 30 days old)" in out
 
     code, out, _ = run_cli(["--json", "--inspect", "--refresh-cache", "--cache-dir", str(target)])
     cache = json.loads(out)["cache"]
@@ -1519,3 +1528,185 @@ def test_cli_cache_dir_that_is_a_file_exits_2(run_cli: Callable[..., tuple[int, 
     blocker.write_text("x", encoding="utf-8")
     code, _, _ = run_cli(["--inspect", "--cache-dir", str(blocker)])
     assert code == 2
+
+
+# ---------------------------------------------------------------------------
+# CLI: CA migration (ADR 0021)
+# ---------------------------------------------------------------------------
+
+
+def _migration_routes(*, replaced: bool = True) -> dict[str, Any]:
+    """Build routes for the emSign -> SSL.com CLI tests.
+
+    Order 1 is emSign (``host1``), order 2 is SSL.com (``host2``), and, when
+    ``replaced``, order 5 is a newer SSL.com certificate for ``host1``.
+
+    Args:
+        replaced: Whether to add the SSL.com replacement for order 1.
+
+    Returns:
+        Path -> payload routes.
+    """
+    routes = _routes()
+    rows = routes[f"{_API}/reports/orders"]["content"]
+    rows[1]["productCode"] = SSLCOM_CODE
+    if replaced:
+        rows.append(_order_row(
+            5, domainName="host1.example.edu", productCode=SSLCOM_CODE, issuerCA=GOOD_INT,
+            orderDate="2026-10-15T00:00:00", certificateExpiryDate="2027-04-01T00:00:00",
+        ))
+        routes[f"{_API}/ssl-certificates/ORDER-00005"] = {"orderId": "ORDER-00005", "status": "issued"}
+        routes[f"{_API}/ssl-certificates/ORDER-00005/certificate"] = _download(
+            rsa.generate_private_key(65537, 2048), bad=False, sans=["host1.example.edu"]
+        )
+    return routes
+
+
+def test_cli_table_shows_ca_and_possible_replacement(run_cli: Callable[..., tuple[int, str, str]]) -> None:
+    """Uninspected, a same-CN SSL.com cert is 'maybe:<order>' and the summary leads with outstanding."""
+    code, out, _ = run_cli([], routes=_migration_routes())
+    assert code == 0
+    assert "EMSIGN" in out and "maybe:ORDER-00005" in out
+    assert out.strip().splitlines()[-1] == (
+        "0 EMSIGN certificates outstanding; 1 replaced (1 unconfirmed without --inspect); "
+        "1 of 3 valid certificates need replacing"
+    )
+
+
+def test_cli_inspected_json_and_csv_carry_replacement(run_cli: Callable[..., tuple[int, str, str]]) -> None:
+    """With SANs known the replacement is confirmed, in JSON, CSV and the table."""
+    code, out, _ = run_cli(["--json", "--inspect", "--all"], routes=_migration_routes())
+    assert code == 0
+    doc = json.loads(out)
+    by_order = {c["order_number"]: c for c in doc["certificates"]}
+    old = by_order["ORDER-00001"]
+    assert (old["ca"], old["replaced_by"], old["replaced_by_ca"], old["outstanding"]) == (
+        "EMSIGN", "ORDER-00005", "SSLCOM", False,
+    )
+    assert (doc["summary"]["outstanding"], doc["summary"]["replaced"]) == (0, 1)
+
+    code, out, _ = run_cli(["--csv", "--inspect"], routes=_migration_routes())
+    row = next(csv.DictReader(io.StringIO(out)))
+    assert (row["ca"], row["replaced_by"], row["replaced_by_ca"], row["possibly_replaced_by"]) == (
+        "EMSIGN", "ORDER-00005", "SSLCOM", "",
+    )
+
+    code, out, _ = run_cli(["--inspect"], routes=_migration_routes())
+    assert "ORDER-00005" in out and "maybe:" not in out
+    assert "0 EMSIGN certificates outstanding; 1 replaced; 1 of 3" in out
+
+
+def test_cli_outstanding_lists_only_work_left(run_cli: Callable[..., tuple[int, str, str]]) -> None:
+    """--outstanding drops replaced rows (and ignores --all); without a replacement the row stays."""
+    code, out, _ = run_cli(["--outstanding", "--all"], routes=_migration_routes())
+    assert code == 0
+    assert "(no certificates match)" in out
+
+    code, out, _ = run_cli(["--outstanding", "--json"], routes=_migration_routes(replaced=False))
+    doc = json.loads(out)
+    assert [c["order_number"] for c in doc["certificates"]] == ["ORDER-00001"]
+    assert doc["summary"]["outstanding"] == 1
+
+
+def test_cli_superseded_emsign_is_counted_separately(run_cli: Callable[..., tuple[int, str, str]]) -> None:
+    """An emSign cert renewed as emSign is neither outstanding nor replaced; the summary says so."""
+    routes = _migration_routes(replaced=False)
+    routes[f"{_API}/reports/orders"]["content"].append(_order_row(
+        6, domainName="host1.example.edu", orderDate="2026-10-15T00:00:00",
+        certificateExpiryDate="2027-04-01T00:00:00",
+    ))
+    routes[f"{_API}/ssl-certificates/ORDER-00006"] = {"orderId": "ORDER-00006", "status": "issued"}
+    routes[f"{_API}/ssl-certificates/ORDER-00006/certificate"] = _download(
+        rsa.generate_private_key(65537, 2048), bad=False, sans=["host1.example.edu"]
+    )
+    code, out, _ = run_cli(["--inspect"], routes=routes)
+    assert code == 0
+    assert (
+        "1 EMSIGN certificates outstanding; 0 replaced; "
+        "1 superseded by newer certificates that also need replacing; 2 of 3"
+    ) in out
+
+
+def test_cli_ca_flag_replaces_config(run_cli: Callable[..., tuple[int, str, str]]) -> None:
+    """--ca (any case) replaces the CA list: here SSL.com certs are the ones flagged."""
+    code, out, _ = run_cli(["--ca", "sslcom", "--json"], routes=_migration_routes())
+    assert code == 0
+    doc = json.loads(out)
+    assert doc["criteria"]["cas"] == ["SSLCOM"]
+    assert sorted(c["order_number"] for c in doc["certificates"]) == ["ORDER-00002", "ORDER-00005"]
+
+
+def test_cli_issued_since_and_group_by_ca(run_cli: Callable[..., tuple[int, str, str]]) -> None:
+    """--issued-since keeps orders placed on or after the date; --group-by ca counts per CA."""
+    code, out, _ = run_cli(
+        ["--issued-since", "2026-10-15", "--all", "--json"], routes=_migration_routes()
+    )
+    assert code == 0
+    assert [c["order_number"] for c in json.loads(out)["certificates"]] == ["ORDER-00005"]
+
+    code, out, _ = run_cli(["--all", "--group-by", "ca", "--json"], routes=_migration_routes())
+    by_ca = {b["ca"]: b for b in json.loads(out)["breakdown"]}
+    assert (by_ca["EMSIGN"]["valid"], by_ca["SSLCOM"]["ok"]) == (1, 2)
+
+
+def _backdate(directory: Path, days: int) -> None:
+    """Make every cache entry under ``directory`` look ``days`` days old.
+
+    Args:
+        directory: A cache environment directory.
+        days: How old to make the entries.
+    """
+    when = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=days)).isoformat()
+    for path in _entries(directory):
+        data = json.loads(path.read_text(encoding="utf-8"))
+        data["fetched_at"] = when
+        path.write_text(json.dumps(data), encoding="utf-8")
+
+
+def test_cli_cache_default_is_30_days_and_max_age_overrides(
+    run_cli: Callable[..., tuple[int, str, str]], tmp_path: Path
+) -> None:
+    """A 20-day-old entry is a hit by default; --cache-max-age 3 makes it a miss and prunes it."""
+    target = tmp_path / "c"
+    run_cli(["--inspect", "--cache-dir", str(target)])
+    _backdate(target / "production", 20)
+
+    code, out, _ = run_cli(["--json", "--inspect", "--cache-dir", str(target)])
+    cache = json.loads(out)["cache"]
+    assert (cache["hits"], cache["max_age_days"]) == (2, 30)
+
+    _backdate(target / "production", 20)
+    code, out, _ = run_cli(["--inspect", "--all", "--cache-dir", str(target), "--cache-max-age", "3"])
+    assert code == 0
+    assert "0 of 2 inspections from cache (up to 3 days old)" in out
+    code, out, _ = run_cli(["--json", "--inspect", "--cache-dir", str(target), "--cache-max-age", "3"])
+    assert json.loads(out)["cache"]["max_age_days"] == 3
+
+
+def test_cli_cache_max_age_implies_cache(
+    run_cli: Callable[..., tuple[int, str, str]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """--cache-max-age alone turns the cache on without asking."""
+    monkeypatch.setattr("sys.stdin", _Tty(""))
+    code, out, err = run_cli(["--json", "--inspect", "--cache-max-age", "10"])
+    assert code == 0 and "[y/N]" not in err
+    assert json.loads(out)["cache"]["max_age_days"] == 10
+
+
+@pytest.mark.parametrize(
+    ("argv", "config", "warned"),
+    [
+        (["--chain-ca", BAD_ROOT], NO_CA_CONFIG, True),
+        (["--chain-ca", BAD_ROOT, "--cache-max-age", "7"], NO_CA_CONFIG, False),
+        (["--chain-ca", BAD_ROOT, "--disable-signal", "chain", "--issuer", BAD_INT], NO_CA_CONFIG, False),
+        ([], None, False),
+    ],
+)
+def test_cli_warns_when_chain_signal_meets_a_long_cache(
+    run_cli: Callable[..., tuple[int, str, str]], argv: list[str], config: str | None, warned: bool
+) -> None:
+    """Only the chain signal can go stale in the cache, so only it (past 7 days) warns."""
+    code, out, err = run_cli(["--inspect", "--cache", *argv], config=config)
+    assert code == 0
+    assert ("chain signal is on" in err) is warned
+    assert "chain signal is on" not in out

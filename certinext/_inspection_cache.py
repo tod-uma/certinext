@@ -45,9 +45,13 @@ import structlog
 
 log = structlog.get_logger(__name__)
 
-#: How long a cached download is trusted. The served chain can change (a CA
-#: re-rooting is exactly the event this report exists for), so keep it short.
-DEFAULT_MAX_AGE = dt.timedelta(days=7)
+#: How long a cached download is trusted (ADR 0021, amending ADR 0019's 7 days).
+#: Entries are keyed by order and serial, so SANs and key never go stale; only
+#: the served chain can (a CA re-rooting without a new serial). The default
+#: criteria don't use the chain signal, and a cold run is ~20 minutes of load
+#: on an overloaded vendor API, so the default is long. The CLI warns when the
+#: chain signal is on with a max age over 7 days.
+DEFAULT_MAX_AGE = dt.timedelta(days=30)
 
 # Bump when the entry layout changes; other versions are ignored (misses).
 _ENTRY_VERSION = 1

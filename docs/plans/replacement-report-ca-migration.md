@@ -9,8 +9,9 @@ implements-adr: [0021]
 **Status:** in progress. Approved by Tod 2026-11-12. Phase 0 is done: !147 merged, v1.4.0rc6 released (GitLab,
 GitHub and PyPI verified), and branch `feat/replacement-report-ca-migration` was cut with a bump to 1.4.0rc7.
 **Phase 1 is done (2026-11-12)**; see the "Done" note under Phase 1 for what was pulled forward from Phases 2–3.
-**Next: Phase 2 (CLI)**, which now also includes the 30-day cache default and `--cache-max-age` (Decision 8,
-added 2026-11-12). This file supersedes the plan-mode draft (moved from `~/.claude/plans/`).
+**Phase 2 is done (2026-11-12)**, including the Phase 3 CLI tests; see its "Done" note. **Next: Phase 4 (docs +
+ADR 0021)**, then the Codex external review (Tod: one round covering library + CLI), then Verification 3–5.
+This file supersedes the plan-mode draft (moved from `~/.claude/plans/`).
 
 ## Context
 
@@ -211,6 +212,31 @@ Valid issued orders grouped by CA (through `catalog.ca_by_product_code()`):
   - Warn on stderr when `"chain" in criteria.active_signals()` and the max age is over 7 days (see the
     Decision 8 rationale for the wording).
 - Regenerate the help golden `tests/goldens/help/replacement-report.txt`.
+
+> **Done 2026-11-12.** Implemented as above, with these choices:
+>
+> - `--cache-max-age` defaults to `None`, not 30, so the CLI can tell it was given (it must imply `--cache`).
+>   The help states the effective default. The terminal prompt only appears when it wasn't given, so it keeps
+>   showing the default.
+> - Summary line: `<outstanding> [<CAS>] certificates outstanding; <n> replaced (<m> unconfirmed without
+>   --inspect | SANs unknown); [<k> superseded by newer certificates that also need replacing;] <needs> of
+>   <valid> valid certificates need replacing`. CA names are the codes (`EMSIGN`), shown only when `ca` is the
+>   sole active signal; there is no display-name map and adding one buys nothing. The "superseded" part
+>   accounts for the rest of `needs_replacing` (emSign renewed as emSign), so the numbers add up.
+>   `N conflicts to review` now appears only when more than one signal is active or a conflict occurred.
+>   A conflict needs two signals, so with `ca` alone it always printed 0.
+> - The chain-signal staleness warning fires only when the cache is in use; threshold `_CHAIN_SAFE_DAYS = 7`.
+> - `--inspect` help now leads with "confirms replacements", its main use under the CA default.
+> - `_config.replacement_criteria()` needed no code change: the table is validated whole through the model,
+>   so `cas` already worked. Only its docstring example changed.
+> - **Phase 3 CLI tests done in the same commit** (CA/`replaced_by` columns, JSON/CSV fields, summary line,
+>   `--outstanding`, `--ca`, `--issued-since`, `--group-by ca`, cache max-age hit/miss/implies/conflicts, the
+>   chain warning). The library cache-expiry test now derives its boundary from `DEFAULT_MAX_AGE`.
+> - Open point for review: `cas` is `list[str]`, so `--ca SSL.COM` (a typo) is accepted and silently matches
+>   nothing. `CertificateAuthority` (`models/domains.py:59`) could validate it; not done, Phase 1's type.
+> - Verification 2 run against prod (read-only, no `--inspect`, 5.9 s): 558 valid, **494 EMSIGN all REPLACE**
+>   (= the probe), 64 SSLCOM all OK (+6 since the probe), 0 UNKNOWN; 407 outstanding, 87 possibly replaced
+>   (CN match), 255 possibly superseded.
 
 ### Phase 3 — tests (`tests/test_replacement.py`)
 

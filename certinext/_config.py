@@ -180,9 +180,13 @@ def replacement_criteria(path: Path | None = None) -> "ReplacementCriteria":
     .. code-block:: toml
 
         [replacement]
-        issuers   = ["InCommon Intermediate CA - OVG3C"]
-        key_types = ["EC"]
-        chain_cas = ["emSign ECC Root CA - G3"]
+        cas = ["EMSIGN"]          # the default
+
+        # Or the October 2026 ECC G3 distrust criteria instead:
+        # cas       = []
+        # issuers   = ["InCommon Intermediate CA - OVG3C"]
+        # key_types = ["EC"]
+        # chain_cas = ["emSign ECC Root CA - G3"]
 
     Args:
         path: Config file to read; defaults to :func:`config_path`.

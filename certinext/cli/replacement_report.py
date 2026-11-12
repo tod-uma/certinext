@@ -22,6 +22,7 @@ the ``--output`` file; progress and logs go to stderr.
 
 import contextlib
 import csv
+import datetime as dt
 import json
 import sys
 from dataclasses import asdict
@@ -56,6 +57,10 @@ _MAX_WORKERS = 16
 _CACHE_SUBDIR = "replacement-inspect"
 _MAX_AGE_DAYS = DEFAULT_MAX_AGE.days
 
+# ADR 0019's original bound. Past it, a re-rooted chain may be served from a
+# stale entry, which matters only when the chain signal is on (ADR 0021).
+_CHAIN_SAFE_DAYS = 7
+
 
 class _GroupBy(str, Enum):
     """``--group-by`` choices (mirrors :data:`certinext.replacement.GroupBy`)."""
@@ -63,17 +68,20 @@ class _GroupBy(str, Enum):
     originator = "originator"
     group = "group"
     issuer = "issuer"
+    ca = "ca"
 
 
 class _SignalName(str, Enum):
     """``--disable-signal`` choices (mirrors :data:`certinext.replacement.Signal`)."""
 
+    ca = "ca"
     issuer = "issuer"
     key = "key"
     chain = "chain"
 
 
 def _criteria(
+    cas: list[str] | None,
     issuers: list[str] | None,
     key_types: list[str] | None,
     chain_cas: list[str] | None,
@@ -82,6 +90,7 @@ def _criteria(
     """Resolve criteria from config plus per-run flags.
 
     Args:
+        cas: ``--ca`` values, or None to keep config/defaults.
         issuers: ``--issuer`` values, or None to keep config/defaults.
         key_types: ``--key-type`` values, or None.
         chain_cas: ``--chain-ca`` values, or None.
@@ -102,7 +111,7 @@ def _criteria(
         raise SystemExit(2) from exc
     try:
         criteria = base.with_overrides(
-            issuers=issuers, key_types=key_types, chain_cas=chain_cas,
+            cas=cas, issuers=issuers, key_types=key_types, chain_cas=chain_cas,
             disable=[d.value for d in disable or []],
         )
     except ValidationError as exc:
@@ -113,33 +122,35 @@ def _criteria(
 
 
 def _resolve_cache(
-    inspect: bool, cache: bool | None, refresh: bool, directory: Path | None
+    inspect: bool, cache: bool | None, refresh: bool, directory: Path | None,
+    max_age_days: int | None = None,
 ) -> bool:
     """Decide whether this run uses the inspection cache.
 
-    ``--refresh-cache`` and ``--cache-dir`` imply ``--cache``. With none of
-    the cache flags, ask on a terminal (Enter means no: reusing week-old
-    downloads should be a choice) and stay off otherwise, so scheduled runs
-    keep reading live.
+    ``--refresh-cache``, ``--cache-dir`` and ``--cache-max-age`` imply
+    ``--cache``. With none of the cache flags, ask on a terminal (Enter
+    means no: reusing weeks-old downloads should be a choice) and stay off
+    otherwise, so scheduled runs keep reading live.
 
     Args:
         inspect: Whether ``--inspect`` was given.
         cache: ``--cache`` (True), ``--no-cache`` (False), or neither (None).
         refresh: Whether ``--refresh-cache`` was given.
         directory: The ``--cache-dir`` value, if any.
+        max_age_days: The ``--cache-max-age`` value, if any.
 
     Returns:
         Whether to use the cache.
 
     Raises:
         typer.BadParameter: On a cache flag without ``--inspect``, or
-            ``--no-cache`` with ``--refresh-cache``/``--cache-dir``.
+            ``--no-cache`` with a flag that implies ``--cache``.
     """
-    implied = refresh or directory is not None
+    implied = refresh or directory is not None or max_age_days is not None
     if cache is False:
         if implied:
             raise typer.BadParameter(
-                "--no-cache cannot be combined with --refresh-cache or --cache-dir",
+                "--no-cache cannot be combined with --refresh-cache, --cache-dir or --cache-max-age",
                 param_hint="--no-cache",
             )
         return False
@@ -165,7 +176,7 @@ def _resolve_cache(
     return answer.strip().lower() in ("y", "yes")
 
 
-def _build_cache(sess: Any, refresh: bool, directory: Path | None) -> InspectionCache:
+def _build_cache(sess: Any, refresh: bool, directory: Path | None, max_age_days: int) -> InspectionCache:
     """Create the inspection cache for this run.
 
     Production and sandbox entries live in separate subdirectories, so one
@@ -175,13 +186,36 @@ def _build_cache(sess: Any, refresh: bool, directory: Path | None) -> Inspection
         sess: The session (for :attr:`CertiNextSession.sandbox`).
         refresh: Whether ``--refresh-cache`` was given.
         directory: The ``--cache-dir`` value, or None for the default.
+        max_age_days: How old an entry may be and still be used; older
+            entries are also pruned.
 
     Returns:
         The cache.
     """
     base = directory if directory is not None else cache_dir() / _CACHE_SUBDIR
     env = "sandbox" if getattr(sess, "sandbox", False) else "production"
-    return InspectionCache(base.expanduser() / env, refresh=refresh)
+    return InspectionCache(
+        base.expanduser() / env, refresh=refresh, max_age=dt.timedelta(days=max_age_days)
+    )
+
+
+def _warn_stale_chain(criteria: rp.ReplacementCriteria, max_age_days: int) -> None:
+    """Warn on stderr when cached chains may be too old for the chain signal.
+
+    A cache entry is keyed by order and serial, so only the served chain can
+    change under it. That matters only when the chain signal is on.
+
+    Args:
+        criteria: The effective criteria.
+        max_age_days: The effective cache max age.
+    """
+    if "chain" in criteria.active_signals() and max_age_days > _CHAIN_SAFE_DAYS:
+        print(
+            f"Warning: the chain signal is on and cached downloads up to {max_age_days} days old "
+            "are trusted, so a chain CertiNext re-rooted since then may show its old CAs. "
+            "Use --refresh-cache for a live answer.",
+            file=sys.stderr,
+        )
 
 
 def _sans_cell(sans: list[str] | None) -> str:
@@ -211,7 +245,7 @@ def _table_row(row: rp.ReportRow, report: rp.ReplacementReport, show_errors: boo
         An ordered column -> value dict.
     """
     f, i = row.facts, row.facts.inspection
-    out: dict[str, Any] = {"verdict": row.verdict.value, "common_name": f.common_name}
+    out: dict[str, Any] = {"verdict": row.verdict.value, "ca": f.ca or "", "common_name": f.common_name}
     if report.inspected:
         out["sans"] = _sans_cell(i.sans if i else None)
         out["key"] = i.key_label if i else ""
@@ -223,6 +257,8 @@ def _table_row(row: rp.ReportRow, report: rp.ReplacementReport, show_errors: boo
         "origin": f.originator,
         "group": f.group_name or f.group_number,
         "superseded": "yes" if row.superseded else "maybe" if row.possibly_superseded else "",
+        "replaced_by": row.replaced_by
+        or (f"maybe:{row.possibly_replaced_by}" if row.possibly_replaced_by else ""),
     })
     if report.inspected:
         out["ordered_by"] = f.ordered_by_name
@@ -240,14 +276,30 @@ def _summary_line(summary: dict[str, int], report: rp.ReplacementReport) -> str:
         report: The report (for criteria and inspection state).
 
     Returns:
-        e.g. ``"297 of 573 valid certificates need replacing; 19 conflicts
-        to review"``, plus a note on signals that were not evaluated and,
-        when the cache was used, how many inspections came from it.
+        Migration progress first, e.g. ``"412 EMSIGN certificates
+        outstanding; 82 replaced (31 unconfirmed without --inspect); 494 of
+        552 valid certificates need replacing"``. The CA names appear only
+        when the ``ca`` signal is the only one active. Conflicts are shown
+        when more than one signal is active (or any occurred), then unknowns,
+        errors, a note on signals that were not evaluated and, when the cache
+        was used, how many inspections came from it.
     """
-    parts = [
-        f"{summary['needs_replacing']} of {summary['valid']} valid certificates need replacing",
-        f"{summary['conflict']} conflicts to review",
-    ]
+    criteria = report.criteria
+    signals = criteria.active_signals()
+    label = f"{'/'.join(criteria.cas)} " if signals == ["ca"] else ""
+    replaced = summary["replaced"] + summary["possibly_replaced"]
+    replaced_part = f"{replaced} replaced"
+    if summary["possibly_replaced"]:
+        why = "SANs unknown" if report.inspected else "without --inspect"
+        replaced_part += f" ({summary['possibly_replaced']} unconfirmed {why})"
+    parts = [f"{summary['outstanding']} {label}certificates outstanding", replaced_part]
+    # The rest of needs_replacing: superseded by a newer cert that itself still needs replacing.
+    renewed = summary["needs_replacing"] - summary["outstanding"] - replaced
+    if renewed:
+        parts.append(f"{renewed} superseded by newer certificates that also need replacing")
+    parts.append(f"{summary['needs_replacing']} of {summary['valid']} valid certificates need replacing")
+    if len(signals) > 1 or summary["conflict"]:
+        parts.append(f"{summary['conflict']} conflicts to review")
     if summary["unknown"]:
         parts.append(f"{summary['unknown']} unknown")
     if summary["errors"]:
@@ -262,7 +314,7 @@ def _summary_line(summary: dict[str, int], report: rp.ReplacementReport) -> str:
         )
     line = "; ".join(parts)
     # ca and issuer come from the orders report and catalog; only key/chain need --inspect.
-    skipped = [s for s in report.criteria.active_signals() if s not in ("ca", "issuer")]
+    skipped = [s for s in signals if s not in ("ca", "issuer")]
     if not report.inspected and skipped:
         line += f" ({'/'.join(skipped)} not inspected; use --inspect)"
     return line
@@ -328,9 +380,9 @@ def replacement_report(
     inspect: bool = typer.Option(
         False, "--inspect",
         help=(
-            "Download and parse every certificate: evaluates the key and chain "
-            "signals (so disagreements are detected), and adds SANs, key size, "
-            "and who ordered it. Two requests per certificate."
+            "Download and parse every certificate: reads SANs (so replacements are "
+            "confirmed rather than 'maybe'), evaluates the key and chain signals, and "
+            "adds key size and who ordered it. Two requests per certificate."
         ),
     ),
     workers: int = typer.Option(
@@ -340,9 +392,16 @@ def replacement_report(
     use_cache: Optional[bool] = typer.Option(
         None, "--cache/--no-cache",
         help=(
-            f"With --inspect, reuse certificate downloads up to {_MAX_AGE_DAYS} days old and save "
-            "new ones; order status is always read live. With neither flag, asks on a terminal "
-            "and stays off otherwise"
+            f"With --inspect, reuse certificate downloads up to {_MAX_AGE_DAYS} days old (see "
+            "--cache-max-age) and save new ones; order status is always read live. With neither "
+            "flag, asks on a terminal and stays off otherwise"
+        ),
+    ),
+    cache_max_age: Optional[int] = typer.Option(
+        None, "--cache-max-age", metavar="DAYS", min=1,
+        help=(
+            f"Trust cached downloads up to DAYS days old (default {_MAX_AGE_DAYS}; implies --cache). "
+            "Older entries are deleted, so a short value discards entries a later run could reuse"
         ),
     ),
     refresh_cache: bool = typer.Option(
@@ -364,6 +423,17 @@ def replacement_report(
             "SANs need --inspect; CN-only matches are kept and marked 'maybe'"
         ),
     ),
+    outstanding: bool = typer.Option(
+        False, "--outstanding",
+        help=(
+            "Only certificates still to replace: not replaced (or possibly replaced) by a newer "
+            "passing certificate and not superseded. Implies --latest-only; --all has no effect"
+        ),
+    ),
+    issued_since: Optional[dt.datetime] = typer.Option(
+        None, "--issued-since", metavar="DATE", formats=["%Y-%m-%d"],
+        help="Only orders placed on or after DATE (YYYY-MM-DD, UTC)",
+    ),
     originator: Optional[list[str]] = typer.Option(
         None, "--originator", metavar="NAME",
         help="Only orders from this originator (ACME, CERTInext, 'CERTInext API'); repeatable",
@@ -378,7 +448,11 @@ def replacement_report(
     ),
     group_by: Optional[_GroupBy] = typer.Option(
         None, "--group-by",
-        help="Also print counts per originator, group, or issuer",
+        help="Also print counts per originator, group, issuer, or CA",
+    ),
+    ca: Optional[list[str]] = typer.Option(
+        None, "--ca", metavar="CA",
+        help="Issuing CA (EMSIGN, SSLCOM) that needs replacing; repeatable, replaces config",
     ),
     issuer: Optional[list[str]] = typer.Option(
         None, "--issuer", metavar="CN",
@@ -406,12 +480,14 @@ def replacement_report(
 ) -> None:
     """List currently valid certificates that need replacing after a CA distrust.
 
-    By default classifies on the issuing CA alone (instant, from the orders
-    report). Criteria come from built-in defaults (the October 2026 eMudhra
-    ECC distrust), the "replacement" table in config.toml, and the flags
-    above. Output is a table, or JSON with --json, or CSV with --csv. Read-only.
-    --inspect can reuse a per-user cache of earlier downloads (--cache); the
-    summary says how many inspections came from it.
+    By default every valid emSign certificate needs replacing: the issuing CA
+    comes from each order's product code (instant, no download). Criteria
+    come from that default, the "replacement" table in config.toml, and the
+    flags above. A certificate covered by a newer one that passes the
+    criteria (an SSL.com replacement) is shown as replaced; --outstanding
+    lists only the work left. Output is a table, or JSON with --json, or CSV
+    with --csv. Read-only. --inspect can reuse a per-user cache of earlier
+    downloads (--cache); the summary says how many inspections came from it.
     Exits 1 if any certificate could not be inspected or any issued order
     could not be classified.
     """
@@ -420,23 +496,28 @@ def replacement_report(
     _check_output(output)
     if cache_directory is not None and cache_directory.expanduser().is_file():
         raise typer.BadParameter(f"{cache_directory} is a file", param_hint="--cache-dir")
-    criteria = _criteria(issuer, key_type, chain_ca, disable_signal)
+    criteria = _criteria(ca, issuer, key_type, chain_ca, disable_signal)
     # Before session(): a credential prompt must not interleave with this one.
-    caching = _resolve_cache(inspect, use_cache, refresh_cache, cache_directory)
+    caching = _resolve_cache(inspect, use_cache, refresh_cache, cache_directory, cache_max_age)
+    max_age_days = cache_max_age if cache_max_age is not None else _MAX_AGE_DAYS
+    if caching:
+        _warn_stale_chain(criteria, max_age_days)
     sess = session(ctx)
-    cache = _build_cache(sess, refresh_cache, cache_directory) if caching else None
+    cache = _build_cache(sess, refresh_cache, cache_directory, max_age_days) if caching else None
 
     log.info(
         "Building replacement report", inspect=inspect,
         signals=",".join(criteria.active_signals()),
         workers=workers if inspect else None,
         cache=str(cache.directory) if cache else None,
+        issued_since=issued_since.date().isoformat() if issued_since else None,
     )
     try:
         with Progress(console=err_console, disable=progress_disabled(ctx.obj.verbose)) as progress:
             task = progress.add_task("Inspecting certificates", total=None, visible=inspect)
             report = rp.build_report(
                 sess, criteria, inspect=inspect, originators=originator, groups=group,
+                issued_since=issued_since,
                 on_total=lambda n: progress.update(task, total=n),
                 on_progress=lambda _f: progress.advance(task), workers=workers, cache=cache,
             )
@@ -444,13 +525,18 @@ def replacement_report(
         log.error("Cannot inspect certificates", error=str(exc))
         raise SystemExit(1) from exc
 
-    population = report.population(latest_only=latest_only, expiring_within=expiring_within)
-    rows = report.select(include_ok=include_ok, latest_only=latest_only, expiring_within=expiring_within)
+    population = report.population(
+        latest_only=latest_only, expiring_within=expiring_within, outstanding=outstanding
+    )
+    rows = report.select(
+        include_ok=include_ok, latest_only=latest_only, expiring_within=expiring_within,
+        outstanding=outstanding,
+    )
     summary = report.summarize(population)
     summary["incomplete"] = len(report.incomplete)
     breakdown = report.breakdown(population, group_by.value) if group_by else None
 
-    if latest_only and summary["possibly_superseded"]:
+    if (latest_only or outstanding) and summary["possibly_superseded"]:
         print(
             f"Warning: {summary['possibly_superseded']} certificates share a common name with a "
             "newer certificate, but their SANs are unknown, so --latest-only kept them "
