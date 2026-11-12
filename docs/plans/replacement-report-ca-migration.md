@@ -329,6 +329,25 @@ Verification 2's prod figures (407 outstanding) date from before finding 1. Expe
 >   shape. Also: cache default 7 → 30 days, `--cache-max-age`, `--outstanding`, `--issued-since`, `--ca`, and
 >   exit 1 on an empty catalog.
 
+### External review (Codex, rc7) — processed 2026-11-12
+
+Reviewed `9bd981a` (v1.4.0rc7). Reviewer: self-reported GPT-6.1, in the Codex VS Code extension, 2026-11-12.
+The files are in gitignored `.review/` (`REVIEW-BRIEF-codex-rc7.md`, `REVIEW-codex-rc7.md`). Both findings were
+re-derived at that commit. The review reported no Risk or Style findings.
+
+1. **A coverer with unknown SANs could clear an inspected row** (finding 1, real in code, scenario
+   implausible). `mark_superseded()` checked only the older row's `sans_known`. The review's counterexample needs
+   a newer cert whose SANs omit its own CN, which CABF BR 7.1.4.3 forbids. Tod chose to fix it anyway: coverage
+   is now confirmed only when both SAN sets are known, so the "never under-states" guarantee no longer depends on
+   BR compliance. This also fixed a newer CN-only match beating a confirmed replacement in `replaced_by`.
+   `344a804`.
+2. **The `maybe` warning blamed `--latest-only` under `--outstanding` alone** (finding 2, real, message only).
+   Fixed in the commit below.
+
+**`--outstanding` summary (rc8, known before the review).** Tod chose the review's design: `--outstanding`
+chooses only the listed rows; the summary/breakdown cover `population(latest_only, expiring_within)` and say so
+("counts cover only certificates …", JSON `summary_scope`). `01beeec`.
+
 ## Verification
 
 > **Prod load (Tod, 2026-11-12):** CertiNext is having load issues. **Every `--inspect` run passes `--cache`**
