@@ -9,8 +9,9 @@ implements-adr: [0021]
 **Status:** in progress. Approved by Tod 2026-11-12. Phase 0 is done: !147 merged, v1.4.0rc6 released (GitLab,
 GitHub and PyPI verified), and branch `feat/replacement-report-ca-migration` was cut with a bump to 1.4.0rc7.
 **Phase 1 is done (2026-11-12)**; see the "Done" note under Phase 1 for what was pulled forward from Phases 2–3.
-**Phase 2 is done (2026-11-12)**, including the Phase 3 CLI tests; see its "Done" note. **Next: Phase 4 (docs +
-ADR 0021)**, then the Codex external review (Tod: one round covering library + CLI), then Verification 3–5.
+**Phase 2 is done (2026-11-12)**, including the Phase 3 CLI tests; see its "Done" note. The Codex external review
+of Phases 1 and 2 was **processed on 2026-11-12**; see "External review" after Phase 3. **Next: Phase 4 (docs + ADR
+0021)**, then Verification 3–5.
 This file supersedes the plan-mode draft (moved from `~/.claude/plans/`).
 
 ## Context
@@ -265,6 +266,32 @@ Valid issued orders grouped by CA (through `catalog.ca_by_product_code()`):
     It, `certinext/_inspection_cache.py` and `README.md` contain hard-coded 7-day references; update each.
 - Update existing tests that assumed the G3 defaults: give them explicit G3 criteria using the `ECC_G3_*`
   constants, rather than rewriting their expectations.
+
+### External review (Codex, Phases 1 + 2) — processed 2026-11-12
+
+Reviewed `17809e6`. Reviewer: self-reported GPT-6, in the Codex VS Code extension, 2026-11-12. The review files
+are in gitignored `.review/` (`REVIEW-BRIEF-codex-ca-migration.md`, `REVIEW-codex-ca-migration.md`). All four
+findings were re-derived at that commit and held up. Each commit carries an `External-review:` trailer.
+
+1. **CN-only match cleared `outstanding`** (finding 1, real). Tod chose to change it: a CN-only match never
+   clears a row. Decision 5 is amended above. `97bd013`.
+2. **An OK coverer with the CA unevaluated counted as a replacement** (finding 2, real, needs several active
+   signals). Fixed. Fixing it exposed a broader gap the review missed: `superseded` (CA-blind) also cleared the
+   row when the newer cert was UNKNOWN/CONFLICT/OK-without-CA, and that happens under the default criteria
+   too. New `ReportRow.renewed`: a supersede clears a row only when its newer coverer itself needs replacing.
+   `--outstanding` no longer implies `--latest-only`. JSON/CSV gain `renewed`. `50774ed`.
+3. **An empty catalog read wasn't fatal** (finding 3, real, and worse than the review said: the headline would
+   have read "0 outstanding"). An empty catalog is now fatal under `ca` (`ValueError`, CLI exits 1). Unmapped
+   product codes and `--ca` names the catalog doesn't know now get warnings, which settles the `--ca SSL.COM`
+   open point. `71be5ca` (+ `125cb71` made the test order-independent).
+4. **`--originator`/`--group` hide out-of-scope replacements** (finding 4, real, over-count only). Tod chose to
+   document it and track it in an issue: help text + docstring in `0264d4c`; fix tracked in certinext **#40**.
+
+For Phase 4: ADR 0021 must record Decision 5 as amended, `renewed`, and the output-shape additions (`ca`,
+`replaced_by`, `replaced_by_ca`, `possibly_replaced_by`, `renewed`, `outstanding`, plus summary keys). The
+review noted that only the criteria change was labelled breaking, so the tag changelog must list these too.
+Verification 2's prod figures (407 outstanding) date from before finding 1. Expect about 494 without
+`--inspect` now.
 
 ### Phase 4 — docs
 
