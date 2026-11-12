@@ -5,6 +5,13 @@ date: 2026-10-21
 
 # Classify replacement need on configurable issuer, key, and chain signals; flag disagreement
 
+> **Note:** The *default criteria* below (the eMudhra ECC G3 issuer, key and
+> chain values) are superseded in part by
+> [ADR 0021](0021-replacement-report-defaults-to-ca-signal.md), which adds a
+> `ca` signal and makes `ca=EMSIGN` the only default; the G3 lists now default
+> to empty and remain available as `ECC_G3_*` constants or config. The signal
+> model, the `conflict` verdict, and the config/flag layering remain in force.
+
 ## Context and problem statement
 
 On 2026-10-20 Mozilla removed `emSign ECC Root CA - G3` from NSS (bug 2083449),
