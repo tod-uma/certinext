@@ -11,8 +11,8 @@
  lists only the work left. Output is a table, or JSON with --json, or CSV                           
  with --csv. Read-only. --inspect can reuse a per-user cache of earlier                             
  downloads (--cache); the summary says how many inspections came from it.                           
- Exits 1 if any certificate could not be inspected or any issued order                              
- could not be classified.                                                                           
+ Exits 1 if any certificate could not be inspected, any issued order                                
+ could not be classified, or the product catalog lists no products.                                 
                                                                                                     
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --inspect                                                          Download and parse every      │

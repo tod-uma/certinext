@@ -1032,14 +1032,53 @@ def _read_ca_map(sess: "CertiNextSession", *, required: bool) -> dict[str, str]:
     Raises:
         CertiNextAPIError: If the read fails and ``required`` is set.
         httpx.HTTPError: Likewise, for a transport failure.
+        ValueError: If ``required`` is set and the read succeeds but lists
+            no products: the same silent all-``unknown`` outcome as a failed
+            read, so equally fatal.
     """
     try:
-        return sess.catalog.ca_by_product_code()
+        ca_map = sess.catalog.ca_by_product_code()
     except (CertiNextAPIError, httpx.HTTPError) as exc:
         if required:
             raise
         log.warning("Could not read the product catalog; CA left blank", error=str(exc))
         return {}
+    if required and not ca_map:
+        raise ValueError(
+            "The product catalog lists no products, so no order's CA can be told; "
+            "refusing to report every certificate as unknown"
+        )
+    return ca_map
+
+
+def _warn_ca_gaps(criteria: ReplacementCriteria, ca_map: dict[str, str], facts: list[CertificateFacts]) -> None:
+    """Log what a partial catalog or a mistyped CA name would hide.
+
+    A product code missing from the catalog leaves its orders ``unknown``;
+    a requested CA the catalog never names (``SSL.COM`` for ``SSLCOM``)
+    matches nothing. Both look like quiet progress in the summary, so both
+    are named. Does nothing unless the ``ca`` signal is active.
+
+    Args:
+        criteria: The replacement criteria.
+        ca_map: Product code to CA, as read from the catalog.
+        facts: The certificates in the report.
+    """
+    if "ca" not in criteria.active_signals():
+        return
+    unmapped = Counter(f.product_code or "(none)" for f in facts if f.ca is None)
+    if unmapped:
+        log.warning(
+            "Orders with a product code the catalog does not list; their CA is unknown",
+            orders=sum(unmapped.values()), product_codes=",".join(sorted(unmapped)),
+        )
+    known = {ca.upper() for ca in ca_map.values()}
+    missing = [ca for ca in criteria.cas if ca not in known]
+    if missing:
+        log.warning(
+            "Requested CA not named by the product catalog; it matches nothing",
+            cas=",".join(missing), catalog_cas=",".join(sorted(known)),
+        )
 
 
 class _Backoff:
@@ -1259,6 +1298,8 @@ def build_report(
             ``groups`` is set and the group names cannot be resolved; or if
             the ``ca`` signal is active and the product catalog cannot be
             read (without it, the catalog failure only blanks the CA).
+        ValueError: If the ``ca`` signal is active and the catalog read
+            succeeds but lists no products.
     """
     if workers < 1:
         raise ValueError(f"workers must be at least 1, got {workers}")
@@ -1317,6 +1358,7 @@ def build_report(
             continue
         facts.append(_facts_from_record(r, group_names, ca_map))
     log.info("Valid certificates found", count=len(facts), incomplete=len(incomplete), issued_rows=issued_rows)
+    _warn_ca_gaps(criteria, ca_map, facts)
 
     if inspect:
         if on_total:

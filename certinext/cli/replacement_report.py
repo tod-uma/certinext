@@ -490,8 +490,8 @@ def replacement_report(
     lists only the work left. Output is a table, or JSON with --json, or CSV
     with --csv. Read-only. --inspect can reuse a per-user cache of earlier
     downloads (--cache); the summary says how many inspections came from it.
-    Exits 1 if any certificate could not be inspected or any issued order
-    could not be classified.
+    Exits 1 if any certificate could not be inspected, any issued order
+    could not be classified, or the product catalog lists no products.
     """
     if output_csv and ctx.obj.output_json:
         raise typer.BadParameter("--csv and --json are mutually exclusive")
@@ -525,6 +525,9 @@ def replacement_report(
             )
     except ImportError as exc:
         log.error("Cannot inspect certificates", error=str(exc))
+        raise SystemExit(1) from exc
+    except ValueError as exc:  # an unusable (empty) product catalog with the ca signal active
+        log.error("Cannot build the replacement report", error=str(exc))
         raise SystemExit(1) from exc
 
     population = report.population(

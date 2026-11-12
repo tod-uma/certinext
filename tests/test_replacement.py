@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 import pytest
+import structlog.testing
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, ed25519, rsa
@@ -1030,6 +1031,42 @@ def test_catalog_failure_is_fatal_only_when_ca_is_active(monkeypatch: pytest.Mon
     report = rp.build_report(sess, CRITERIA, now=NOW)
     assert [r.facts.ca for r in report.rows] == [None, None, None]
     assert [r.verdict for r in report.rows][:2] == [rp.Verdict.REPLACE, rp.Verdict.OK]
+
+
+def test_empty_catalog_is_fatal_only_when_ca_is_active(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A 2xx catalog with no products would turn every row UNKNOWN: fatal like a failed read.
+
+    External review finding 3: an empty map otherwise gave "0 outstanding".
+    """
+    routes = _ca_routes()
+    routes[f"{_API}/catalog/products"] = {"products": []}
+    sess, _ = _session(monkeypatch, routes)
+    with pytest.raises(ValueError, match="lists no products"):
+        rp.build_report(sess, CA_CRITERIA, now=NOW)
+    assert [r.facts.ca for r in rp.build_report(sess, CRITERIA, now=NOW).rows] == [None, None, None]
+
+
+def test_cli_empty_catalog_exits_1(run_cli: Callable[..., tuple[int, str, str]]) -> None:
+    """The CLI turns an empty catalog into exit 1 with no report, not a '0 outstanding' summary."""
+    routes = _migration_routes()
+    routes[f"{_API}/catalog/products"] = {"products": []}
+    code, out, _ = run_cli([], routes=routes)
+    assert code == 1 and "outstanding" not in out
+
+
+def test_unmapped_codes_and_unknown_ca_names_are_warned(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A partial catalog and a mistyped --ca are named in warnings, not left as quiet 'unknown'."""
+    sess, _ = _session(monkeypatch, _ca_routes())
+    with structlog.testing.capture_logs() as logs:
+        rp.build_report(sess, CA_CRITERIA.with_overrides(cas=["EMSIGN", "SSL.COM"]), now=NOW)
+    warnings = {e["event"]: e for e in logs if e["log_level"] == "warning"}
+    unmapped = warnings["Orders with a product code the catalog does not list; their CA is unknown"]
+    assert (unmapped["orders"], unmapped["product_codes"]) == (1, "999")
+    assert warnings["Requested CA not named by the product catalog; it matches nothing"]["cas"] == "SSL.COM"
+
+    with structlog.testing.capture_logs() as logs:
+        rp.build_report(sess, CRITERIA, now=NOW)  # ca signal off: nothing to warn about
+    assert not [e for e in logs if e["log_level"] == "warning"]
 
 
 def test_issued_since_filters_on_order_date(monkeypatch: pytest.MonkeyPatch) -> None:
