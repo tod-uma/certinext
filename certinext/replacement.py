@@ -1272,6 +1272,10 @@ def build_report(
             one download request per certificate).
         originators: Keep only these originators (case-insensitive).
         groups: Keep only these groups, by number or name (case-insensitive).
+            Both filters run before replacements are matched, so a scoped
+            report sees only replacements inside its scope. An emSign
+            certificate replaced under another originator or group stays
+            outstanding: an over-count, never an under-count.
         issued_since: Keep only orders placed at or after this time
             (``order_date >= issued_since``); a naive value is read as UTC.
             Orders with no order date are dropped, since they cannot be
