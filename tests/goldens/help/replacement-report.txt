@@ -3,73 +3,109 @@
                                                                                                     
  List currently valid certificates that need replacing after a CA distrust.                         
                                                                                                     
- By default classifies on the issuing CA alone (instant, from the orders                            
- report). Criteria come from built-in defaults (the October 2026 eMudhra                            
- ECC distrust), the "replacement" table in config.toml, and the flags                               
- above. Output is a table, or JSON with --json, or CSV with --csv. Read-only.                       
- --inspect can reuse a per-user cache of earlier downloads (--cache); the                           
- summary says how many inspections came from it.                                                    
- Exits 1 if any certificate could not be inspected or any issued order                              
- could not be classified.                                                                           
+ By default every valid emSign certificate needs replacing: the issuing CA                          
+ comes from each order's product code (instant, no download). Criteria                              
+ come from that default, the "replacement" table in config.toml, and the                            
+ flags above. A certificate covered by a newer one that passes the                                  
+ criteria (an SSL.com replacement) is shown as replaced; --outstanding                              
+ lists only the work left. Output is a table, or JSON with --json, or CSV                           
+ with --csv. Read-only. --inspect can reuse a per-user cache of earlier                             
+ downloads (--cache); the summary says how many inspections came from it.                           
+ Exits 1 if any certificate could not be inspected, any issued order                                
+ could not be classified, or the product catalog lists no products.                                 
                                                                                                     
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --inspect                                                       Download and parse every         │
-│                                                                 certificate: evaluates the key   │
-│                                                                 and chain signals (so            │
-│                                                                 disagreements are detected), and │
-│                                                                 adds SANs, key size, and who     │
-│                                                                 ordered it. Two requests per     │
-│                                                                 certificate.                     │
-│ --workers                            N [1<=x<=16]               Certificates to download at once │
-│                                                                 with --inspect; a rate limit     │
-│                                                                 pauses them all                  │
-│                                                                 [default: 4]                     │
-│ --cache                --no-cache                               With --inspect, reuse            │
-│                                                                 certificate downloads up to 7    │
-│                                                                 days old and save new ones;      │
-│                                                                 order status is always read      │
-│                                                                 live. With neither flag, asks on │
-│                                                                 a terminal and stays off         │
-│                                                                 otherwise                        │
-│ --refresh-cache                                                 Re-download every certificate    │
-│                                                                 and rewrite the cache (implies   │
-│                                                                 --cache)                         │
-│ --cache-dir                          DIR                        Keep the cache in DIR instead of │
-│                                                                 the per-user cache directory     │
-│                                                                 (implies --cache)                │
-│ --all                                                           Also list certificates that do   │
-│                                                                 not need replacing (to measure   │
-│                                                                 progress)                        │
-│ --latest-only                                                   Hide certificates superseded by  │
-│                                                                 a newer valid certificate        │
-│                                                                 covering all their SANs. SANs    │
-│                                                                 need --inspect; CN-only matches  │
-│                                                                 are kept and marked 'maybe'      │
-│ --originator                         NAME                       Only orders from this originator │
-│                                                                 (ACME, CERTInext, 'CERTInext     │
-│                                                                 API'); repeatable                │
-│ --group                              GROUP                      Only orders in this account      │
-│                                                                 group, by number or name;        │
-│                                                                 repeatable                       │
-│ --expiring-within                    DAYS [x>=1]                Only certificates expiring       │
-│                                                                 within DAYS days                 │
-│ --group-by                           [originator|group|issuer]  Also print counts per            │
-│                                                                 originator, group, or issuer     │
-│ --issuer                             CN                         Issuing-CA common name that      │
-│                                                                 needs replacing; repeatable,     │
-│                                                                 replaces config                  │
-│ --key-type                           TYPE                       Key type that needs replacing    │
-│                                                                 (EC, RSA, Ed25519, Ed448, DSA);  │
-│                                                                 repeatable, replaces config      │
-│ --chain-ca                           CN                         Distrusted CA common name in the │
-│                                                                 served chain; repeatable,        │
-│                                                                 replaces config                  │
-│ --disable-signal                     [issuer|key|chain]         Turn a signal off for this run;  │
-│                                                                 repeatable                       │
-│ --csv                                                           Write CSV instead of a table     │
-│                                                                 (use --json for JSON)            │
-│ --output           -o                FILE                       Write the table, JSON, or CSV to │
-│                                                                 FILE (UTF-8) instead of stdout   │
-│ --help                                                          Show this message and exit.      │
+│ --inspect                                                          Download and parse every      │
+│                                                                    certificate: reads SANs (so   │
+│                                                                    replacements are confirmed    │
+│                                                                    rather than 'maybe'),         │
+│                                                                    evaluates the key and chain   │
+│                                                                    signals, and adds key size    │
+│                                                                    and who ordered it. Two       │
+│                                                                    requests per certificate.     │
+│ --workers                            N [1<=x<=16]                  Certificates to download at   │
+│                                                                    once with --inspect; a rate   │
+│                                                                    limit pauses them all         │
+│                                                                    [default: 4]                  │
+│ --cache                --no-cache                                  With --inspect, reuse         │
+│                                                                    certificate downloads up to   │
+│                                                                    30 days old (see              │
+│                                                                    --cache-max-age) and save new │
+│                                                                    ones; order status is always  │
+│                                                                    read live. With neither flag, │
+│                                                                    asks on a terminal and stays  │
+│                                                                    off otherwise                 │
+│ --cache-max-age                      DAYS [x>=1]                   Trust cached downloads up to  │
+│                                                                    DAYS days old (default 30;    │
+│                                                                    implies --cache). Older       │
+│                                                                    entries are deleted, so a     │
+│                                                                    short value discards entries  │
+│                                                                    a later run could reuse       │
+│ --refresh-cache                                                    Re-download every certificate │
+│                                                                    and rewrite the cache         │
+│                                                                    (implies --cache)             │
+│ --cache-dir                          DIR                           Keep the cache in DIR instead │
+│                                                                    of the per-user cache         │
+│                                                                    directory (implies --cache)   │
+│ --all                                                              Also list certificates that   │
+│                                                                    do not need replacing (to     │
+│                                                                    measure progress)             │
+│ --latest-only                                                      Hide certificates superseded  │
+│                                                                    by a newer valid certificate  │
+│                                                                    covering all their SANs. SANs │
+│                                                                    need --inspect; CN-only       │
+│                                                                    matches are kept and marked   │
+│                                                                    'maybe'                       │
+│ --outstanding                                                      Only certificates still to    │
+│                                                                    replace: no confirmed         │
+│                                                                    replacement by a newer        │
+│                                                                    passing certificate and not   │
+│                                                                    renewed by a newer one that   │
+│                                                                    still needs replacing.        │
+│                                                                    CN-only matches stay listed   │
+│                                                                    (replaced_by                  │
+│                                                                    'maybe:<order>'). --all has   │
+│                                                                    no effect                     │
+│ --issued-since                       DATE                          Only orders placed on or      │
+│                                                                    after DATE (YYYY-MM-DD, UTC)  │
+│ --originator                         NAME                          Only orders from this         │
+│                                                                    originator (ACME, CERTInext,  │
+│                                                                    'CERTInext API'); repeatable. │
+│                                                                    A replacement placed by       │
+│                                                                    another originator is not     │
+│                                                                    seen, so its predecessor      │
+│                                                                    stays outstanding             │
+│ --group                              GROUP                         Only orders in this account   │
+│                                                                    group, by number or name;     │
+│                                                                    repeatable. A replacement     │
+│                                                                    placed in another group is    │
+│                                                                    not seen, so its predecessor  │
+│                                                                    stays outstanding             │
+│ --expiring-within                    DAYS [x>=1]                   Only certificates expiring    │
+│                                                                    within DAYS days              │
+│ --group-by                           [originator|group|issuer|ca]  Also print counts per         │
+│                                                                    originator, group, issuer, or │
+│                                                                    CA                            │
+│ --ca                                 CA                            Issuing CA (EMSIGN, SSLCOM)   │
+│                                                                    that needs replacing;         │
+│                                                                    repeatable, replaces config   │
+│ --issuer                             CN                            Issuing-CA common name that   │
+│                                                                    needs replacing; repeatable,  │
+│                                                                    replaces config               │
+│ --key-type                           TYPE                          Key type that needs replacing │
+│                                                                    (EC, RSA, Ed25519, Ed448,     │
+│                                                                    DSA); repeatable, replaces    │
+│                                                                    config                        │
+│ --chain-ca                           CN                            Distrusted CA common name in  │
+│                                                                    the served chain; repeatable, │
+│                                                                    replaces config               │
+│ --disable-signal                     [ca|issuer|key|chain]         Turn a signal off for this    │
+│                                                                    run; repeatable               │
+│ --csv                                                              Write CSV instead of a table  │
+│                                                                    (use --json for JSON)         │
+│ --output           -o                FILE                          Write the table, JSON, or CSV │
+│                                                                    to FILE (UTF-8) instead of    │
+│                                                                    stdout                        │
+│ --help                                                             Show this message and exit.   │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 

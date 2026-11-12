@@ -17,8 +17,13 @@
 When a root or intermediate CA loses browser trust, every certificate still
 chaining to it has to be reissued. This module inventories the account's
 valid certificates from the orders report and classifies each one against
-:class:`ReplacementCriteria`, which names three independent signals:
+:class:`ReplacementCriteria`, which names four independent signals:
 
+- **ca** — the CA that issued the certificate, from joining the order's
+  product code against the catalog
+  (:meth:`~certinext.catalog.CatalogAccessor.ca_by_product_code`). Costs one
+  catalog read per run. Never inferred from the issuer name, since emSign
+  issues from InCommon-branded intermediates.
 - **issuer** — the issuing intermediate's common name. Free: every orders
   report row carries it (``issuerCA``).
 - **key** — the leaf's public-key algorithm (``EC``, ``RSA``, ...). The API
@@ -36,19 +41,24 @@ is what a CA re-rooting its issuance looks like, and also what an EC key
 issued under an RSA-rooted intermediate looks like (key type matches, chain
 is trusted) — such certificates exist, so key type alone is not trusted.
 
-The defaults describe the October 2026 eMudhra ECC distrust (Mozilla bug
-2083449: ``emSign ECC Root CA - G3`` removed from NSS, which untrusts ECDSA
-certificates from ``InCommon Intermediate CA - OVG3C``). Override them in the
-``[replacement]`` table of ``config.toml`` or per call when the situation
-changes.
+The defaults describe eMudhra's exit from issuance (ADR 0021): every valid
+emSign certificate needs replacing (``cas=["EMSIGN"]``), and the issuer, key
+and chain signals are off. The October 2026 eMudhra ECC G3 distrust (Mozilla
+bug 2083449) is still reachable through the ``ECC_G3_*`` constants, the
+``[replacement]`` table of ``config.toml``, or per-call overrides.
+
+A row that needs replacing is **replaced** when a newer valid certificate
+covering all its names itself classifies :attr:`Verdict.OK`
+(:attr:`ReportRow.replaced_by`), and **outstanding** when nothing newer
+covers it (:attr:`ReportRow.outstanding`).
 
 Example::
 
     from certinext.replacement import ReplacementCriteria, build_report
 
     report = build_report(sess, ReplacementCriteria(), inspect=True)
-    for row in report.select():
-        print(row.facts.common_name, row.verdict.value)
+    for row in report.select(outstanding=True):
+        print(row.facts.common_name, row.facts.ca)
 """
 
 import datetime as dt
@@ -67,6 +77,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from certinext._chain import split_pem_certificates
 from certinext._inspection_cache import InspectionCache
 from certinext.exceptions import CertiNextAPIError, CertiNextRateLimitError
+from certinext.models.domains import EMSIGN, UNKNOWN_CA
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from cryptography.x509 import Certificate, Name
@@ -77,20 +88,32 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 
 log = structlog.get_logger(__name__)
 
-Signal = Literal["issuer", "key", "chain"]
-"""Names of the replacement signals, in evaluation order."""
+Signal = Literal["ca", "issuer", "key", "chain"]
+"""Names of the replacement signals, in evaluation order (cheapest first)."""
 
-SIGNALS: tuple[Signal, ...] = ("issuer", "key", "chain")
+SIGNALS: tuple[Signal, ...] = ("ca", "issuer", "key", "chain")
 
 KeyType = Literal["EC", "RSA", "Ed25519", "Ed448", "DSA"]
 """Public-key algorithm families the ``key`` signal can match."""
 
 _KEY_TYPES_BY_FOLDED: dict[str, KeyType] = {k.casefold(): k for k in get_args(KeyType)}
 
-#: Defaults for the October 2026 eMudhra ECC distrust (Mozilla bug 2083449).
-DEFAULT_ISSUERS: tuple[str, ...] = ("InCommon Intermediate CA - OVG3C",)
-DEFAULT_KEY_TYPES: tuple[KeyType, ...] = ("EC",)
-DEFAULT_CHAIN_CAS: tuple[str, ...] = ("emSign ECC Root CA - G3",)
+#: Default ``ca`` signal: every emSign certificate needs replacing (ADR 0021).
+DEFAULT_CAS: tuple[str, ...] = (EMSIGN,)
+
+#: Criteria for the October 2026 eMudhra ECC G3 distrust (Mozilla bug
+#: 2083449). Not defaults: set them in ``[replacement]`` or per run.
+ECC_G3_ISSUERS: tuple[str, ...] = ("InCommon Intermediate CA - OVG3C",)
+ECC_G3_KEY_TYPES: tuple[KeyType, ...] = ("EC",)
+ECC_G3_CHAIN_CAS: tuple[str, ...] = ("emSign ECC Root CA - G3",)
+
+#: Deprecated alias of :data:`ECC_G3_ISSUERS`. **No longer a default**
+#: (ADR 0021): the issuer signal now defaults to off. Removed in 2.0.
+DEFAULT_ISSUERS: tuple[str, ...] = ECC_G3_ISSUERS
+#: Deprecated alias of :data:`ECC_G3_KEY_TYPES`; no longer a default. Removed in 2.0.
+DEFAULT_KEY_TYPES: tuple[KeyType, ...] = ECC_G3_KEY_TYPES
+#: Deprecated alias of :data:`ECC_G3_CHAIN_CAS`; no longer a default. Removed in 2.0.
+DEFAULT_CHAIN_CAS: tuple[str, ...] = ECC_G3_CHAIN_CAS
 
 # Wait used when a 429 carries no Retry-After header.
 _DEFAULT_RETRY_AFTER = 5.0
@@ -123,6 +146,11 @@ class ReplacementCriteria(BaseModel):
     :attr:`disabled`, turns that signal off. Matching is case-insensitive and
     exact on common names.
 
+    Out of the box only the ``ca`` signal is on (``cas=["EMSIGN"]``): every
+    valid emSign certificate needs replacing. The issuer, key and chain lists
+    default to empty; the ``ECC_G3_*`` constants hold the October 2026 G3
+    distrust values for anyone who still wants them.
+
     Built from (lowest precedence first) the module defaults, the
     ``[replacement]`` table of ``config.toml`` (:meth:`from_config`), and
     per-run overrides (:meth:`with_overrides`). A higher layer *replaces* a
@@ -131,27 +159,53 @@ class ReplacementCriteria(BaseModel):
 
     Example::
 
-        criteria = ReplacementCriteria().with_overrides(disable=["key"])
+        g3 = ReplacementCriteria().with_overrides(
+            issuers=list(ECC_G3_ISSUERS), key_types=list(ECC_G3_KEY_TYPES),
+            chain_cas=list(ECC_G3_CHAIN_CAS), disable=["ca"],
+        )
     """
 
     model_config = ConfigDict(extra="forbid")
 
+    cas: list[str] = Field(
+        default_factory=lambda: list(DEFAULT_CAS),
+        description="Issuing CAs (``EMSIGN``, ``SSLCOM``) whose certificates need replacing.",
+    )
     issuers: list[str] = Field(
-        default_factory=lambda: list(DEFAULT_ISSUERS),
+        default_factory=list,
         description="Issuing-intermediate common names that need replacing.",
     )
     key_types: list[KeyType] = Field(
-        default_factory=lambda: list(DEFAULT_KEY_TYPES),
+        default_factory=list,
         description="Leaf public-key algorithms that need replacing.",
     )
     chain_cas: list[str] = Field(
-        default_factory=lambda: list(DEFAULT_CHAIN_CAS),
+        default_factory=list,
         description="CA common names that must not appear in the served chain.",
     )
     disabled: list[Signal] = Field(
         default_factory=list,
         description="Signals switched off regardless of their lists.",
     )
+
+    @field_validator("cas", mode="before")
+    @classmethod
+    def _canonical_cas(cls, value: Any) -> Any:
+        """Accept CA names in any case and with stray whitespace (``emsign`` -> ``EMSIGN``).
+
+        The catalog reports CAs upper-cased (:data:`~certinext.models.domains.EMSIGN`,
+        :data:`~certinext.models.domains.SSLCOM`), so the list is stored that way.
+
+        Args:
+            value: The raw ``cas`` value.
+
+        Returns:
+            The list with string entries stripped and upper-cased; anything
+            else passes through for the ``list[str]`` check to reject.
+        """
+        if not isinstance(value, list):
+            return value
+        return [item.strip().upper() if isinstance(item, str) else item for item in value]
 
     @field_validator("key_types", mode="before")
     @classmethod
@@ -199,6 +253,7 @@ class ReplacementCriteria(BaseModel):
     def with_overrides(
         self,
         *,
+        cas: list[str] | None = None,
         issuers: list[str] | None = None,
         key_types: list[str] | None = None,
         chain_cas: list[str] | None = None,
@@ -207,6 +262,7 @@ class ReplacementCriteria(BaseModel):
         """Return a copy with per-run overrides applied.
 
         Args:
+            cas: Replaces :attr:`cas` when not ``None``.
             issuers: Replaces :attr:`issuers` when not ``None``.
             key_types: Replaces :attr:`key_types` when not ``None``.
             chain_cas: Replaces :attr:`chain_cas` when not ``None``.
@@ -219,6 +275,8 @@ class ReplacementCriteria(BaseModel):
             pydantic.ValidationError: If an override value is invalid.
         """
         data = self.model_dump()
+        if cas is not None:
+            data["cas"] = cas
         if issuers is not None:
             data["issuers"] = issuers
         if key_types is not None:
@@ -236,7 +294,7 @@ class ReplacementCriteria(BaseModel):
             Signals that are not disabled and have a non-empty list.
         """
         lists: dict[Signal, list[Any]] = {
-            "issuer": self.issuers, "key": list(self.key_types), "chain": self.chain_cas,
+            "ca": self.cas, "issuer": self.issuers, "key": list(self.key_types), "chain": self.chain_cas,
         }
         return [s for s in SIGNALS if s not in self.disabled and lists[s]]
 
@@ -306,6 +364,10 @@ class CertificateFacts:
         group_number: Account sub-group number.
         group_name: Account sub-group name, when it could be resolved.
         product_code: CertiNext product code.
+        ca: Issuing CA from the catalog's product-code map (``EMSIGN``,
+            ``SSLCOM``, or :data:`~certinext.models.domains.UNKNOWN_CA` for an
+            ambiguous or uncategorised code); ``None`` when the code is absent
+            from the catalog or the catalog was not read.
         serial_number: Certificate serial number.
         inspection: Parsed certificate details, or ``None`` if not inspected.
         ordered_by_name: Who placed the order (order detail), if inspected.
@@ -324,6 +386,7 @@ class CertificateFacts:
     group_number: str | None = None
     group_name: str | None = None
     product_code: str | None = None
+    ca: str | None = None
     serial_number: str | None = None
     inspection: Inspection | None = None
     ordered_by_name: str | None = None
@@ -369,7 +432,13 @@ class Classification:
 
 @dataclass
 class ReportRow:
-    """One certificate's facts, classification, and superseded flag.
+    """One certificate's facts, classification, and superseded/replaced state.
+
+    ``superseded`` is CA-blind (any newer covering certificate) and drives
+    ``latest_only`` de-duplication. ``replaced_by`` is narrower: the newer
+    covering certificate must itself classify :attr:`Verdict.OK`, so under
+    the default criteria it means "a newer non-emSign certificate". Both are
+    set by :func:`mark_superseded`.
 
     Attributes:
         facts: The certificate's :class:`CertificateFacts`.
@@ -379,17 +448,49 @@ class ReportRow:
             name, but its SANs are unknown (not inspected, or inspection
             failed), so coverage cannot be confirmed. Never hidden by
             ``latest_only``.
+        replaced_by: Order number of the newest valid certificate that
+            covers all this row's SANs and classifies :attr:`Verdict.OK`.
+            Only set on rows whose own verdict is not OK.
+        replaced_by_ca: That certificate's CA (:attr:`CertificateFacts.ca`).
+        possibly_replaced_by: As ``replaced_by``, but matched on the common
+            name alone because this row's SANs are unknown. Informational:
+            the row stays :attr:`outstanding`.
+        renewed: Superseded by a newer covering certificate that itself
+            needs replacing, which carries the work forward. Narrower than
+            ``superseded``: a newer certificate whose verdict is unknown,
+            conflicting, or OK without an evaluated CA carries nothing.
     """
 
     facts: CertificateFacts
     classification: Classification
     superseded: bool = False
     possibly_superseded: bool = False
+    replaced_by: str | None = None
+    replaced_by_ca: str | None = None
+    possibly_replaced_by: str | None = None
+    renewed: bool = False
 
     @property
     def verdict(self) -> Verdict:
         """Shortcut for ``classification.verdict``."""
         return self.classification.verdict
+
+    @property
+    def outstanding(self) -> bool:
+        """Whether this row is replacement work still to do.
+
+        True when it needs replacing and nothing newer is *confirmed* to
+        account for it: no ``replaced_by`` and not ``renewed`` (a newer
+        sibling that still needs replacing carries the work, so it is not
+        counted twice). Being ``superseded`` alone is not enough, since the
+        newer certificate may be neither a replacement nor counted itself.
+        A common-name match alone never clears a row:
+        ``possibly_replaced_by`` and ``possibly_superseded`` leave it
+        outstanding, since the newer certificate may lack some of its SANs.
+        The count may therefore overstate the work without inspection, but
+        never understates it.
+        """
+        return self.verdict.needs_replacing and not (self.replaced_by or self.renewed)
 
     def days_left(self, now: dt.datetime) -> int:
         """Return whole days until expiry.
@@ -432,9 +533,15 @@ class ReportRow:
             "group_number": f.group_number,
             "group_name": f.group_name,
             "product_code": f.product_code,
+            "ca": f.ca,
             "serial_number": f.serial_number,
             "superseded": self.superseded,
             "possibly_superseded": self.possibly_superseded,
+            "replaced_by": self.replaced_by,
+            "replaced_by_ca": self.replaced_by_ca,
+            "possibly_replaced_by": self.possibly_replaced_by,
+            "renewed": self.renewed,
+            "outstanding": self.outstanding,
             "ordered_by_name": f.ordered_by_name,
             "ordered_by_email": f.ordered_by_email,
             "error": f.error,
@@ -496,7 +603,7 @@ class CacheStats:
         }
 
 
-GroupBy = Literal["originator", "group", "issuer"]
+GroupBy = Literal["originator", "group", "issuer", "ca"]
 """Dimensions :meth:`ReplacementReport.breakdown` can group by."""
 
 
@@ -527,13 +634,23 @@ class ReplacementReport:
     cache: CacheStats | None = None
 
     def population(
-        self, *, latest_only: bool = False, expiring_within: int | None = None
+        self,
+        *,
+        latest_only: bool = False,
+        expiring_within: int | None = None,
+        outstanding: bool = False,
     ) -> list[ReportRow]:
         """Return the rows a summary should count.
 
         Args:
             latest_only: Drop superseded rows.
             expiring_within: Keep only rows expiring within this many days.
+            outstanding: Keep only :attr:`ReportRow.outstanding` rows (the
+                work still to do). Already de-duplicated: a row renewed by a
+                newer one that still needs replacing is not outstanding. A
+                row superseded only by a certificate that carries nothing
+                (unknown verdict, unmapped CA) is kept unless ``latest_only``
+                is also set.
 
         Returns:
             Matching rows, soonest expiry first.
@@ -541,6 +658,8 @@ class ReplacementReport:
         rows = self.rows
         if latest_only:
             rows = [r for r in rows if not r.superseded]
+        if outstanding:
+            rows = [r for r in rows if r.outstanding]
         if expiring_within is not None:
             rows = [r for r in rows if r.days_left(self.started_at) < expiring_within]
         return rows
@@ -551,34 +670,45 @@ class ReplacementReport:
         include_ok: bool = False,
         latest_only: bool = False,
         expiring_within: int | None = None,
+        outstanding: bool = False,
     ) -> list[ReportRow]:
         """Return the rows to display.
 
         Args:
             include_ok: Also return rows that do not need replacing (to
-                measure migration progress).
+                measure migration progress). Has no effect with
+                ``outstanding``, which keeps only rows needing replacement.
             latest_only: Drop superseded rows.
             expiring_within: Keep only rows expiring within this many days.
+            outstanding: Keep only outstanding rows (see :meth:`population`).
 
         Returns:
             Matching rows, soonest expiry first.
         """
-        rows = self.population(latest_only=latest_only, expiring_within=expiring_within)
+        rows = self.population(
+            latest_only=latest_only, expiring_within=expiring_within, outstanding=outstanding
+        )
         if include_ok:
             return rows
         return [r for r in rows if r.verdict is not Verdict.OK]
 
     @staticmethod
     def summarize(rows: list[ReportRow]) -> dict[str, int]:
-        """Count verdicts, superseded copies, and inspection errors.
+        """Count verdicts, migration progress, superseded copies, and errors.
 
         Args:
             rows: The population to count (usually :meth:`population`).
 
         Returns:
             Counts keyed ``valid``, ``needs_replacing``, one key per
-            :class:`Verdict` value, ``superseded``, ``possibly_superseded``,
-            and ``errors``.
+            :class:`Verdict` value, ``outstanding`` (needs replacing and
+            nothing newer is confirmed to account for it), ``replaced``
+            (needs replacing and has ``replaced_by``), ``possibly_replaced``
+            (outstanding rows with only a CN match to a passing certificate;
+            a subset of ``outstanding``), ``superseded``,
+            ``possibly_superseded``, and ``errors``. Rows needing replacement
+            split exactly into ``outstanding``, ``replaced``, and
+            :attr:`ReportRow.renewed` rows without a replacement.
         """
         verdicts = Counter(r.verdict for r in rows)
         summary = {
@@ -586,6 +716,10 @@ class ReplacementReport:
             "needs_replacing": sum(n for v, n in verdicts.items() if v.needs_replacing),
         }
         summary.update({v.value: verdicts.get(v, 0) for v in Verdict})
+        needing = [r for r in rows if r.verdict.needs_replacing]
+        summary["outstanding"] = sum(1 for r in needing if r.outstanding)
+        summary["replaced"] = sum(1 for r in needing if r.replaced_by)
+        summary["possibly_replaced"] = sum(1 for r in needing if r.possibly_replaced_by and not r.replaced_by)
         summary["superseded"] = sum(1 for r in rows if r.superseded)
         summary["possibly_superseded"] = sum(1 for r in rows if r.possibly_superseded)
         summary["errors"] = sum(1 for r in rows if r.facts.error)
@@ -593,10 +727,11 @@ class ReplacementReport:
 
     @staticmethod
     def breakdown(rows: list[ReportRow], by: GroupBy) -> list[dict[str, Any]]:
-        """Count verdicts per originator, group, or issuer.
+        """Count verdicts per originator, group, issuer, or CA.
 
         Useful for spotting which groups hold automated (ACME) issuance
-        without hardcoding any account's group numbers.
+        without hardcoding any account's group numbers, and for watching the
+        migration per CA.
 
         Args:
             rows: The population to count.
@@ -604,7 +739,8 @@ class ReplacementReport:
 
         Returns:
             One dict per distinct value, largest first, with the key, the
-            ``valid``/``needs_replacing`` counts, and per-verdict counts.
+            ``valid``/``needs_replacing`` counts, per-verdict counts, and the
+            ``outstanding``/``replaced`` counts.
         """
         def key(row: ReportRow) -> str:
             f = row.facts
@@ -612,6 +748,8 @@ class ReplacementReport:
                 return f.originator or ""
             if by == "group":
                 return f.group_name or f.group_number or ""
+            if by == "ca":
+                return f.ca or ""
             return f.issuer or ""
 
         buckets: dict[str, list[ReportRow]] = defaultdict(list)
@@ -622,7 +760,7 @@ class ReplacementReport:
         ]
         out.sort(key=lambda d: (-d["valid"], d[by]))
         for item in out:
-            del item["superseded"], item["possibly_superseded"], item["errors"]
+            del item["possibly_replaced"], item["superseded"], item["possibly_superseded"], item["errors"]
         return out
 
 
@@ -740,6 +878,9 @@ def inspect_download(download: "CertificateDownload") -> Inspection:
 def classify(facts: CertificateFacts, criteria: ReplacementCriteria) -> Classification:
     """Score one certificate against the criteria.
 
+    The ca signal uses :attr:`CertificateFacts.ca` and is left unevaluated
+    when that is ``None`` or :data:`~certinext.models.domains.UNKNOWN_CA`
+    (an unmapped product code is missing evidence, not a non-emSign cert).
     The issuer signal uses the leaf's own issuer when inspected, else the
     orders report's ``issuerCA``. Key and chain signals need inspection; the
     chain signal also needs the download to have served a chain, since an
@@ -757,6 +898,8 @@ def classify(facts: CertificateFacts, criteria: ReplacementCriteria) -> Classifi
     active = criteria.active_signals()
     insp = facts.inspection
 
+    if "ca" in active and facts.ca and facts.ca.upper() != UNKNOWN_CA:
+        results["ca"] = facts.ca.upper() in criteria.cas
     if "issuer" in active:
         issuer = (insp.leaf_issuer if insp and insp.leaf_issuer else facts.issuer) or ""
         if issuer:
@@ -782,20 +925,29 @@ def classify(facts: CertificateFacts, criteria: ReplacementCriteria) -> Classifi
 
 
 def mark_superseded(rows: list[ReportRow]) -> None:
-    """Flag rows whose names are all covered by a newer valid certificate.
+    """Flag rows covered by a newer valid certificate, and record replacements.
 
     "Newer" compares ``(order_date, valid_to)``. Only a row whose SANs are
     known can be marked ``superseded``: a common name alone may hide extra
     SANs the newer certificate lacks. A CN-only match sets
     ``possibly_superseded`` instead. A row with no names is never flagged.
-    Flags are set in place.
+
+    In the same pass, a row whose own verdict is not :attr:`Verdict.OK` gets
+    ``replaced_by``/``replaced_by_ca`` from the **newest** covering row whose
+    verdict is OK (``possibly_replaced_by`` on a CN-only match). When the
+    ``ca`` signal is active, a coverer counts only if its CA was evaluated:
+    with another signal active, an unmapped product code can still score OK
+    without showing the certificate left the distrusted CA. ``renewed`` is
+    set when a covering row (SANs known) itself needs replacing. Rows must
+    therefore be classified first. Flags are reset and set in place, so
+    calling this again on the same rows is safe.
 
     Args:
-        rows: The report rows to flag.
+        rows: The classified report rows to flag.
     """
-    def recency(row: ReportRow) -> tuple[dt.datetime, dt.datetime]:
+    def recency(row: ReportRow) -> tuple[dt.datetime, dt.datetime, str]:
         f = row.facts
-        return (f.order_date or dt.datetime.min.replace(tzinfo=dt.timezone.utc), f.valid_to)
+        return (f.order_date or dt.datetime.min.replace(tzinfo=dt.timezone.utc), f.valid_to, f.order_number)
 
     by_name: dict[str, list[ReportRow]] = defaultdict(list)
     for row in rows:
@@ -803,27 +955,48 @@ def mark_superseded(rows: list[ReportRow]) -> None:
             by_name[name].append(row)
 
     for row in rows:
+        row.superseded = row.possibly_superseded = row.renewed = False
+        row.replaced_by = row.replaced_by_ca = row.possibly_replaced_by = None
         names = row.facts.names()
         if not names:
             continue
-        mine = recency(row)
+        mine = recency(row)[:2]
         first = next(iter(names))
-        covered = any(
-            other is not row and recency(other) > mine and names <= other.facts.names()
-            for other in by_name[first]
-        )
-        if row.facts.sans_known:
-            row.superseded = covered
+        coverers = [
+            other for other in by_name[first]
+            if other is not row and recency(other)[:2] > mine and names <= other.facts.names()
+        ]
+        known = row.facts.sans_known
+        if known:
+            row.superseded = bool(coverers)
+            row.renewed = any(o.verdict.needs_replacing for o in coverers)
         else:
-            row.possibly_superseded = covered
+            row.possibly_superseded = bool(coverers)
+
+        # OK with the ca signal unevaluated (an unmapped product code) proves no CA move.
+        passing = [
+            o for o in coverers
+            if o.verdict is Verdict.OK and "ca" not in o.classification.unevaluated
+        ]
+        if row.verdict is Verdict.OK or not passing:
+            continue
+        newest = max(passing, key=recency)
+        if known:
+            row.replaced_by, row.replaced_by_ca = newest.facts.order_number, newest.facts.ca
+        else:
+            row.possibly_replaced_by = newest.facts.order_number
 
 
-def _facts_from_record(record: "OrderRecord", group_names: dict[str, str]) -> CertificateFacts:
+def _facts_from_record(
+    record: "OrderRecord", group_names: dict[str, str], ca_map: dict[str, str] | None = None
+) -> CertificateFacts:
     """Build report-level facts from one orders report row.
 
     Args:
         record: A row whose ``order_number`` and expiry are set.
         group_names: Group number to group name.
+        ca_map: Product code to CA (from the catalog); empty or ``None``
+            leaves :attr:`CertificateFacts.ca` unset.
 
     Returns:
         Facts with no inspection data.
@@ -839,8 +1012,73 @@ def _facts_from_record(record: "OrderRecord", group_names: dict[str, str]) -> Ce
         group_number=record.group_number,
         group_name=group_names.get(record.group_number or ""),
         product_code=record.product_code,
+        ca=(ca_map or {}).get(record.product_code or "") or None,
         serial_number=record.certificate_serial_number,
     )
+
+
+def _read_ca_map(sess: "CertiNextSession", *, required: bool) -> dict[str, str]:
+    """Read the catalog's product-code → CA map once.
+
+    Args:
+        sess: An authenticated session.
+        required: Whether the ``ca`` signal is active. If so a failed read is
+            fatal: silently turning every emSign row into ``unknown`` would
+            look like migration progress.
+
+    Returns:
+        The map, or ``{}`` after logging a warning when not ``required``.
+
+    Raises:
+        CertiNextAPIError: If the read fails and ``required`` is set.
+        httpx.HTTPError: Likewise, for a transport failure.
+        ValueError: If ``required`` is set and the read succeeds but lists
+            no products: the same silent all-``unknown`` outcome as a failed
+            read, so equally fatal.
+    """
+    try:
+        ca_map = sess.catalog.ca_by_product_code()
+    except (CertiNextAPIError, httpx.HTTPError) as exc:
+        if required:
+            raise
+        log.warning("Could not read the product catalog; CA left blank", error=str(exc))
+        return {}
+    if required and not ca_map:
+        raise ValueError(
+            "The product catalog lists no products, so no order's CA can be told; "
+            "refusing to report every certificate as unknown"
+        )
+    return ca_map
+
+
+def _warn_ca_gaps(criteria: ReplacementCriteria, ca_map: dict[str, str], facts: list[CertificateFacts]) -> None:
+    """Log what a partial catalog or a mistyped CA name would hide.
+
+    A product code missing from the catalog leaves its orders ``unknown``;
+    a requested CA the catalog never names (``SSL.COM`` for ``SSLCOM``)
+    matches nothing. Both look like quiet progress in the summary, so both
+    are named. Does nothing unless the ``ca`` signal is active.
+
+    Args:
+        criteria: The replacement criteria.
+        ca_map: Product code to CA, as read from the catalog.
+        facts: The certificates in the report.
+    """
+    if "ca" not in criteria.active_signals():
+        return
+    unmapped = Counter(f.product_code or "(none)" for f in facts if f.ca is None)
+    if unmapped:
+        log.warning(
+            "Orders with a product code the catalog does not list; their CA is unknown",
+            orders=sum(unmapped.values()), product_codes=",".join(sorted(unmapped)),
+        )
+    known = {ca.upper() for ca in ca_map.values()}
+    missing = [ca for ca in criteria.cas if ca not in known]
+    if missing:
+        log.warning(
+            "Requested CA not named by the product catalog; it matches nothing",
+            cas=",".join(missing), catalog_cas=",".join(sorted(known)),
+        )
 
 
 class _Backoff:
@@ -1010,6 +1248,7 @@ def build_report(
     inspect: bool = False,
     originators: list[str] | None = None,
     groups: list[str] | None = None,
+    issued_since: dt.datetime | None = None,
     now: dt.datetime | None = None,
     on_progress: Callable[[CertificateFacts], None] | None = None,
     on_total: Callable[[int], None] | None = None,
@@ -1033,6 +1272,15 @@ def build_report(
             one download request per certificate).
         originators: Keep only these originators (case-insensitive).
         groups: Keep only these groups, by number or name (case-insensitive).
+            Both filters run before replacements are matched, so a scoped
+            report sees only replacements inside its scope. An emSign
+            certificate replaced under another originator or group stays
+            outstanding: an over-count, never an under-count.
+        issued_since: Keep only orders placed at or after this time
+            (``order_date >= issued_since``); a naive value is read as UTC.
+            Orders with no order date are dropped, since they cannot be
+            shown to qualify. Example: the day emSign issuance became
+            untrusted, to find certificates broken from day one.
         now: Reference time; defaults to the current UTC time.
         on_progress: Called after each certificate is inspected, always from
             the calling thread. With several workers the order is completion
@@ -1050,11 +1298,17 @@ def build_report(
     Raises:
         ValueError: If ``workers`` is less than 1.
         ImportError: If ``inspect`` is set and ``cryptography`` is missing.
-        CertiNextAPIError: If the orders report itself cannot be read, or if
-            ``groups`` is set and the group names cannot be resolved.
+        CertiNextAPIError: If the orders report itself cannot be read; if
+            ``groups`` is set and the group names cannot be resolved; or if
+            the ``ca`` signal is active and the product catalog cannot be
+            read (without it, the catalog failure only blanks the CA).
+        ValueError: If the ``ca`` signal is active and the catalog read
+            succeeds but lists no products.
     """
     if workers < 1:
         raise ValueError(f"workers must be at least 1, got {workers}")
+    if issued_since is not None and issued_since.tzinfo is None:
+        issued_since = issued_since.replace(tzinfo=dt.timezone.utc)
     now = now or _utcnow()
     clock_start = time.monotonic()
     try:
@@ -1068,6 +1322,7 @@ def build_report(
             raise
         log.warning("Could not resolve group names; showing numbers", error=str(exc))
         group_names = {}
+    ca_map = _read_ca_map(sess, required="ca" in criteria.active_signals())
 
     records = sess.orders.get_list(status="issued")
     issued_rows = len(records)
@@ -1081,6 +1336,8 @@ def build_report(
             if (r.group_number or "").casefold() in wanted
             or group_names.get(r.group_number or "", "").casefold() in wanted
         ]
+    if issued_since is not None:
+        records = [r for r in records if r.order_date is not None and r.order_date >= issued_since]
 
     facts: list[CertificateFacts] = []
     incomplete: list[IncompleteRecord] = []
@@ -1103,8 +1360,9 @@ def build_report(
                 serial_number=r.certificate_serial_number, reason=reason,
             ))
             continue
-        facts.append(_facts_from_record(r, group_names))
+        facts.append(_facts_from_record(r, group_names, ca_map))
     log.info("Valid certificates found", count=len(facts), incomplete=len(incomplete), issued_rows=issued_rows)
+    _warn_ca_gaps(criteria, ca_map, facts)
 
     if inspect:
         if on_total:
@@ -1152,9 +1410,13 @@ def build_report(
 
 
 __all__ = [
+    "DEFAULT_CAS",
     "DEFAULT_CHAIN_CAS",
     "DEFAULT_ISSUERS",
     "DEFAULT_KEY_TYPES",
+    "ECC_G3_CHAIN_CAS",
+    "ECC_G3_ISSUERS",
+    "ECC_G3_KEY_TYPES",
     "SIGNALS",
     "CacheStats",
     "CertificateFacts",

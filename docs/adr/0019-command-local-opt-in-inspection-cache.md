@@ -5,6 +5,13 @@ date: 2026-10-21
 
 # Cache certificate downloads per command, opt-in, never volatile state
 
+> **Note:** The 7-day **Bounded age** rule and the matching "up to 7 days"
+> consequence below are superseded in part by
+> [ADR 0021](0021-replacement-report-defaults-to-ca-signal.md): the default is
+> now 30 days, `--cache-max-age DAYS` overrides it, and a run with the chain
+> signal active warns when the age is over 7 days. Every other rule remains in
+> force.
+
 ## Context and problem statement
 
 `certinext replacement-report --inspect` downloads every valid certificate (order

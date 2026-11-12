@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 import pytest
+import structlog.testing
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, ed25519, rsa
@@ -39,6 +40,7 @@ from pydantic import ValidationError
 
 from certinext import replacement as rp
 from certinext._config import ConfigError, replacement_criteria
+from certinext._inspection_cache import DEFAULT_MAX_AGE
 from certinext.cli import main as cli_main
 from certinext.exceptions import CertiNextAPIError, CertiNextRateLimitError
 from certinext.models.ssl_certificates import CertificateDownload
@@ -52,7 +54,18 @@ BAD_INT = "Example Intermediate CA - OV3"
 GOOD_ROOT = "Example Root CA - G1"
 GOOD_INT = "Example Intermediate CA - OV2"
 
-CRITERIA = rp.ReplacementCriteria(issuers=[BAD_INT], key_types=["EC"], chain_cas=[BAD_ROOT])
+# G3-style criteria (ca signal off) for the issuer/key/chain tests.
+CRITERIA = rp.ReplacementCriteria(cas=[], issuers=[BAD_INT], key_types=["EC"], chain_cas=[BAD_ROOT])
+# The default migration criteria: every emSign certificate needs replacing.
+CA_CRITERIA = rp.ReplacementCriteria()
+
+# Fake catalog product codes: "100" is emSign (the _order_row default), "200" SSL.com,
+# "300" sits in an uncategorised product family.
+EMSIGN_CODE, SSLCOM_CODE, OTHER_CODE = "100", "200", "300"
+
+# config.toml for the CLI tests written before the ca signal: issuer signal only.
+G3_CONFIG = f'[replacement]\ncas = []\nissuers = ["{BAD_INT}"]\n'
+NO_CA_CONFIG = "[replacement]\ncas = []\n"
 
 _KeyT = ec.EllipticCurvePrivateKey | rsa.RSAPrivateKey | ed25519.Ed25519PrivateKey
 
@@ -283,20 +296,42 @@ def test_missing_chain_leaves_chain_unevaluated() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_default_criteria_describe_the_emudhra_distrust() -> None:
-    """Out of the box the criteria target the October 2026 eMudhra ECC distrust."""
+def test_default_criteria_target_every_emsign_certificate() -> None:
+    """Out of the box only the ca signal is on, naming emSign (ADR 0021)."""
     c = rp.ReplacementCriteria()
-    assert c.issuers == ["InCommon Intermediate CA - OVG3C"]
-    assert c.key_types == ["EC"]
-    assert c.chain_cas == ["emSign ECC Root CA - G3"]
-    assert c.active_signals() == ["issuer", "key", "chain"]
+    assert c.cas == ["EMSIGN"]
+    assert (c.issuers, c.key_types, c.chain_cas) == ([], [], [])
+    assert c.active_signals() == ["ca"]
+
+
+def test_ecc_g3_constants_keep_the_old_criteria_reachable() -> None:
+    """The G3 values survive as constants, and the old DEFAULT_* names alias them."""
+    assert rp.ECC_G3_ISSUERS == ("InCommon Intermediate CA - OVG3C",)
+    assert rp.ECC_G3_KEY_TYPES == ("EC",)
+    assert rp.ECC_G3_CHAIN_CAS == ("emSign ECC Root CA - G3",)
+    assert (rp.DEFAULT_ISSUERS, rp.DEFAULT_KEY_TYPES, rp.DEFAULT_CHAIN_CAS) == (
+        rp.ECC_G3_ISSUERS, rp.ECC_G3_KEY_TYPES, rp.ECC_G3_CHAIN_CAS,
+    )
+    g3 = rp.ReplacementCriteria().with_overrides(
+        issuers=list(rp.ECC_G3_ISSUERS), key_types=list(rp.ECC_G3_KEY_TYPES),
+        chain_cas=list(rp.ECC_G3_CHAIN_CAS), disable=["ca"],
+    )
+    assert g3.active_signals() == ["issuer", "key", "chain"]
+
+
+def test_ca_names_are_upper_cased() -> None:
+    """CA names from config or flags match the catalog's upper-case names."""
+    assert rp.ReplacementCriteria(cas=[" emsign ", "SslCom"]).cas == ["EMSIGN", "SSLCOM"]
+    assert CA_CRITERIA.with_overrides(cas=["sslcom"]).cas == ["SSLCOM"]
 
 
 def test_from_config_overrides_only_named_keys() -> None:
     """A partial table keeps defaults for absent keys and normalizes key case."""
     c = rp.ReplacementCriteria.from_config({"replacement": {"key_types": ["ec", "rsa"]}})
     assert c.key_types == ["EC", "RSA"]
-    assert c.issuers == list(rp.DEFAULT_ISSUERS)
+    assert c.issuers == []
+    assert c.cas == list(rp.DEFAULT_CAS)
+    assert c.active_signals() == ["ca", "key"]
 
 
 def test_from_config_rejects_bad_table() -> None:
@@ -475,6 +510,23 @@ class _FakeApi:
         return copy.deepcopy(value)
 
 
+def _catalog() -> dict[str, Any]:
+    """Build a catalog payload mapping the fake product codes to CAs.
+
+    Wrapped in a ``products`` envelope because :class:`_FakeApi` treats a bare
+    list of dicts as a queue of successive responses.
+
+    Returns:
+        Wire-shaped product categories: emSign, SSL.com, and an
+        uncategorised family.
+    """
+    return {"products": [
+        {"categoryName": "SSL/TLS Certificates", "products": [{"productCode": EMSIGN_CODE}]},
+        {"categoryName": "SSL.com", "products": [{"productCode": SSLCOM_CODE}]},
+        {"categoryName": "Private PKI Products", "products": [{"productCode": OTHER_CODE}]},
+    ]}
+
+
 def _routes() -> dict[str, Any]:
     """Build the standard fake-API routes: two valid orders and one expired.
 
@@ -488,6 +540,7 @@ def _routes() -> dict[str, Any]:
     ]
     return {
         f"{_API}/groups": {"groups": [{"groupNumber": "G-1", "groupName": "Portal"}]},
+        f"{_API}/catalog/products": _catalog(),
         f"{_API}/reports/orders": {"content": rows, "totalPages": 1},
         f"{_API}/ssl-certificates/ORDER-00001": {
             "orderId": "ORDER-00001", "status": "issued",
@@ -749,6 +802,287 @@ def test_report_records_start_and_end_times(monkeypatch: pytest.MonkeyPatch) -> 
 
 
 # ---------------------------------------------------------------------------
+# CA signal and migration tracking (ADR 0021)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("ca", "verdict"),
+    [
+        ("EMSIGN", rp.Verdict.REPLACE),
+        ("SSLCOM", rp.Verdict.OK),
+        (None, rp.Verdict.UNKNOWN),  # product code missing from the catalog
+        ("UNKNOWN", rp.Verdict.UNKNOWN),  # code in an uncategorised or ambiguous family
+    ],
+)
+def test_ca_signal_classification(ca: str | None, verdict: rp.Verdict) -> None:
+    """Under the default criteria the CA alone decides; an unmapped CA is missing evidence."""
+    c = rp.classify(_facts(ca=ca), CA_CRITERIA)
+    assert c.verdict is verdict
+    assert c.unevaluated == ([] if verdict is not rp.Verdict.UNKNOWN else ["ca"])
+
+
+def test_ca_signal_combines_with_others() -> None:
+    """An SSL.com cert from a matching issuer is a conflict, not silently OK."""
+    criteria = CA_CRITERIA.with_overrides(issuers=[BAD_INT])
+    c = rp.classify(_facts(ca="SSLCOM", issuer=BAD_INT), criteria)
+    assert c.verdict is rp.Verdict.CONFLICT
+    assert (c.evaluated, c.matched) == (["ca", "issuer"], ["issuer"])
+
+
+def _ca_row(order: str, days_ago: int, ca: str, sans: list[str] | None = None, cn: str | None = None) -> rp.ReportRow:
+    """Build a row classified under the default (CA) criteria.
+
+    Args:
+        order: Order number.
+        days_ago: Order age in days (decides recency).
+        ca: The row's CA.
+        sans: Leaf SANs; ``None`` leaves the row uninspected (CN only).
+        cn: Common name; defaults to the first SAN or ``host.example.edu``.
+
+    Returns:
+        The classified row.
+    """
+    insp = rp.Inspection("RSA", 2048, "RSA 2048", sans, GOOD_INT, [GOOD_INT, GOOD_ROOT]) if sans else None
+    facts = _facts(
+        order_number=order, common_name=cn or (sans[0] if sans else "host.example.edu"),
+        order_date=NOW - dt.timedelta(days=days_ago), ca=ca, inspection=insp,
+    )
+    return rp.ReportRow(facts=facts, classification=rp.classify(facts, CA_CRITERIA))
+
+
+def test_newer_sslcom_cert_replaces_emsign() -> None:
+    """A covering newer SSL.com cert is recorded as the replacement, with its CA."""
+    old = _ca_row("ORDER-00001", 60, "EMSIGN", ["a.example.edu", "b.example.edu"])
+    new = _ca_row("ORDER-00002", 5, "SSLCOM", ["a.example.edu", "b.example.edu", "c.example.edu"])
+    rp.mark_superseded([old, new])
+    assert (old.replaced_by, old.replaced_by_ca, old.possibly_replaced_by) == ("ORDER-00002", "SSLCOM", None)
+    assert old.superseded and not old.outstanding
+    assert new.replaced_by is None  # an OK row is never "replaced"
+
+
+def test_newer_emsign_cert_supersedes_but_does_not_replace() -> None:
+    """A newer emSign renewal carries the work forward: the old row is superseded, the new one outstanding."""
+    old = _ca_row("ORDER-00001", 60, "EMSIGN", ["a.example.edu"])
+    new = _ca_row("ORDER-00002", 5, "EMSIGN", ["a.example.edu"])
+    rp.mark_superseded([old, new])
+    assert old.superseded and old.renewed and old.replaced_by is None and not old.outstanding
+    assert new.outstanding
+
+
+def test_partial_sslcom_coverage_is_not_a_replacement() -> None:
+    """An SSL.com cert missing one of the old SANs leaves the emSign cert outstanding."""
+    old = _ca_row("ORDER-00001", 60, "EMSIGN", ["a.example.edu", "b.example.edu"])
+    new = _ca_row("ORDER-00002", 5, "SSLCOM", ["a.example.edu"])
+    rp.mark_superseded([old, new])
+    assert old.replaced_by is None and old.outstanding
+
+
+def test_cn_only_sslcom_match_is_possibly_replaced() -> None:
+    """Without known SANs on the old cert, a same-CN SSL.com cert is only a possible replacement.
+
+    It stays outstanding: the SSL.com cert may lack SANs the emSign cert has
+    (external review finding 1), so a CN match must never clear the work.
+    """
+    old = _ca_row("ORDER-00001", 60, "EMSIGN")
+    new = _ca_row("ORDER-00002", 5, "SSLCOM")
+    rp.mark_superseded([old, new])
+    assert (old.replaced_by, old.possibly_replaced_by) == (None, "ORDER-00002")
+    assert old.possibly_superseded and old.outstanding
+
+
+def test_coverer_with_unevaluated_ca_is_not_a_replacement() -> None:
+    """An OK coverer whose CA is unmapped proves no CA move (external review finding 2).
+
+    With ca plus issuer active, a newer cert with an unmapped product code and
+    a non-matching issuer scores OK on the issuer alone; it must not count as
+    the emSign cert's replacement.
+    """
+    criteria = CA_CRITERIA.with_overrides(issuers=[BAD_INT])
+    sans = ["a.example.edu"]
+    insp = rp.Inspection("RSA", 2048, "RSA 2048", sans, GOOD_INT, [GOOD_INT, GOOD_ROOT])
+    old_insp = rp.Inspection("RSA", 2048, "RSA 2048", sans, BAD_INT, [BAD_INT])
+    old_f = _facts(order_number="ORDER-00001", common_name=sans[0], order_date=NOW - dt.timedelta(days=60),
+                   ca="EMSIGN", issuer=BAD_INT, inspection=old_insp)
+    new_f = _facts(order_number="ORDER-00002", common_name=sans[0], order_date=NOW - dt.timedelta(days=5),
+                   ca=None, issuer=GOOD_INT, inspection=insp)
+    old = rp.ReportRow(facts=old_f, classification=rp.classify(old_f, criteria))
+    new = rp.ReportRow(facts=new_f, classification=rp.classify(new_f, criteria))
+    assert (old.verdict, new.verdict, new.classification.unevaluated) == (rp.Verdict.REPLACE, rp.Verdict.OK, ["ca"])
+    rp.mark_superseded([old, new])
+    # Superseded (CA-blind), but neither replaced nor renewed: the work stays counted.
+    assert old.superseded and old.replaced_by is None and not old.renewed and old.outstanding
+    report = rp.ReplacementReport(criteria=criteria, rows=[old, new], inspected=True, started_at=NOW)
+    assert report.select(outstanding=True) == [old]
+
+
+def test_unknown_coverer_does_not_carry_the_work() -> None:
+    """A newer cert with an unmapped CA (UNKNOWN) supersedes but does not clear the emSign row."""
+    old = _ca_row("ORDER-00001", 60, "EMSIGN", ["a.example.edu"])
+    new = _ca_row("ORDER-00002", 5, "UNKNOWN", ["a.example.edu"])
+    rp.mark_superseded([old, new])
+    assert new.verdict is rp.Verdict.UNKNOWN
+    assert old.superseded and not old.renewed and old.outstanding
+
+
+def test_newest_sslcom_coverer_wins() -> None:
+    """With two SSL.com replacements the newest is recorded, whatever the input order."""
+    old = _ca_row("ORDER-00001", 60, "EMSIGN", ["a.example.edu"])
+    first = _ca_row("ORDER-00002", 20, "SSLCOM", ["a.example.edu"])
+    second = _ca_row("ORDER-00003", 2, "SSLCOM", ["a.example.edu"])
+    rp.mark_superseded([second, old, first])
+    assert old.replaced_by == "ORDER-00003"
+    assert first.replaced_by is None  # OK rows are never marked
+
+
+def test_older_sslcom_cert_does_not_replace() -> None:
+    """Coverage only counts forward in time: an emSign cert newer than the SSL.com one is outstanding."""
+    sslcom = _ca_row("ORDER-00001", 60, "SSLCOM", ["a.example.edu"])
+    emsign = _ca_row("ORDER-00002", 5, "EMSIGN", ["a.example.edu"])
+    rp.mark_superseded([sslcom, emsign])
+    assert emsign.replaced_by is None and emsign.outstanding
+
+
+def test_mark_superseded_is_idempotent_for_replacements() -> None:
+    """Re-running after the coverer is gone clears the stale replacement."""
+    old = _ca_row("ORDER-00001", 60, "EMSIGN", ["a.example.edu"])
+    new = _ca_row("ORDER-00002", 5, "SSLCOM", ["a.example.edu"])
+    rp.mark_superseded([old, new])
+    rp.mark_superseded([old])
+    assert (old.replaced_by, old.replaced_by_ca, old.superseded) == (None, None, False)
+
+
+def test_migration_counts_and_outstanding_filter() -> None:
+    """summarize() leads with outstanding/replaced; outstanding=True lists only the work left."""
+    replaced = _ca_row("ORDER-00001", 60, "EMSIGN", ["a.example.edu"])
+    replacement = _ca_row("ORDER-00002", 5, "SSLCOM", ["a.example.edu"])
+    maybe = _ca_row("ORDER-00003", 60, "EMSIGN", cn="b.example.edu")
+    maybe_new = _ca_row("ORDER-00004", 5, "SSLCOM", cn="b.example.edu")
+    renewed_old = _ca_row("ORDER-00005", 60, "EMSIGN", ["c.example.edu"])
+    renewed_new = _ca_row("ORDER-00006", 5, "EMSIGN", ["c.example.edu"])
+    untouched = _ca_row("ORDER-00007", 30, "EMSIGN", ["d.example.edu"])
+    rows = [replaced, replacement, maybe, maybe_new, renewed_old, renewed_new, untouched]
+    rp.mark_superseded(rows)
+    report = rp.ReplacementReport(criteria=CA_CRITERIA, rows=rows, inspected=True, started_at=NOW)
+
+    summary = report.summarize(rows)
+    assert summary["needs_replacing"] == 5
+    # The CN-only match (ORDER-00003) stays outstanding; possibly_replaced is a subset of it.
+    assert (summary["outstanding"], summary["replaced"], summary["possibly_replaced"]) == (3, 1, 1)
+    # outstanding + replaced + superseded-without-replacement partitions needs_replacing.
+    renewed = sum(1 for r in rows if r.verdict.needs_replacing and r.renewed and not r.replaced_by)
+    assert summary["outstanding"] + summary["replaced"] + renewed == summary["needs_replacing"]
+    assert sorted(r.facts.order_number for r in report.select(outstanding=True)) == [
+        "ORDER-00003", "ORDER-00006", "ORDER-00007",
+    ]
+    assert report.select(outstanding=True, include_ok=True) == report.select(outstanding=True)
+
+    by_ca = {b["ca"]: b for b in report.breakdown(rows, "ca")}
+    assert (by_ca["EMSIGN"]["valid"], by_ca["EMSIGN"]["outstanding"], by_ca["EMSIGN"]["replaced"]) == (5, 3, 1)
+    assert by_ca["SSLCOM"]["ok"] == 2
+    assert "possibly_replaced" not in by_ca["EMSIGN"]
+
+
+def test_row_json_carries_ca_and_replacement() -> None:
+    """to_dict() exposes the CA and replacement fields for JSON/CSV consumers."""
+    old = _ca_row("ORDER-00001", 60, "EMSIGN", ["a.example.edu"])
+    new = _ca_row("ORDER-00002", 5, "SSLCOM", ["a.example.edu"])
+    rp.mark_superseded([old, new])
+    d = old.to_dict(NOW)
+    assert (d["ca"], d["replaced_by"], d["replaced_by_ca"], d["possibly_replaced_by"], d["outstanding"]) == (
+        "EMSIGN", "ORDER-00002", "SSLCOM", None, False,
+    )
+
+
+def _ca_routes() -> dict[str, Any]:
+    """Build routes where order 2 is an SSL.com cert and order 3 has an unmapped code.
+
+    Returns:
+        Path -> payload routes.
+    """
+    routes = _routes()
+    rows = routes[f"{_API}/reports/orders"]["content"]
+    rows[1]["productCode"] = SSLCOM_CODE
+    rows.append(_order_row(4, productCode="999", orderDate="2026-10-20T00:00:00"))
+    return routes
+
+
+def test_report_labels_rows_by_ca(monkeypatch: pytest.MonkeyPatch) -> None:
+    """build_report joins product codes against the catalog once and classifies by CA."""
+    sess, api = _session(monkeypatch, _ca_routes())
+    report = rp.build_report(sess, CA_CRITERIA, now=NOW)
+    got = {r.facts.order_number: (r.facts.ca, r.verdict) for r in report.rows}
+    assert got == {
+        "ORDER-00001": ("EMSIGN", rp.Verdict.REPLACE),
+        "ORDER-00002": ("SSLCOM", rp.Verdict.OK),
+        "ORDER-00004": (None, rp.Verdict.UNKNOWN),
+    }
+    assert api.calls.count(f"{_API}/catalog/products") == 1
+
+
+def test_catalog_failure_is_fatal_only_when_ca_is_active(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Without the catalog the CA signal would turn every emSign row into UNKNOWN, so it raises."""
+    routes = _ca_routes()
+    routes[f"{_API}/catalog/products"] = CertiNextAPIError(503, "down")
+    sess, _ = _session(monkeypatch, routes)
+    with pytest.raises(CertiNextAPIError):
+        rp.build_report(sess, CA_CRITERIA, now=NOW)
+
+    report = rp.build_report(sess, CRITERIA, now=NOW)
+    assert [r.facts.ca for r in report.rows] == [None, None, None]
+    assert [r.verdict for r in report.rows][:2] == [rp.Verdict.REPLACE, rp.Verdict.OK]
+
+
+def test_empty_catalog_is_fatal_only_when_ca_is_active(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A 2xx catalog with no products would turn every row UNKNOWN: fatal like a failed read.
+
+    External review finding 3: an empty map otherwise gave "0 outstanding".
+    """
+    routes = _ca_routes()
+    routes[f"{_API}/catalog/products"] = {"products": []}
+    sess, _ = _session(monkeypatch, routes)
+    with pytest.raises(ValueError, match="lists no products"):
+        rp.build_report(sess, CA_CRITERIA, now=NOW)
+    assert [r.facts.ca for r in rp.build_report(sess, CRITERIA, now=NOW).rows] == [None, None, None]
+
+
+def test_cli_empty_catalog_exits_1(run_cli: Callable[..., tuple[int, str, str]]) -> None:
+    """The CLI turns an empty catalog into exit 1 with no report, not a '0 outstanding' summary."""
+    routes = _migration_routes()
+    routes[f"{_API}/catalog/products"] = {"products": []}
+    code, out, _ = run_cli([], routes=routes)
+    assert code == 1 and "outstanding" not in out
+
+
+def test_unmapped_codes_and_unknown_ca_names_are_warned(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A partial catalog and a mistyped --ca are named in warnings, not left as quiet 'unknown'."""
+    # Replace the module logger outright: capture_logs() misses a logger cached by an earlier test.
+    logger = structlog.testing.CapturingLogger()
+    monkeypatch.setattr(rp, "log", logger)
+    sess, _ = _session(monkeypatch, _ca_routes())
+    rp.build_report(sess, CA_CRITERIA.with_overrides(cas=["EMSIGN", "SSL.COM"]), now=NOW)
+    warnings = {c.args[0]: c.kwargs for c in logger.calls if c.method_name == "warning"}
+    unmapped = warnings["Orders with a product code the catalog does not list; their CA is unknown"]
+    assert (unmapped["orders"], unmapped["product_codes"]) == (1, "999")
+    assert warnings["Requested CA not named by the product catalog; it matches nothing"]["cas"] == "SSL.COM"
+
+    logger.calls.clear()
+    rp.build_report(sess, CRITERIA, now=NOW)  # ca signal off: nothing to warn about
+    assert not [c for c in logger.calls if c.method_name == "warning"]
+
+
+def test_issued_since_filters_on_order_date(monkeypatch: pytest.MonkeyPatch) -> None:
+    """issued_since keeps orders placed on or after it (naive = UTC) and drops undated ones."""
+    routes = _ca_routes()
+    routes[f"{_API}/reports/orders"]["content"].append(_order_row(5, orderDate=None))
+    sess, _ = _session(monkeypatch, routes)
+    report = rp.build_report(sess, CA_CRITERIA, now=NOW, issued_since=dt.datetime(2026, 10, 20))
+    assert [r.facts.order_number for r in report.rows] == ["ORDER-00004"]
+    aware = rp.build_report(sess, CA_CRITERIA, now=NOW, issued_since=dt.datetime(2026, 10, 1, tzinfo=dt.timezone.utc))
+    assert len(aware.rows) == 3
+
+
+# ---------------------------------------------------------------------------
 # Inspection cache
 # ---------------------------------------------------------------------------
 
@@ -829,9 +1163,11 @@ def test_expired_entries_are_refetched_and_pruned(monkeypatch: pytest.MonkeyPatc
     rp.build_report(sess, CRITERIA, inspect=True, now=NOW, cache=rp.InspectionCache(tmp_path, clock=lambda: t0))
     assert len(_entries(tmp_path)) == 2
 
-    old = rp.InspectionCache(tmp_path, clock=lambda: t0 + dt.timedelta(days=8))
+    assert DEFAULT_MAX_AGE == dt.timedelta(days=30)  # ADR 0021
+    day = dt.timedelta(days=1)
+    old = rp.InspectionCache(tmp_path, clock=lambda: t0 + DEFAULT_MAX_AGE + day)
     assert old.get("ORDER-00001", "SERIAL-1") is None
-    fresh = rp.InspectionCache(tmp_path, clock=lambda: t0 + dt.timedelta(days=6))
+    fresh = rp.InspectionCache(tmp_path, clock=lambda: t0 + DEFAULT_MAX_AGE - day)
     assert fresh.get("ORDER-00001", "SERIAL-1") is not None
     assert old.prune() == 2
     assert _entries(tmp_path) == []
@@ -1015,13 +1351,14 @@ def run_cli(
 def test_cli_json(run_cli: Callable[..., tuple[int, str, str]]) -> None:
     """--json carries criteria, summary and certificate rows; stdout is pure JSON."""
     code, out, _ = run_cli(
-        ["--json", "--all", "--group-by", "originator"], config=f'[replacement]\nissuers = ["{BAD_INT}"]\n'
+        ["--json", "--all", "--group-by", "originator"], config=G3_CONFIG
     )
     assert code == 0
     doc = json.loads(out)
     assert doc["summary"]["needs_replacing"] == 1
     assert doc["criteria"]["issuers"] == [BAD_INT]
-    assert doc["criteria"]["chain_cas"] == list(rp.DEFAULT_CHAIN_CAS)
+    assert doc["criteria"]["chain_cas"] == []
+    assert doc["criteria"]["cas"] == []
     assert [c["order_number"] for c in doc["certificates"]] == ["ORDER-00001", "ORDER-00002"]
     assert doc["certificates"][0]["days_left"] == (dt.datetime(2027, 1, 1, tzinfo=dt.timezone.utc) - NOW).days
     assert {b["originator"] for b in doc["breakdown"]} == {"CERTInext", "ACME"}
@@ -1029,17 +1366,29 @@ def test_cli_json(run_cli: Callable[..., tuple[int, str, str]]) -> None:
 
 def test_cli_table_uses_configured_criteria(run_cli: Callable[..., tuple[int, str, str]]) -> None:
     """The [replacement] table drives classification; the summary line follows the table."""
-    code, out, _ = run_cli([], config=f'[replacement]\nissuers = ["{BAD_INT}"]\n')
+    code, out, _ = run_cli([], config=G3_CONFIG + 'key_types = ["EC"]\n')
     assert code == 0
     assert "ORDER-00001" in out and "ORDER-00002" not in out
     assert "1 of 2 valid certificates need replacing; 0 conflicts to review" in out
     assert "not inspected; use --inspect" in out
 
 
+def test_cli_default_run_classifies_by_ca(run_cli: Callable[..., tuple[int, str, str]]) -> None:
+    """With no config, the CA signal decides, and no --inspect hint is shown (the CA needs none)."""
+    code, out, _ = run_cli(["--json"], routes=_ca_routes())
+    assert code == 0
+    doc = json.loads(out)
+    assert doc["criteria"]["cas"] == ["EMSIGN"]
+    assert {c["order_number"]: c["ca"] for c in doc["certificates"]} == {"ORDER-00001": "EMSIGN", "ORDER-00004": None}
+
+    code, out, _ = run_cli([], routes=_ca_routes())
+    assert "not inspected" not in out
+
+
 def test_cli_flag_overrides_config(run_cli: Callable[..., tuple[int, str, str]]) -> None:
     """--issuer replaces the configured issuer list for one run."""
     code, out, _ = run_cli(
-        ["--issuer", GOOD_INT, "--json"], config=f'[replacement]\nissuers = ["{BAD_INT}"]\n'
+        ["--issuer", GOOD_INT, "--json"], config=G3_CONFIG
     )
     assert code == 0
     assert [c["order_number"] for c in json.loads(out)["certificates"]] == ["ORDER-00002"]
@@ -1047,7 +1396,9 @@ def test_cli_flag_overrides_config(run_cli: Callable[..., tuple[int, str, str]])
 
 def test_cli_csv_with_inspection(run_cli: Callable[..., tuple[int, str, str]]) -> None:
     """--csv writes parseable rows to stdout and the summary to stderr."""
-    code, out, err = run_cli(["--csv", "--inspect", "--all", "--issuer", BAD_INT, "--chain-ca", BAD_ROOT])
+    code, out, err = run_cli(
+        ["--csv", "--inspect", "--all", "--issuer", BAD_INT, "--chain-ca", BAD_ROOT], config=NO_CA_CONFIG
+    )
     assert code == 0
     rows = list(csv.DictReader(io.StringIO(out)))
     assert [r["verdict"] for r in rows] == ["replace", "ok"]
@@ -1105,7 +1456,7 @@ def test_cli_output_writes_file(
 ) -> None:
     """--output puts the data in a UTF-8 file, leaves stdout empty, and shows the summary on stderr."""
     target = tmp_path / "report.out"
-    code, out, err = run_cli([*fmt, "--output", str(target)], config=f'[replacement]\nissuers = ["{BAD_INT}"]\n')
+    code, out, err = run_cli([*fmt, "--output", str(target)], config=G3_CONFIG)
     assert code == 0
     assert out == ""
     assert check(target.read_text(encoding="utf-8"))
@@ -1122,7 +1473,7 @@ def test_cli_output_unopenable_falls_back_to_stdout(
 
     monkeypatch.setattr("certinext.cli.replacement_report.open", locked, raising=False)
     code, out, _ = run_cli(
-        ["--json", "-o", str(tmp_path / "report.json")], config=f'[replacement]\nissuers = ["{BAD_INT}"]\n'
+        ["--json", "-o", str(tmp_path / "report.json")], config=G3_CONFIG
     )
     assert code == 1
     assert json.loads(out)["summary"]["needs_replacing"] == 1
@@ -1143,13 +1494,18 @@ def test_cli_help_mentions_json(capsys: pytest.CaptureFixture[str], monkeypatch:
         (["--output", "no-such-dir/report.json"], None),
         (["--inspect", "--workers", "0"], None),
         (["--inspect", "--workers", "17"], None),
-        (["--disable-signal", "issuer", "--disable-signal", "key", "--disable-signal", "chain"], None),
+        (["--disable-signal", "issuer", "--disable-signal", "key", "--disable-signal", "chain"], NO_CA_CONFIG),
         (["--key-type", "ECDSA"], None),
         ([], '[replacement]\nkey_types = "EC"\n'),
         (["--cache"], None),
         (["--refresh-cache"], None),
         (["--inspect", "--no-cache", "--refresh-cache"], None),
         (["--inspect", "--no-cache", "--cache-dir", "cache"], None),
+        (["--inspect", "--no-cache", "--cache-max-age", "3"], None),
+        (["--cache-max-age", "3"], None),
+        (["--inspect", "--cache-max-age", "0"], None),
+        (["--disable-signal", "ca"], None),
+        (["--issued-since", "11/16/2026"], None),
     ],
 )
 def test_cli_usage_and_config_errors_exit_2(
@@ -1157,7 +1513,8 @@ def test_cli_usage_and_config_errors_exit_2(
 ) -> None:
     """Conflicting outputs, a bad --output path, no enabled signal, bad flags and a bad config all exit 2.
 
-    Also cache flags without --inspect, and --no-cache combined with a flag that implies --cache.
+    Also cache flags without --inspect, --no-cache combined with a flag that implies --cache,
+    a zero --cache-max-age, and a non-ISO --issued-since.
     """
     code, _, _ = run_cli(argv, config=config)
     assert code == 2
@@ -1221,7 +1578,7 @@ def test_cli_cache_dir_and_summary(run_cli: Callable[..., tuple[int, str, str]],
     assert len(_entries(target / "production")) == 2
     code, out, _ = run_cli(["--inspect", "--all", "--cache-dir", str(target)])
     assert code == 0
-    assert "2 of 2 inspections from cache (up to 7 days old)" in out
+    assert "2 of 2 inspections from cache (up to 30 days old)" in out
 
     code, out, _ = run_cli(["--json", "--inspect", "--refresh-cache", "--cache-dir", str(target)])
     cache = json.loads(out)["cache"]
@@ -1254,3 +1611,189 @@ def test_cli_cache_dir_that_is_a_file_exits_2(run_cli: Callable[..., tuple[int, 
     blocker.write_text("x", encoding="utf-8")
     code, _, _ = run_cli(["--inspect", "--cache-dir", str(blocker)])
     assert code == 2
+
+
+# ---------------------------------------------------------------------------
+# CLI: CA migration (ADR 0021)
+# ---------------------------------------------------------------------------
+
+
+def _migration_routes(*, replaced: bool = True) -> dict[str, Any]:
+    """Build routes for the emSign -> SSL.com CLI tests.
+
+    Order 1 is emSign (``host1``), order 2 is SSL.com (``host2``), and, when
+    ``replaced``, order 5 is a newer SSL.com certificate for ``host1``.
+
+    Args:
+        replaced: Whether to add the SSL.com replacement for order 1.
+
+    Returns:
+        Path -> payload routes.
+    """
+    routes = _routes()
+    rows = routes[f"{_API}/reports/orders"]["content"]
+    rows[1]["productCode"] = SSLCOM_CODE
+    if replaced:
+        rows.append(_order_row(
+            5, domainName="host1.example.edu", productCode=SSLCOM_CODE, issuerCA=GOOD_INT,
+            orderDate="2026-10-15T00:00:00", certificateExpiryDate="2027-04-01T00:00:00",
+        ))
+        routes[f"{_API}/ssl-certificates/ORDER-00005"] = {"orderId": "ORDER-00005", "status": "issued"}
+        routes[f"{_API}/ssl-certificates/ORDER-00005/certificate"] = _download(
+            rsa.generate_private_key(65537, 2048), bad=False, sans=["host1.example.edu"]
+        )
+    return routes
+
+
+def test_cli_table_shows_ca_and_possible_replacement(run_cli: Callable[..., tuple[int, str, str]]) -> None:
+    """Uninspected, a same-CN SSL.com cert is 'maybe:<order>' and the row still counts as outstanding."""
+    code, out, _ = run_cli([], routes=_migration_routes())
+    assert code == 0
+    assert "EMSIGN" in out and "maybe:ORDER-00005" in out
+    assert out.strip().splitlines()[-1] == (
+        "1 EMSIGN certificates outstanding (1 possibly replaced; confirm with --inspect); "
+        "0 replaced; 1 of 3 valid certificates need replacing"
+    )
+
+
+def test_cli_inspected_json_and_csv_carry_replacement(run_cli: Callable[..., tuple[int, str, str]]) -> None:
+    """With SANs known the replacement is confirmed, in JSON, CSV and the table."""
+    code, out, _ = run_cli(["--json", "--inspect", "--all"], routes=_migration_routes())
+    assert code == 0
+    doc = json.loads(out)
+    by_order = {c["order_number"]: c for c in doc["certificates"]}
+    old = by_order["ORDER-00001"]
+    assert (old["ca"], old["replaced_by"], old["replaced_by_ca"], old["outstanding"]) == (
+        "EMSIGN", "ORDER-00005", "SSLCOM", False,
+    )
+    assert (doc["summary"]["outstanding"], doc["summary"]["replaced"]) == (0, 1)
+
+    code, out, _ = run_cli(["--csv", "--inspect"], routes=_migration_routes())
+    row = next(csv.DictReader(io.StringIO(out)))
+    assert (row["ca"], row["replaced_by"], row["replaced_by_ca"], row["possibly_replaced_by"]) == (
+        "EMSIGN", "ORDER-00005", "SSLCOM", "",
+    )
+
+    code, out, _ = run_cli(["--inspect"], routes=_migration_routes())
+    assert "ORDER-00005" in out and "maybe:" not in out
+    assert "0 EMSIGN certificates outstanding; 1 replaced; 1 of 3" in out
+
+
+def test_cli_outstanding_lists_only_work_left(run_cli: Callable[..., tuple[int, str, str]]) -> None:
+    """--outstanding drops confirmed replacements (and ignores --all); CN-only matches stay listed."""
+    code, out, _ = run_cli(["--outstanding", "--all", "--inspect"], routes=_migration_routes())
+    assert code == 0
+    assert "(no certificates match)" in out
+
+    code, out, _ = run_cli(["--outstanding", "--all"], routes=_migration_routes())
+    assert code == 0
+    assert "ORDER-00001" in out and "maybe:ORDER-00005" in out
+
+    code, out, _ = run_cli(["--outstanding", "--json"], routes=_migration_routes(replaced=False))
+    doc = json.loads(out)
+    assert [c["order_number"] for c in doc["certificates"]] == ["ORDER-00001"]
+    assert doc["summary"]["outstanding"] == 1
+
+
+def test_cli_superseded_emsign_is_counted_separately(run_cli: Callable[..., tuple[int, str, str]]) -> None:
+    """An emSign cert renewed as emSign is neither outstanding nor replaced; the summary says so."""
+    routes = _migration_routes(replaced=False)
+    routes[f"{_API}/reports/orders"]["content"].append(_order_row(
+        6, domainName="host1.example.edu", orderDate="2026-10-15T00:00:00",
+        certificateExpiryDate="2027-04-01T00:00:00",
+    ))
+    routes[f"{_API}/ssl-certificates/ORDER-00006"] = {"orderId": "ORDER-00006", "status": "issued"}
+    routes[f"{_API}/ssl-certificates/ORDER-00006/certificate"] = _download(
+        rsa.generate_private_key(65537, 2048), bad=False, sans=["host1.example.edu"]
+    )
+    code, out, _ = run_cli(["--inspect"], routes=routes)
+    assert code == 0
+    assert (
+        "1 EMSIGN certificates outstanding; 0 replaced; "
+        "1 superseded by newer certificates that also need replacing; 2 of 3"
+    ) in out
+
+
+def test_cli_ca_flag_replaces_config(run_cli: Callable[..., tuple[int, str, str]]) -> None:
+    """--ca (any case) replaces the CA list: here SSL.com certs are the ones flagged."""
+    code, out, _ = run_cli(["--ca", "sslcom", "--json"], routes=_migration_routes())
+    assert code == 0
+    doc = json.loads(out)
+    assert doc["criteria"]["cas"] == ["SSLCOM"]
+    assert sorted(c["order_number"] for c in doc["certificates"]) == ["ORDER-00002", "ORDER-00005"]
+
+
+def test_cli_issued_since_and_group_by_ca(run_cli: Callable[..., tuple[int, str, str]]) -> None:
+    """--issued-since keeps orders placed on or after the date; --group-by ca counts per CA."""
+    code, out, _ = run_cli(
+        ["--issued-since", "2026-10-15", "--all", "--json"], routes=_migration_routes()
+    )
+    assert code == 0
+    assert [c["order_number"] for c in json.loads(out)["certificates"]] == ["ORDER-00005"]
+
+    code, out, _ = run_cli(["--all", "--group-by", "ca", "--json"], routes=_migration_routes())
+    by_ca = {b["ca"]: b for b in json.loads(out)["breakdown"]}
+    assert (by_ca["EMSIGN"]["valid"], by_ca["SSLCOM"]["ok"]) == (1, 2)
+
+
+def _backdate(directory: Path, days: int) -> None:
+    """Make every cache entry under ``directory`` look ``days`` days old.
+
+    Args:
+        directory: A cache environment directory.
+        days: How old to make the entries.
+    """
+    when = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=days)).isoformat()
+    for path in _entries(directory):
+        data = json.loads(path.read_text(encoding="utf-8"))
+        data["fetched_at"] = when
+        path.write_text(json.dumps(data), encoding="utf-8")
+
+
+def test_cli_cache_default_is_30_days_and_max_age_overrides(
+    run_cli: Callable[..., tuple[int, str, str]], tmp_path: Path
+) -> None:
+    """A 20-day-old entry is a hit by default; --cache-max-age 3 makes it a miss and prunes it."""
+    target = tmp_path / "c"
+    run_cli(["--inspect", "--cache-dir", str(target)])
+    _backdate(target / "production", 20)
+
+    code, out, _ = run_cli(["--json", "--inspect", "--cache-dir", str(target)])
+    cache = json.loads(out)["cache"]
+    assert (cache["hits"], cache["max_age_days"]) == (2, 30)
+
+    _backdate(target / "production", 20)
+    code, out, _ = run_cli(["--inspect", "--all", "--cache-dir", str(target), "--cache-max-age", "3"])
+    assert code == 0
+    assert "0 of 2 inspections from cache (up to 3 days old)" in out
+    code, out, _ = run_cli(["--json", "--inspect", "--cache-dir", str(target), "--cache-max-age", "3"])
+    assert json.loads(out)["cache"]["max_age_days"] == 3
+
+
+def test_cli_cache_max_age_implies_cache(
+    run_cli: Callable[..., tuple[int, str, str]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """--cache-max-age alone turns the cache on without asking."""
+    monkeypatch.setattr("sys.stdin", _Tty(""))
+    code, out, err = run_cli(["--json", "--inspect", "--cache-max-age", "10"])
+    assert code == 0 and "[y/N]" not in err
+    assert json.loads(out)["cache"]["max_age_days"] == 10
+
+
+@pytest.mark.parametrize(
+    ("argv", "config", "warned"),
+    [
+        (["--chain-ca", BAD_ROOT], NO_CA_CONFIG, True),
+        (["--chain-ca", BAD_ROOT, "--cache-max-age", "7"], NO_CA_CONFIG, False),
+        (["--chain-ca", BAD_ROOT, "--disable-signal", "chain", "--issuer", BAD_INT], NO_CA_CONFIG, False),
+        ([], None, False),
+    ],
+)
+def test_cli_warns_when_chain_signal_meets_a_long_cache(
+    run_cli: Callable[..., tuple[int, str, str]], argv: list[str], config: str | None, warned: bool
+) -> None:
+    """Only the chain signal can go stale in the cache, so only it (past 7 days) warns."""
+    code, out, err = run_cli(["--inspect", "--cache", *argv], config=config)
+    assert code == 0
+    assert ("chain signal is on" in err) is warned
+    assert "chain signal is on" not in out
