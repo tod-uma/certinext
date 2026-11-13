@@ -355,6 +355,34 @@ re-derived at that commit. The review reported no Risk or Style findings.
 chooses only the listed rows; the summary/breakdown cover `population(latest_only, expiring_within)` and say so
 ("counts cover only certificates …", JSON `summary_scope`). `01beeec`.
 
+### External review (Codex, #40 fix) — processed 2026-11-13
+
+Reviewed `8d12792` (the #40 branch, 1.4.0rc10). Reviewer: self-reported "GPT-6 (release version unknown)", in the Codex
+VS Code extension (Tod confirmed; the model said "Codex API"), 2026-11-13. The files are in gitignored `.review/` (`REVIEW-BRIEF-codex-issue40.md`, `REVIEW-codex-issue40.md`). The
+review reported no Bug or Style findings. Both Risk findings were re-derived at that commit.
+
+1. **A scoped owner can see 0 outstanding while the work sits outside the scope** (Risk 1, real). An in-scope
+   emSign row renewed by a newer out-of-scope emSign cert is `renewed`, not outstanding, and its renewer is not
+   listed. Across scopes the work is still counted once. One supporting claim is **wrong**: "with `--issued-since`
+   excluding the successor, the same handoff can occur within one originator". A successor is newer, so its order
+   date is at or after the listed row's, which is at or after the cutoff, so it is always in scope. Tod chose
+   docs + a `renewed_by` field (newest confirmed renewer; JSON/CSV `renewed_by`, table `renewed:<order>`), not a
+   change of ownership semantics. README, `--originator`/`--group` help and the `build_report` docstring now
+   describe the handoff.
+2. **No regression tests for the renewal handoff or the boundaries** (Risk 2, real as test gaps). Added: a
+   cross-scope renewal counted once (library: portal + ACME + unscoped), a CLI scoped run (`renewed:` + cache
+   label), `--issued-since` at the exact boundary with an undated and an older same-CN out-of-scope cert (both
+   modes), `_possible_coverers` with equal recency, later expiry, undated and SAN-not-CN cases, and `renewed_by`
+   newest-wins/reset. Its aside that "a mutation that inspects every out-of-scope row" could evade the tests is
+   **wrong**: `ORDER-00002` is out of scope in that test and must never be fetched, and `totals == [1, 2]` pins the
+   count.
+
+From the review's checks, also done: the `inspect` docstring no longer says "every certificate", and the cache
+label now counts out-of-scope inspections. `CacheStats.coverers` (JSON `cache.coverers`) is additive, and the
+summary appends "N of them out-of-scope possible replacements". That label was a known item before the review.
+The pre-inspection rule stays CN-based. The review agrees that no complete rule exists without inspecting every
+newer candidate, and that a cache-dependent rule is out.
+
 ## Verification
 
 > **Prod load (Tod, 2026-11-12):** CertiNext is having load issues. **Every `--inspect` run passes `--cache`**
