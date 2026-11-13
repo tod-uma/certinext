@@ -258,6 +258,7 @@ def _table_row(row: rp.ReportRow, report: rp.ReplacementReport, show_errors: boo
         "group": f.group_name or f.group_number,
         "superseded": "yes" if row.superseded else "maybe" if row.possibly_superseded else "",
         "replaced_by": row.replaced_by
+        or (f"renewed:{row.renewed_by}" if row.renewed_by else "")
         or (f"maybe:{row.possibly_replaced_by}" if row.possibly_replaced_by else ""),
     })
     if report.inspected:
@@ -333,9 +334,10 @@ def _summary_line(
         parts.append(f"{summary['incomplete']} issued orders could not be classified")
     if report.cache:
         c = report.cache
+        coverers = f"; {c.coverers} of them out-of-scope possible replacements" if c.coverers else ""
         parts.append(
             f"{c.hits} of {c.hits + c.misses} inspections from cache "
-            f"(up to {c.max_age.days} days old{'; refreshed' if c.refreshed else ''})"
+            f"(up to {c.max_age.days} days old{'; refreshed' if c.refreshed else ''}{coverers})"
         )
     if scope:
         parts.append(f"counts cover only certificates {' and '.join(scope)}")
@@ -467,14 +469,15 @@ def replacement_report(
         None, "--originator", metavar="NAME",
         help=(
             "Only orders from this originator (ACME, CERTInext, 'CERTInext API'); repeatable. "
-            "A replacement placed by another originator is not seen, so its predecessor stays outstanding"
+            "Replacements and renewals under other originators still count: a row renewed "
+            "outside the filter shows replaced_by 'renewed:<order>' and is not outstanding here"
         ),
     ),
     group: Optional[list[str]] = typer.Option(
         None, "--group", metavar="GROUP",
         help=(
-            "Only orders in this account group, by number or name; repeatable. "
-            "A replacement placed in another group is not seen, so its predecessor stays outstanding"
+            "Only orders in this account group, by number or name; repeatable. As with "
+            "--originator, replacements and renewals in other groups still count"
         ),
     ),
     expiring_within: Optional[int] = typer.Option(

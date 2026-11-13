@@ -98,7 +98,7 @@ wheels = [
 
 [[package]]
 name = "certinext"
-version = "1.4.0rc9"
+version = "1.4.0rc10"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },

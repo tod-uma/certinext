@@ -107,9 +107,12 @@ Chosen: **1a, 2a, 3a, 4a, 5a, 6a.**
   changelog lists all of it, not only the criteria change.
 - Bad: the report now needs the product catalog when `ca` is active, one more
   endpoint that can fail it.
-- Bad: `--originator`/`--group` hide replacements placed outside the filter, so
-  their predecessors stay outstanding (over-count only). Documented in the help;
-  a fix is tracked in certinext #40.
+- Bad (fixed in 1.4.0rc10, certinext #40): `--originator`/`--group` hid
+  replacements placed outside the filter, so their predecessors stayed
+  outstanding (over-count only; 13 of 100 portal rows in production on
+  2026-11-13). The filters now choose listed rows after matching; under
+  `--inspect`, an out-of-scope certificate is inspected only if it is newer
+  than a listed certificate that carries its common name.
 - Bad: with the 30-day bound, a re-rooted chain can be shown stale for up to 30
   days if someone turns the chain signal back on. The warning names
   `--refresh-cache`. A short `--cache-max-age` also prunes entries a later run

@@ -74,16 +74,18 @@
 │ --originator                         NAME                          Only orders from this         │
 │                                                                    originator (ACME, CERTInext,  │
 │                                                                    'CERTInext API'); repeatable. │
-│                                                                    A replacement placed by       │
-│                                                                    another originator is not     │
-│                                                                    seen, so its predecessor      │
-│                                                                    stays outstanding             │
+│                                                                    Replacements and renewals     │
+│                                                                    under other originators still │
+│                                                                    count: a row renewed outside  │
+│                                                                    the filter shows replaced_by  │
+│                                                                    'renewed:<order>' and is not  │
+│                                                                    outstanding here              │
 │ --group                              GROUP                         Only orders in this account   │
 │                                                                    group, by number or name;     │
-│                                                                    repeatable. A replacement     │
-│                                                                    placed in another group is    │
-│                                                                    not seen, so its predecessor  │
-│                                                                    stays outstanding             │
+│                                                                    repeatable. As with           │
+│                                                                    --originator, replacements    │
+│                                                                    and renewals in other groups  │
+│                                                                    still count                   │
 │ --expiring-within                    DAYS [x>=1]                   Only certificates expiring    │
 │                                                                    within DAYS days              │
 │ --group-by                           [originator|group|issuer|ca]  Also print counts per         │

@@ -1001,9 +1001,25 @@ when the inspection of either certificate failed, a same-CN match is only
 `maybe` superseded (or replaced): it never clears a row. `--latest-only` and
 `--outstanding` keep those rows and print a warning on stderr.
 
-`--originator` and `--group` filter before replacements are matched, so a
-replacement placed by another originator or in another group isn't seen and
-its predecessor stays outstanding. Run unfiltered for the true count.
+`--originator`, `--group` and `--issued-since` choose which certificates are
+listed, not which ones count as replacements: an emSign certificate ordered
+through ACME and replaced through the portal shows as replaced under
+`--originator ACME` too. With `--inspect`, an out-of-scope certificate is
+downloaded only if it is newer than a listed certificate that carries its
+common name, so the extra downloads stay few (and go through `--cache`). A
+replacement whose common name is not on the listed certificate is still
+missed, and its predecessor stays outstanding: an over-count, never an
+under-count.
+
+The same goes for renewals, and there the work **moves out of the filtered
+report**. If a portal emSign certificate is renewed through ACME, still on
+emSign, then under `--originator CERTInext` it shows as `renewed:<order>` in
+`replaced_by` and is *not* outstanding, and the ACME certificate that now
+carries the work is outstanding only under `--originator ACME`. Across
+reports that split the whole population, each certificate's work is counted
+exactly once, never twice. A scoped `0 outstanding` therefore means "nothing
+left *in this scope*", not "nothing left for these names". Run unfiltered, or
+follow the `renewed:` orders, before treating a scope as done.
 
 The `origin` column is CertiNext's own `originator`: `ACME`, `CERTInext` (portal),
 or `CERTInext API`. `--group-by group` counts certificates per account group, which
@@ -1108,6 +1124,9 @@ opt-in:
   run warns; `--refresh-cache` or `--no-cache` gives a live answer.
 - The summary line says how many inspections came from the cache, and
   `--json` has a `cache` block (`hits`, `misses`, `max_age_days`, `dir`, ...).
+  With `--originator`, `--group` or `--issued-since`, inspections include the
+  out-of-scope possible replacements, so `hits + misses` can exceed the listed
+  rows; `coverers` (and the summary line) says how many of them there are.
 - `--refresh-cache` ignores what is there, downloads everything, and saves it.
 
 Before 1.4.0rc7 the bound was 7 days. Existing entries become usable for longer
@@ -1124,7 +1143,7 @@ subdirectories. Delete the directory to clear it.
 
 The table has `verdict`, `ca`, `common_name`, `issuer`, `valid_to`, `days`,
 `order`, `origin`, `group`, `superseded` (`yes`/`maybe`) and `replaced_by`
-(an order number, or `maybe:<order>`) columns; `--inspect` adds `sans`, `key`
+(an order number, `renewed:<order>`, or `maybe:<order>`) columns; `--inspect` adds `sans`, `key`
 and `ordered_by`. It is sorted by expiry, soonest first, and ends with a summary
 that leads with the work left, such as:
 
@@ -1146,7 +1165,7 @@ expiring within 30 days`; the JSON `summary_scope` records the same. Before
 
 `--json` and `--csv` rows carry every field, including `ca`, `product_code`,
 `replaced_by`, `replaced_by_ca`, `possibly_replaced_by`, `superseded`,
-`possibly_superseded`, `renewed` and `outstanding`. The JSON `summary` has
+`possibly_superseded`, `renewed`, `renewed_by` and `outstanding`. The JSON `summary` has
 `outstanding`, `replaced` and `possibly_replaced` (a subset of `outstanding`)
 alongside the verdict counts.
 
