@@ -465,17 +465,11 @@ def replacement_report(
     ),
     originator: Optional[list[str]] = typer.Option(
         None, "--originator", metavar="NAME",
-        help=(
-            "Only orders from this originator (ACME, CERTInext, 'CERTInext API'); repeatable. "
-            "A replacement placed by another originator is not seen, so its predecessor stays outstanding"
-        ),
+        help="Only orders from this originator (ACME, CERTInext, 'CERTInext API'); repeatable",
     ),
     group: Optional[list[str]] = typer.Option(
         None, "--group", metavar="GROUP",
-        help=(
-            "Only orders in this account group, by number or name; repeatable. "
-            "A replacement placed in another group is not seen, so its predecessor stays outstanding"
-        ),
+        help="Only orders in this account group, by number or name; repeatable",
     ),
     expiring_within: Optional[int] = typer.Option(
         None, "--expiring-within", metavar="DAYS", min=1,

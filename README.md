@@ -1001,9 +1001,15 @@ when the inspection of either certificate failed, a same-CN match is only
 `maybe` superseded (or replaced): it never clears a row. `--latest-only` and
 `--outstanding` keep those rows and print a warning on stderr.
 
-`--originator` and `--group` filter before replacements are matched, so a
-replacement placed by another originator or in another group isn't seen and
-its predecessor stays outstanding. Run unfiltered for the true count.
+`--originator`, `--group` and `--issued-since` choose which certificates are
+listed, not which ones count as replacements: an emSign certificate ordered
+through ACME and replaced through the portal shows as replaced under
+`--originator ACME` too. With `--inspect`, an out-of-scope certificate is
+downloaded only if it is newer than a listed certificate that carries its
+common name, so the extra downloads stay few (and go through `--cache`). A
+replacement whose common name is not on the listed certificate is still
+missed, and its predecessor stays outstanding: an over-count, never an
+under-count.
 
 The `origin` column is CertiNext's own `originator`: `ACME`, `CERTInext` (portal),
 or `CERTInext API`. `--group-by group` counts certificates per account group, which

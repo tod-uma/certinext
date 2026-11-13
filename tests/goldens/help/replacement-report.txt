@@ -73,17 +73,10 @@
 │                                                                    after DATE (YYYY-MM-DD, UTC)  │
 │ --originator                         NAME                          Only orders from this         │
 │                                                                    originator (ACME, CERTInext,  │
-│                                                                    'CERTInext API'); repeatable. │
-│                                                                    A replacement placed by       │
-│                                                                    another originator is not     │
-│                                                                    seen, so its predecessor      │
-│                                                                    stays outstanding             │
+│                                                                    'CERTInext API'); repeatable  │
 │ --group                              GROUP                         Only orders in this account   │
 │                                                                    group, by number or name;     │
-│                                                                    repeatable. A replacement     │
-│                                                                    placed in another group is    │
-│                                                                    not seen, so its predecessor  │
-│                                                                    stays outstanding             │
+│                                                                    repeatable                    │
 │ --expiring-within                    DAYS [x>=1]                   Only certificates expiring    │
 │                                                                    within DAYS days              │
 │ --group-by                           [originator|group|issuer|ca]  Also print counts per         │

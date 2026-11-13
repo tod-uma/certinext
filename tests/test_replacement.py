@@ -1109,6 +1109,76 @@ def test_issued_since_filters_on_order_date(monkeypatch: pytest.MonkeyPatch) -> 
     assert len(aware.rows) == 3
 
 
+def _cross_scope_routes() -> dict[str, Any]:
+    """Build #40's case: emSign order 1 (portal, G-1) replaced by SSL.com order 5 (ACME, G-2).
+
+    Order 2 (ACME, G-2, ``host2``) is out of scope for a portal report and
+    covers nothing in it.
+
+    Returns:
+        Path -> payload routes.
+    """
+    routes = _migration_routes()
+    order5 = routes[f"{_API}/reports/orders"]["content"][-1]
+    order5.update(originator="ACME", groupNumber="G-2")
+    return routes
+
+
+@pytest.mark.parametrize("scope", [{"originators": ["CERTInext"]}, {"groups": ["portal"]}])
+def test_scoped_report_sees_replacement_outside_scope_uninspected(
+    monkeypatch: pytest.MonkeyPatch, scope: dict[str, list[str]]
+) -> None:
+    """#40: an out-of-scope SSL.com cert with the same CN still counts, as a possible replacement."""
+    sess, api = _session(monkeypatch, _cross_scope_routes())
+    report = rp.build_report(sess, CA_CRITERIA, now=NOW, **scope)  # type: ignore[arg-type]
+    assert [r.facts.order_number for r in report.rows] == ["ORDER-00001"]
+    assert report.rows[0].possibly_replaced_by == "ORDER-00005"
+    assert not any("ssl-certificates" in c for c in api.calls)
+
+
+@pytest.mark.parametrize("scope", [{"originators": ["CERTInext"]}, {"groups": ["portal"]}])
+def test_scoped_report_sees_replacement_outside_scope_inspected(
+    monkeypatch: pytest.MonkeyPatch, scope: dict[str, list[str]]
+) -> None:
+    """#40: inspection confirms the out-of-scope replacement and downloads nothing unrelated."""
+    sess, api = _session(monkeypatch, _cross_scope_routes())
+    totals: list[int] = []
+    seen: list[str] = []
+    report = rp.build_report(
+        sess, CA_CRITERIA, inspect=True, now=NOW, on_total=totals.append,
+        on_progress=lambda f: seen.append(f.order_number), **scope,  # type: ignore[arg-type]
+    )
+    [row] = report.rows
+    assert (row.facts.order_number, row.replaced_by, row.replaced_by_ca, row.outstanding) == (
+        "ORDER-00001", "ORDER-00005", "SSLCOM", False,
+    )
+    counts = rp.ReplacementReport.summarize(report.rows)
+    assert (counts["outstanding"], counts["replaced"]) == (0, 1)
+    assert totals == [1, 2] and seen == ["ORDER-00001", "ORDER-00005"]
+    assert not any("ORDER-00002" in c for c in api.calls)
+
+
+def test_out_of_scope_rows_never_listed_or_counted_as_incomplete(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Out-of-scope certs only feed matching: not listed, and an incomplete one is not reported."""
+    routes = _cross_scope_routes()
+    routes[f"{_API}/reports/orders"]["content"].append(
+        _order_row(6, originator="ACME", certificateExpiryDate=None)
+    )
+    sess, _ = _session(monkeypatch, routes)
+    report = rp.build_report(sess, CA_CRITERIA, now=NOW, originators=["CERTInext"])
+    assert [r.facts.order_number for r in report.rows] == ["ORDER-00001"]
+    assert report.incomplete == []
+
+
+def test_possible_coverers_needs_a_shared_name_and_newer_order() -> None:
+    """Only a newer out-of-scope cert sharing a name with an in-scope one is worth inspecting."""
+    scoped = [_facts(order_number="IN", common_name="a.example.edu", order_date=NOW - dt.timedelta(days=10))]
+    newer = _facts(order_number="NEW", common_name="A.example.edu", order_date=NOW - dt.timedelta(days=1))
+    older = _facts(order_number="OLD", common_name="a.example.edu", order_date=NOW - dt.timedelta(days=20))
+    other = _facts(order_number="OTHER", common_name="b.example.edu", order_date=NOW - dt.timedelta(days=1))
+    assert [f.order_number for f in rp._possible_coverers(scoped, [newer, older, other])] == ["NEW"]
+
+
 # ---------------------------------------------------------------------------
 # Inspection cache
 # ---------------------------------------------------------------------------

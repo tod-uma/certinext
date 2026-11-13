@@ -928,6 +928,49 @@ def classify(facts: CertificateFacts, criteria: ReplacementCriteria) -> Classifi
     return Classification(verdict=verdict, matched=matched, evaluated=evaluated, unevaluated=unevaluated)
 
 
+def _newness(facts: CertificateFacts) -> tuple[dt.datetime, dt.datetime]:
+    """Return the key that decides which of two certificates is newer.
+
+    Args:
+        facts: The certificate.
+
+    Returns:
+        ``(order_date, valid_to)``; a missing order date sorts oldest.
+    """
+    return (facts.order_date or dt.datetime.min.replace(tzinfo=dt.timezone.utc), facts.valid_to)
+
+
+def _possible_coverers(scoped: list[CertificateFacts], others: list[CertificateFacts]) -> list[CertificateFacts]:
+    """Pick the out-of-scope certificates worth inspecting as possible coverers.
+
+    A certificate can cover an in-scope one only if it is newer and carries
+    all of its names, so it must carry at least one name of an in-scope
+    certificate that is older than it. Before inspection only an out-of-scope
+    certificate's common name is known, so one whose common name is not on
+    any in-scope certificate is skipped. Such a certificate (a multi-SAN
+    certificate under a different common name) still covers in reality, and
+    the in-scope row then stays outstanding: an over-count, never an
+    under-count.
+
+    Args:
+        scoped: The in-scope certificates, inspected where possible.
+        others: The out-of-scope certificates, not yet inspected.
+
+    Returns:
+        The subset of ``others`` to inspect, in their original order.
+    """
+    oldest: dict[str, tuple[dt.datetime, dt.datetime]] = {}
+    for f in scoped:
+        key = _newness(f)
+        for name in f.names():
+            if name not in oldest or key < oldest[name]:
+                oldest[name] = key
+    return [
+        o for o in others
+        if any(name in oldest and _newness(o) > oldest[name] for name in o.names())
+    ]
+
+
 def mark_superseded(rows: list[ReportRow]) -> None:
     """Flag rows covered by a newer valid certificate, and record replacements.
 
@@ -953,8 +996,7 @@ def mark_superseded(rows: list[ReportRow]) -> None:
         rows: The classified report rows to flag.
     """
     def recency(row: ReportRow) -> tuple[dt.datetime, dt.datetime, str]:
-        f = row.facts
-        return (f.order_date or dt.datetime.min.replace(tzinfo=dt.timezone.utc), f.valid_to, f.order_number)
+        return (*_newness(row.facts), row.facts.order_number)
 
     def passing(candidates: list[ReportRow]) -> list[ReportRow]:
         """Return the candidates that count as a replacement.
@@ -1261,6 +1303,47 @@ def _inspect_into(
         )
 
 
+def _inspect_all(
+    sess: "CertiNextSession",
+    facts: list[CertificateFacts],
+    *,
+    workers: int,
+    backoff: _Backoff,
+    cache: InspectionCache | None,
+    on_progress: Callable[[CertificateFacts], None] | None,
+) -> None:
+    """Inspect every certificate in ``facts`` on a worker pool.
+
+    Args:
+        sess: An authenticated session.
+        facts: The facts to fill in (each mutated).
+        workers: Certificates to inspect at once.
+        backoff: The rate-limit gate shared by all workers.
+        cache: Inspection cache to read from and write to, if any.
+        on_progress: Called after each certificate, from the calling thread.
+
+    Raises:
+        ImportError: If ``cryptography`` is missing.
+        CertiNextAuthError: If no token can be had (see :func:`_inspect_into`).
+    """
+    if not facts:
+        return
+    pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="inspect")
+    try:
+        futures = {pool.submit(_inspect_into, sess, f, backoff, cache): f for f in facts}
+        pending = set(futures)
+        while pending:
+            # A timed wait, so Ctrl+C reaches this thread on Windows too.
+            done, pending = wait(pending, timeout=0.5, return_when=FIRST_COMPLETED)
+            for future in (f for f in futures if f in done):  # submission order, not set order
+                future.result()  # re-raise the fatal cases: ImportError, no token
+                if on_progress:
+                    on_progress(futures[future])
+    finally:
+        # On Ctrl+C or a fatal error, drop the queue instead of waiting for it.
+        pool.shutdown(wait=True, cancel_futures=True)
+
+
 def build_report(
     sess: "CertiNextSession",
     criteria: ReplacementCriteria,
@@ -1292,20 +1375,27 @@ def build_report(
             one download request per certificate).
         originators: Keep only these originators (case-insensitive).
         groups: Keep only these groups, by number or name (case-insensitive).
-            Both filters run before replacements are matched, so a scoped
-            report sees only replacements inside its scope. An emSign
-            certificate replaced under another originator or group stays
-            outstanding: an over-count, never an under-count.
         issued_since: Keep only orders placed at or after this time
             (``order_date >= issued_since``); a naive value is read as UTC.
             Orders with no order date are dropped, since they cannot be
             shown to qualify. Example: the day emSign issuance became
             untrusted, to find certificates broken from day one.
+
+            These three filters choose the rows listed, not the certificates
+            replacements are matched against: a certificate replaced under
+            another originator or group still shows as replaced. Without
+            ``inspect`` every valid certificate takes part in matching. With
+            it, an out-of-scope certificate takes part only if inspected,
+            and it is inspected only if it is newer than an in-scope one
+            sharing one of its names (see :func:`_possible_coverers`).
+            Incomplete rows are listed only when in scope.
         now: Reference time; defaults to the current UTC time.
         on_progress: Called after each certificate is inspected, always from
-            the calling thread. With several workers the order is completion
-            order, not report order.
-        on_total: Called once with the number of certificates to inspect.
+            the calling thread, including out-of-scope coverers. With several
+            workers the order is completion order, not report order.
+        on_total: Called with the number of certificates to inspect: once for
+            the in-scope rows, then again with a larger total if out-of-scope
+            coverers are added.
         sleep: Delay function used for rate-limit backoff.
         workers: Certificates to inspect at once. A 429 pauses them all.
         cache: Reuse downloads up to the cache's max age, and save fresh
@@ -1346,30 +1436,35 @@ def build_report(
 
     records = sess.orders.get_list(status="issued")
     issued_rows = len(records)
-    if originators:
-        wanted = {o.casefold() for o in originators}
-        records = [r for r in records if (r.originator or "").casefold() in wanted]
-    if groups:
-        wanted = {g.casefold() for g in groups}
-        records = [
-            r for r in records
-            if (r.group_number or "").casefold() in wanted
-            or group_names.get(r.group_number or "", "").casefold() in wanted
-        ]
-    if issued_since is not None:
-        records = [r for r in records if r.order_date is not None and r.order_date >= issued_since]
+    wanted_originators = {o.casefold() for o in originators or []}
+    wanted_groups = {g.casefold() for g in groups or []}
 
-    facts: list[CertificateFacts] = []
+    def in_scope(r: "OrderRecord") -> bool:
+        """Return whether the originator, group and issued-since filters keep ``r``."""
+        if wanted_originators and (r.originator or "").casefold() not in wanted_originators:
+            return False
+        if wanted_groups and not (
+            (r.group_number or "").casefold() in wanted_groups
+            or group_names.get(r.group_number or "", "").casefold() in wanted_groups
+        ):
+            return False
+        return issued_since is None or (r.order_date is not None and r.order_date >= issued_since)
+
+    facts: list[CertificateFacts] = []  # in scope: the rows listed
+    others: list[CertificateFacts] = []  # out of scope: possible replacements only
     incomplete: list[IncompleteRecord] = []
     for r in records:
         if r.certificate_expiry_date and r.certificate_expiry_date <= now:
             continue  # expired
+        scoped = in_scope(r)
         missing = [
             label for label, value in
             (("order number", r.order_number), ("certificate expiry date", r.certificate_expiry_date))
             if not value
         ]
         if missing:
+            if not scoped:
+                continue
             reason = f"no {' or '.join(missing)}"
             log.warning(
                 "Issued order could not be classified", order=r.order_number,
@@ -1380,10 +1475,11 @@ def build_report(
                 serial_number=r.certificate_serial_number, reason=reason,
             ))
             continue
-        facts.append(_facts_from_record(r, group_names, ca_map))
+        (facts if scoped else others).append(_facts_from_record(r, group_names, ca_map))
     log.info("Valid certificates found", count=len(facts), incomplete=len(incomplete), issued_rows=issued_rows)
     _warn_ca_gaps(criteria, ca_map, facts)
 
+    matched_against = others  # without inspection, every out-of-scope cert can match by CN
     if inspect:
         if on_total:
             on_total(len(facts))
@@ -1392,27 +1488,24 @@ def build_report(
             pruned = cache.prune()
             if pruned:
                 log.info("Pruned inspection cache", removed=pruned, dir=str(cache.directory))
-        pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="inspect")
-        try:
-            futures = {pool.submit(_inspect_into, sess, f, backoff, cache): f for f in facts}
-            pending = set(futures)
-            while pending:
-                # A timed wait, so Ctrl+C reaches this thread on Windows too.
-                done, pending = wait(pending, timeout=0.5, return_when=FIRST_COMPLETED)
-                for future in (f for f in futures if f in done):  # submission order, not set order
-                    future.result()  # re-raise the fatal cases: ImportError, no token
-                    if on_progress:
-                        on_progress(futures[future])
-        finally:
-            # On Ctrl+C or a fatal error, drop the queue instead of waiting for it.
-            pool.shutdown(wait=True, cancel_futures=True)
+        _inspect_all(sess, facts, workers=workers, backoff=backoff, cache=cache, on_progress=on_progress)
+        # Uninspected out-of-scope certs would only add CN-only "possibly" matches to inspected rows.
+        matched_against = _possible_coverers(facts, others)
+        if matched_against:
+            log.info("Inspecting out-of-scope possible replacements", count=len(matched_against))
+            if on_total:
+                on_total(len(facts) + len(matched_against))
+            _inspect_all(
+                sess, matched_against, workers=workers, backoff=backoff, cache=cache, on_progress=on_progress,
+            )
 
     stats: CacheStats | None = None
     if inspect and cache is not None:
-        hits = sum(1 for f in facts if f.from_cache)
+        inspected = facts + matched_against
+        hits = sum(1 for f in inspected if f.from_cache)
         stats = CacheStats(
             directory=str(cache.directory), refreshed=cache.refresh, max_age=cache.max_age,
-            hits=hits, misses=len(facts) - hits, writes=cache.writes,
+            hits=hits, misses=len(inspected) - hits, writes=cache.writes,
         )
         log.info(
             "Inspection cache", dir=stats.directory, hits=stats.hits, misses=stats.misses,
@@ -1420,7 +1513,8 @@ def build_report(
         )
 
     rows = [ReportRow(facts=f, classification=classify(f, criteria)) for f in facts]
-    mark_superseded(rows)
+    extra = [ReportRow(facts=f, classification=classify(f, criteria)) for f in matched_against]
+    mark_superseded(rows + extra)
     rows.sort(key=lambda r: (r.facts.valid_to, r.facts.order_number))
     log.info("Report built", duration_seconds=round(time.monotonic() - clock_start, 1))
     return ReplacementReport(
