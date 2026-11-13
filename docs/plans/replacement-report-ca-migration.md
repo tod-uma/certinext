@@ -11,7 +11,9 @@ GitHub and PyPI verified), and branch `feat/replacement-report-ca-migration` was
 **Phase 1 is done (2026-11-12)**; see the "Done" note under Phase 1 for what was pulled forward from Phases 2–3.
 **Phase 2 is done (2026-11-12)**, including the Phase 3 CLI tests; see its "Done" note. The Codex external review
 of Phases 1 and 2 was **processed on 2026-11-12**; see "External review" after Phase 3. **Phase 4 is done
-(2026-11-12)**; see its "Done" note. **Next: Verification 3–5** (prod, read-only), then MR and the rc7 tag.
+(2026-11-12)**; see its "Done" note. Released as 1.4.0rc7–rc9. **Verification 3–5 run 2026-11-13** (see
+"Results" under Verification); external-review finding 4 (#40) fixed in 1.4.0rc10. **Next: rerun Verification 4
+after 2026-11-16** (expect 0 emSign issued since the cutoff), then mark this plan done.
 This file supersedes the plan-mode draft (moved from `~/.claude/plans/`).
 
 ## Context
@@ -286,6 +288,11 @@ findings were re-derived at that commit and held up. Each commit carries an `Ext
    open point. `71be5ca` (+ `125cb71` made the test order-independent).
 4. **`--originator`/`--group` hide out-of-scope replacements** (finding 4, real, over-count only). Tod chose to
    document it and track it in an issue: help text + docstring in `0264d4c`; fix tracked in certinext **#40**.
+   **Fixed 2026-11-13 (1.4.0rc10):** the filters now pick listed rows after matching. Without `--inspect` every
+   out-of-scope cert takes part (CN match, so `possibly_replaced_by`). With it, `_possible_coverers()` inspects only
+   out-of-scope certs newer than a listed cert that carries their CN. Prod: the portal scope went from 13 phantom
+   outstanding to 2 (both replaced by multi-SAN ACME certs under another CN, the documented residual); ACME scope
+   matches the unscoped report exactly. 72 + 16 extra inspections, all cache hits.
 
 For Phase 4: ADR 0021 must record Decision 5 as amended, `renewed`, and the output-shape additions (`ca`,
 `replaced_by`, `replaced_by_ca`, `possibly_replaced_by`, `renewed`, `outstanding`, plus summary keys). The
@@ -372,6 +379,16 @@ chooses only the listed rows; the summary/breakdown cover `population(latest_onl
    --disable-signal ca` reproduces the old verdict counts.
 6. Don't commit real report output. The repo mirrors to public GitHub; put JSON/CSV in the scratchpad or
    `~/Downloads`.
+
+**Results (2026-11-13, rc9 code, warm cache, read-only):**
+
+- 3: default report with `--inspect --cache --outstanding`: 181 outstanding, 214 replaced (11-12: 237 and 96). No
+  group-name warning; the summary shows `replaced` under `--outstanding` (the rc8 fix holds in prod).
+- 4 (before the cutoff, with `--issued-since 2026-11-09`): 13 emSign certs, the last issued 2026-11-10; SSL.com
+  from 2026-11-10 on. Plausible. **Rerun after 2026-11-16 with `--issued-since 2026-11-16`; expect 0.**
+- 5: under the G3 criteria with `ca` disabled, every `replace` row matches `issuer+key+chain`, every `conflict` is
+  an EC cert matching `key` only, and every `ok` row is RSA with nothing matched: the same semantics as v1.3.0.
+  Counts differ from the 2026-10-22 baseline (297/19) because the population turned over, not from a regression.
 
 ## Follow-ups (not in this plan)
 
