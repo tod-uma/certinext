@@ -460,6 +460,10 @@ class ReportRow:
             needs replacing, which carries the work forward. Narrower than
             ``superseded``: a newer certificate whose verdict is unknown,
             conflicting, or OK without an evaluated CA carries nothing.
+        renewed_by: Order number of the newest such renewing certificate,
+            set exactly when ``renewed`` is. In a report filtered by
+            originator, group or issue date it may name a certificate that
+            is not listed: the work moved out of the filter's scope.
     """
 
     facts: CertificateFacts
@@ -470,6 +474,7 @@ class ReportRow:
     replaced_by_ca: str | None = None
     possibly_replaced_by: str | None = None
     renewed: bool = False
+    renewed_by: str | None = None
 
     @property
     def verdict(self) -> Verdict:
@@ -542,6 +547,7 @@ class ReportRow:
             "replaced_by_ca": self.replaced_by_ca,
             "possibly_replaced_by": self.possibly_replaced_by,
             "renewed": self.renewed,
+            "renewed_by": self.renewed_by,
             "outstanding": self.outstanding,
             "ordered_by_name": f.ordered_by_name,
             "ordered_by_email": f.ordered_by_email,
@@ -581,6 +587,9 @@ class CacheStats:
         misses: Certificates downloaded live (absent, expired, refreshing,
             unparseable entry, or no serial number to key on).
         writes: Entries written.
+        coverers: How many of the ``hits + misses`` inspections were
+            out-of-scope possible replacements rather than listed rows, so
+            ``hits + misses`` can exceed the number of listed certificates.
     """
 
     directory: str
@@ -589,6 +598,7 @@ class CacheStats:
     hits: int
     misses: int
     writes: int
+    coverers: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON-ready dict.
@@ -601,6 +611,7 @@ class CacheStats:
             "enabled": True, "dir": self.directory, "refreshed": self.refreshed,
             "max_age_days": self.max_age / dt.timedelta(days=1),
             "hits": self.hits, "misses": self.misses, "writes": self.writes,
+            "coverers": self.coverers,
         }
 
 
@@ -988,7 +999,8 @@ def mark_superseded(rows: list[ReportRow]) -> None:
     ``ca`` signal is active, a coverer counts only if its CA was evaluated:
     with another signal active, an unmapped product code can still score OK
     without showing the certificate left the distrusted CA. ``renewed`` is
-    set when a confirmed covering row itself needs replacing. Rows must
+    set when a confirmed covering row itself needs replacing, and
+    ``renewed_by`` names the newest such row. Rows must
     therefore be classified first. Flags are reset and set in place, so
     calling this again on the same rows is safe.
 
@@ -1016,7 +1028,7 @@ def mark_superseded(rows: list[ReportRow]) -> None:
 
     for row in rows:
         row.superseded = row.possibly_superseded = row.renewed = False
-        row.replaced_by = row.replaced_by_ca = row.possibly_replaced_by = None
+        row.replaced_by = row.replaced_by_ca = row.possibly_replaced_by = row.renewed_by = None
         names = row.facts.names()
         if not names:
             continue
@@ -1031,7 +1043,9 @@ def mark_superseded(rows: list[ReportRow]) -> None:
         confirmed = [o for o in coverers if o.facts.sans_known] if row.facts.sans_known else []
         row.superseded = bool(confirmed)
         row.possibly_superseded = bool(coverers) and not confirmed
-        row.renewed = any(o.verdict.needs_replacing for o in confirmed)
+        if renewers := [o for o in confirmed if o.verdict.needs_replacing]:
+            row.renewed = True
+            row.renewed_by = max(renewers, key=recency).facts.order_number
 
         if row.verdict is Verdict.OK:
             continue
@@ -1370,9 +1384,10 @@ def build_report(
     Args:
         sess: An authenticated session.
         criteria: The replacement criteria.
-        inspect: Download and parse every certificate, enabling the key and
-            chain signals plus SANs and who ordered it (one order-detail and
-            one download request per certificate).
+        inspect: Download and parse every listed certificate, plus the
+            out-of-scope possible replacements described below, enabling the
+            key and chain signals plus SANs and who ordered it (one
+            order-detail and one download request per certificate).
         originators: Keep only these originators (case-insensitive).
         groups: Keep only these groups, by number or name (case-insensitive).
         issued_since: Keep only orders placed at or after this time
@@ -1383,7 +1398,10 @@ def build_report(
 
             These three filters choose the rows listed, not the certificates
             replacements are matched against: a certificate replaced under
-            another originator or group still shows as replaced. Without
+            another originator or group still shows as replaced. Likewise
+            one renewed there is ``renewed``, not outstanding, and its
+            ``renewed_by`` names a certificate this report does not list:
+            the work is counted once, under the renewal's scope. Without
             ``inspect`` every valid certificate takes part in matching. With
             it, an out-of-scope certificate takes part only if inspected,
             and it is inspected only if it is newer than an in-scope one
@@ -1505,7 +1523,7 @@ def build_report(
         hits = sum(1 for f in inspected if f.from_cache)
         stats = CacheStats(
             directory=str(cache.directory), refreshed=cache.refresh, max_age=cache.max_age,
-            hits=hits, misses=len(inspected) - hits, writes=cache.writes,
+            hits=hits, misses=len(inspected) - hits, writes=cache.writes, coverers=len(matched_against),
         )
         log.info(
             "Inspection cache", dir=stats.directory, hits=stats.hits, misses=stats.misses,

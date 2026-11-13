@@ -867,7 +867,19 @@ def test_newer_emsign_cert_supersedes_but_does_not_replace() -> None:
     new = _ca_row("ORDER-00002", 5, "EMSIGN", ["a.example.edu"])
     rp.mark_superseded([old, new])
     assert old.superseded and old.renewed and old.replaced_by is None and not old.outstanding
+    assert old.renewed_by == "ORDER-00002" and new.renewed_by is None
     assert new.outstanding
+
+
+def test_renewed_by_names_the_newest_renewal() -> None:
+    """With two emSign renewals, renewed_by is the newer one, and a re-run resets it."""
+    old = _ca_row("ORDER-00001", 60, "EMSIGN", ["a.example.edu"])
+    mid = _ca_row("ORDER-00002", 30, "EMSIGN", ["a.example.edu"])
+    new = _ca_row("ORDER-00003", 5, "EMSIGN", ["a.example.edu"])
+    rp.mark_superseded([old, mid, new])
+    assert (old.renewed_by, mid.renewed_by, new.renewed_by) == ("ORDER-00003", "ORDER-00003", None)
+    rp.mark_superseded([old])
+    assert old.renewed_by is None and not old.renewed
 
 
 def test_partial_sslcom_coverage_is_not_a_replacement() -> None:
@@ -1177,6 +1189,87 @@ def test_possible_coverers_needs_a_shared_name_and_newer_order() -> None:
     older = _facts(order_number="OLD", common_name="a.example.edu", order_date=NOW - dt.timedelta(days=20))
     other = _facts(order_number="OTHER", common_name="b.example.edu", order_date=NOW - dt.timedelta(days=1))
     assert [f.order_number for f in rp._possible_coverers(scoped, [newer, older, other])] == ["NEW"]
+
+
+def test_possible_coverers_boundaries() -> None:
+    """Equal recency is not newer; an undated cert is oldest; an in-scope SAN (not only its CN) counts."""
+    when, until = NOW - dt.timedelta(days=10), NOW + dt.timedelta(days=30)
+    insp = rp.Inspection("RSA", 2048, "RSA 2048", ["a.example.edu", "b.example.edu"], GOOD_INT, [GOOD_INT, GOOD_ROOT])
+    scoped = [_facts(order_number="IN", common_name="a.example.edu", order_date=when, valid_to=until, inspection=insp)]
+    tie = _facts(order_number="TIE", common_name="a.example.edu", order_date=when, valid_to=until)
+    later_expiry = _facts(
+        order_number="LATER", common_name="a.example.edu", order_date=when, valid_to=until + dt.timedelta(days=1),
+    )
+    undated = _facts(order_number="UNDATED", common_name="a.example.edu", order_date=None)
+    by_san = _facts(order_number="BYSAN", common_name="b.example.edu", order_date=NOW - dt.timedelta(days=1))
+    picked = rp._possible_coverers(scoped, [tie, later_expiry, undated, by_san])
+    assert [f.order_number for f in picked] == ["LATER", "BYSAN"]
+
+
+def _cross_scope_renewal_routes() -> dict[str, Any]:
+    """Build Codex's handoff case: portal emSign order 1 renewed by ACME emSign order 5.
+
+    Returns:
+        Path -> payload routes.
+    """
+    routes = _cross_scope_routes()
+    routes[f"{_API}/reports/orders"]["content"][-1].update(productCode=EMSIGN_CODE, issuerCA=BAD_INT)
+    return routes
+
+
+def test_cross_scope_renewal_is_counted_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A renewal outside the scope takes the work with it: renewed_by points there, and it is outstanding there."""
+    sess, _ = _session(monkeypatch, _cross_scope_renewal_routes())
+    portal = rp.build_report(sess, CA_CRITERIA, inspect=True, now=NOW, originators=["CERTInext"])
+    [row] = portal.rows
+    assert (row.renewed, row.renewed_by, row.replaced_by, row.outstanding) == (True, "ORDER-00005", None, False)
+    counts = rp.ReplacementReport.summarize(portal.rows)
+    assert (counts["needs_replacing"], counts["outstanding"], counts["replaced"]) == (1, 0, 0)
+
+    acme = rp.build_report(sess, CA_CRITERIA, inspect=True, now=NOW, originators=["ACME"])
+    acme_out = [r.facts.order_number for r in acme.rows if r.outstanding]
+    everything = rp.build_report(sess, CA_CRITERIA, inspect=True, now=NOW)
+    all_out = [r.facts.order_number for r in everything.rows if r.outstanding]
+    assert acme_out == all_out == ["ORDER-00005"]
+
+
+def test_cli_scoped_report_shows_renewal_and_coverer_count(run_cli: Callable[..., tuple[int, str, str]]) -> None:
+    """The table names the out-of-scope renewal and the cache part counts the out-of-scope inspection."""
+    code, out, _ = run_cli(
+        ["--inspect", "--cache", "--originator", "CERTInext"], routes=_cross_scope_renewal_routes(),
+    )
+    assert code == 0
+    assert "renewed:ORDER-00005" in out
+    summary = out.strip().splitlines()[-1]
+    assert summary.startswith(
+        "0 EMSIGN certificates outstanding; 0 replaced; "
+        "1 superseded by newer certificates that also need replacing; 1 of 1 valid"
+    )
+    assert "0 of 2 inspections from cache (up to 30 days old; 1 of them out-of-scope possible replacements)" in summary
+
+    code, out, _ = run_cli(["--json", "--inspect", "--cache", "--originator", "CERTInext"],
+                           routes=_cross_scope_renewal_routes())
+    doc = json.loads(out)
+    assert doc["certificates"][0]["renewed_by"] == "ORDER-00005"
+    assert (doc["cache"]["hits"], doc["cache"]["coverers"]) == (2, 1)
+
+
+@pytest.mark.parametrize("inspect", [False, True])
+def test_issued_since_boundary_and_undated_out_of_scope(monkeypatch: pytest.MonkeyPatch, inspect: bool) -> None:
+    """An order placed exactly at --issued-since is listed; older or undated same-CN certs never cover it."""
+    routes = _routes()
+    rows = routes[f"{_API}/reports/orders"]["content"]
+    for n, date in ((5, None), (6, "2026-09-01T00:00:00")):
+        rows.append(_order_row(
+            n, domainName="host1.example.edu", productCode=SSLCOM_CODE, issuerCA=GOOD_INT, orderDate=date,
+        ))
+    sess, api = _session(monkeypatch, routes)
+    report = rp.build_report(
+        sess, CA_CRITERIA, inspect=inspect, now=NOW, issued_since=dt.datetime(2026, 10, 1),
+    )
+    row = next(r for r in report.rows if r.facts.order_number == "ORDER-00001")
+    assert (row.possibly_replaced_by, row.possibly_superseded, row.outstanding) == (None, False, True)
+    assert not any(o in c for c in api.calls for o in ("ORDER-00005", "ORDER-00006"))
 
 
 # ---------------------------------------------------------------------------
