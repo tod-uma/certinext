@@ -64,6 +64,14 @@ def normalize_serial(value: str) -> str:
     return value.strip().casefold()
 
 
+def _serial_matches_leaf(report_serial: str, leaf_serial: int) -> bool:
+    """Accept the report's hex serial or its observed decimal emSign form."""
+    if normalize_serial(report_serial) == format(leaf_serial, "x"):
+        return True
+    compact = report_serial.strip()
+    return compact.isascii() and compact.isdecimal() and int(compact, 10) == leaf_serial
+
+
 def _name(value: str) -> str:
     """Normalize DNS spelling for literal matching, without wildcard expansion."""
     return value.strip().rstrip(".").casefold()
@@ -104,8 +112,8 @@ def _parse(download: CertificateDownload, record: OrderRecord) -> list[str]:
     if not blocks:
         raise ValueError("download contains no leaf certificate")
     leaf = x509.load_pem_x509_certificate(blocks[0].encode("ascii"))
-    if record.certificate_serial_number and normalize_serial(record.certificate_serial_number) != format(
-        leaf.serial_number, "x"
+    if record.certificate_serial_number and not _serial_matches_leaf(
+        record.certificate_serial_number, leaf.serial_number
     ):
         raise ValueError("download serial differs from the live orders report")
     try:

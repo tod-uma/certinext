@@ -154,6 +154,22 @@ def test_cold_cache_round_trip(tmp_path: Path) -> None:
     assert second[0].from_cache and second[0].sans == entries[0].sans
 
 
+def test_decimal_report_serial_matches_emsign_leaf() -> None:
+    """The sandbox emSign report's decimal serial matches its downloaded leaf."""
+    sess = _session(_record(serial="171"))
+    entries = [CertificateEntry(_record(serial="171"))]
+    enrich_sans(sess, entries)
+    assert entries[0].sans and entries[0].error is None
+
+
+def test_wrong_decimal_report_serial_still_fails() -> None:
+    """Decimal compatibility never accepts a different issued certificate."""
+    sess = _session(_record(serial="172"))
+    entries = [CertificateEntry(_record(serial="172"))]
+    enrich_sans(sess, entries)
+    assert entries[0].sans is None and entries[0].error
+
+
 def test_cache_keeps_only_order_contact_name_and_email(tmp_path: Path) -> None:
     """The shared cache stores only the documented contact fields."""
     sess = _session()
