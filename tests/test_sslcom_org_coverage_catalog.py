@@ -394,14 +394,37 @@ class TestCatalogCa:
         client.get.return_value = {"products": []}
         assert CatalogAccessor(client).ca_by_product_code() == {}
 
-    def test_legacy_code_sets_cover_known_profiles(self) -> None:
-        """Prod has all 56 KB profiles; sandbox has the 57 codes its catalog listed on 2026-11-16."""
-        assert len(LEGACY_EMSIGN_PROD_CODES) == 56
-        assert len(LEGACY_EMSIGN_SANDBOX_CODES) == 57
+    def test_legacy_code_sets_match_their_sources(self) -> None:
+        """Each table equals its source list exactly, so a substituted code fails here.
+
+        Written out code by code rather than as ranges, so this is an independent
+        record of the sources, not a copy of the implementation's span arithmetic.
+        Prod: vendor KB "Understanding Certificate Product Profiles" section 5 (56
+        profiles). Sandbox: the live sandbox catalog's emSign category, 2026-11-16.
+        External review (Codex, 2026-11-16): count and subset checks alone let a
+        swap such as 817 -> 816 pass.
+        """
+        prod_source = set(
+            "817 818 819 820 821 822 823 824 825 826 "
+            "828 829 830 831 832 833 834 835 836 837 838 839 840 841 "
+            "842 843 844 845 846 847 848 849 850 851 852 853 854 855 "
+            "858 859 860 861 862 863 864 865 866 867 868 869 870 871 872 873 874 875".split()
+        )
+        sandbox_source = set(
+            "945 946 947 948 949 950 952 953 955 956 957 "
+            "959 960 961 962 963 964 965 966 967 968 969 970 971 972 973 974 975 976 977 978 979 980 "
+            "983 984 985 986 987 988 989 990 991 992 993 994 995 996 997 998 999 "
+            "1000 1001 1002 1003 1004 1005 1006".split()
+        )
+        assert len(prod_source) == 56 and len(sandbox_source) == 57
+        assert LEGACY_EMSIGN_PROD_CODES == prod_source
+        assert LEGACY_EMSIGN_SANDBOX_CODES == sandbox_source
+        # Gaps inside the spans: unassigned in prod, absent from the sandbox catalog.
+        assert not {"827", "856", "857"} & LEGACY_EMSIGN_PROD_CODES
+        assert not {"951", "954", "958", "981", "982"} & LEGACY_EMSIGN_SANDBOX_CODES
         # Codes seen on real orders and posted to cert-users for each environment.
         assert {"823", "835", "842", "843", "844", "845", "846", "847", "848", "849"} <= LEGACY_EMSIGN_PROD_CODES
         assert {str(c) for c in range(970, 978)} <= LEGACY_EMSIGN_SANDBOX_CODES
-        assert not {"827", "856", "857"} & LEGACY_EMSIGN_PROD_CODES
 
     def test_legacy_code_sets_are_disjoint(self) -> None:
         """One combined set is only safe while prod, sandbox and SSL.com codes never collide."""

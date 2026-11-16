@@ -1060,6 +1060,35 @@ def test_report_labels_rows_by_ca(monkeypatch: pytest.MonkeyPatch) -> None:
     assert api.calls.count(f"{_API}/catalog/products") == 1
 
 
+def test_report_labels_legacy_emsign_codes_with_sslcom_only_catalog(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Prod's catalog lists only SSL.com since 2026-11-16; old emSign orders must still need replacing.
+
+    Real codes, not the fake 100/200: 848 (prod emSign) and 999 (sandbox emSign)
+    are absent from the catalog and fall back to EMSIGN; 1011 stays SSLCOM. With
+    the fallback the report raises neither CA-gap warning. External review
+    (Codex, 2026-11-16): no report-level test covered this scenario.
+    """
+    logger = structlog.testing.CapturingLogger()
+    monkeypatch.setattr(rp, "log", logger)
+    routes = _routes()
+    routes[f"{_API}/catalog/products"] = {
+        "products": [{"categoryName": "SSL.com", "products": [{"productCode": "1011"}]}]
+    }
+    rows = routes[f"{_API}/reports/orders"]["content"]
+    rows[0]["productCode"] = "848"
+    rows[1]["productCode"] = "1011"
+    rows.append(_order_row(4, productCode="999", orderDate="2026-10-20T00:00:00"))
+    sess, _ = _session(monkeypatch, routes)
+    report = rp.build_report(sess, CA_CRITERIA, now=NOW)
+    got = {r.facts.order_number: (r.facts.ca, r.verdict) for r in report.rows}
+    assert got == {
+        "ORDER-00001": ("EMSIGN", rp.Verdict.REPLACE),
+        "ORDER-00002": ("SSLCOM", rp.Verdict.OK),
+        "ORDER-00004": ("EMSIGN", rp.Verdict.REPLACE),
+    }
+    assert not [c for c in logger.calls if c.method_name == "warning"]
+
+
 def test_catalog_failure_is_fatal_only_when_ca_is_active(monkeypatch: pytest.MonkeyPatch) -> None:
     """Without the catalog the CA signal would turn every emSign row into UNKNOWN, so it raises."""
     routes = _ca_routes()
