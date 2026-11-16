@@ -180,6 +180,47 @@ Seen in both environments: ``"SSL/TLS Certificates"`` holds the emSign
 row when the vendor adds a CA category; until then its products report
 :data:`UNKNOWN_CA`."""
 
+def _code_ranges(*spans: tuple[int, int]) -> frozenset[str]:
+    """Expand inclusive ``(first, last)`` code spans into a set of code strings.
+
+    Args:
+        *spans: Inclusive numeric ranges of product codes.
+
+    Returns:
+        Every code in the spans, as strings (the wire type).
+    """
+    return frozenset(str(code) for first, last in spans for code in range(first, last + 1))
+
+
+LEGACY_EMSIGN_PROD_CODES: frozenset[str] = _code_ranges((817, 826), (828, 855), (858, 875))
+"""Production emSign (InCommon-branded) product codes: all 56 profiles.
+
+DV, OV, EV and IGTF at 30/45/90/199 days, from section 5 of the vendor KB
+article "Understanding Certificate Product Profiles" (read 2026-11-16, after
+the prod catalog dropped the emSign category). 827, 856 and 857 are not
+assigned."""
+
+LEGACY_EMSIGN_SANDBOX_CODES: frozenset[str] = _code_ranges(
+    (945, 950), (952, 953), (955, 957), (959, 980), (983, 1006),
+)
+"""Sandbox emSign product codes, copied from the live sandbox catalog's
+``"SSL/TLS Certificates"`` category on 2026-11-16 (57 codes), while it still
+listed them, so sandbox orders keep their CA if the vendor drops it there too."""
+
+LEGACY_EMSIGN_CODES: frozenset[str] = LEGACY_EMSIGN_PROD_CODES | LEGACY_EMSIGN_SANDBOX_CODES
+"""Product codes of emSign orders, for when the catalog no longer lists them.
+
+The vendor stopped listing the emSign category in the production catalog
+(seen 2026-11-16: only ``"SSL.com"``, 1011-1014), so these codes no longer
+map through :data:`CATEGORY_CA`, yet existing orders still carry them. The
+catalog stays authoritative: :meth:`CatalogAccessor.ca_by_product_code` uses
+this set only for a code the catalog does not list. An explicit set, not an
+"unlisted means emSign" rule (ADR 0020).
+
+Product codes are environment-specific, but the prod and sandbox ranges are
+disjoint from each other and from the SSL.com codes (1011-1020), so one
+combined set cannot mislabel an order in either environment."""
+
 
 class CustomField(CertiNextModel):
     """A custom field definition for a certificate product.

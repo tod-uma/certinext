@@ -29,7 +29,12 @@ from certinext.accounts import AccountAccessor, OrgCaValidation
 from certinext.catalog import CatalogAccessor
 from certinext.domains import Domain, DomainAccessor
 from certinext.models.accounts import Organization
-from certinext.models.catalog import ProductCategory
+from certinext.models.catalog import (
+    LEGACY_EMSIGN_CODES,
+    LEGACY_EMSIGN_PROD_CODES,
+    LEGACY_EMSIGN_SANDBOX_CODES,
+    ProductCategory,
+)
 from tests.conftest import SAMPLE_DOMAIN_DATA
 
 _CA_VALIDATIONS: dict[str, Any] = {
@@ -361,8 +366,9 @@ class TestCatalogCa:
                 {"categoryName": "Private PKI Products", "products": [{"productCode": "900"}]},
             ]
         }
+        legacy = {code: "EMSIGN" for code in LEGACY_EMSIGN_CODES - {"823"}}
         assert CatalogAccessor(client).ca_by_product_code() == {
-            "823": "UNKNOWN", "955": "EMSIGN", "1011": "SSLCOM", "900": "UNKNOWN",
+            "823": "UNKNOWN", "955": "EMSIGN", "1011": "SSLCOM", "900": "UNKNOWN", **legacy,
         }
 
     def test_repeat_within_one_ca_keeps_ca(self, client: MagicMock) -> None:
@@ -373,4 +379,55 @@ class TestCatalogCa:
                 {"categoryName": "SSLCOM", "products": [{"productCode": "1011"}]},
             ]
         }
-        assert CatalogAccessor(client).ca_by_product_code() == {"1011": "SSLCOM"}
+        result = CatalogAccessor(client).ca_by_product_code()
+        assert result["1011"] == "SSLCOM"
+
+    def test_legacy_emsign_codes_survive_a_catalog_without_emsign(self, client: MagicMock) -> None:
+        """Prod dropped the emSign category (2026-11-16); its old order codes still map to EMSIGN."""
+        client.get.return_value = {"products": [{"categoryName": "SSL.com", "products": [{"productCode": "1011"}]}]}
+        result = CatalogAccessor(client).ca_by_product_code()
+        assert result["848"] == result["849"] == "EMSIGN"
+        assert result["1011"] == "SSLCOM"
+
+    def test_empty_catalog_stays_empty(self, client: MagicMock) -> None:
+        """The legacy fallback must not turn an empty catalog into a usable map."""
+        client.get.return_value = {"products": []}
+        assert CatalogAccessor(client).ca_by_product_code() == {}
+
+    def test_legacy_code_sets_match_their_sources(self) -> None:
+        """Each table equals its source list exactly, so a substituted code fails here.
+
+        Written out code by code rather than as ranges, so this is an independent
+        record of the sources, not a copy of the implementation's span arithmetic.
+        Prod: vendor KB "Understanding Certificate Product Profiles" section 5 (56
+        profiles). Sandbox: the live sandbox catalog's emSign category, 2026-11-16.
+        External review (Codex, 2026-11-16): count and subset checks alone let a
+        swap such as 817 -> 816 pass.
+        """
+        prod_source = set(
+            "817 818 819 820 821 822 823 824 825 826 "
+            "828 829 830 831 832 833 834 835 836 837 838 839 840 841 "
+            "842 843 844 845 846 847 848 849 850 851 852 853 854 855 "
+            "858 859 860 861 862 863 864 865 866 867 868 869 870 871 872 873 874 875".split()
+        )
+        sandbox_source = set(
+            "945 946 947 948 949 950 952 953 955 956 957 "
+            "959 960 961 962 963 964 965 966 967 968 969 970 971 972 973 974 975 976 977 978 979 980 "
+            "983 984 985 986 987 988 989 990 991 992 993 994 995 996 997 998 999 "
+            "1000 1001 1002 1003 1004 1005 1006".split()
+        )
+        assert len(prod_source) == 56 and len(sandbox_source) == 57
+        assert LEGACY_EMSIGN_PROD_CODES == prod_source
+        assert LEGACY_EMSIGN_SANDBOX_CODES == sandbox_source
+        # Gaps inside the spans: unassigned in prod, absent from the sandbox catalog.
+        assert not {"827", "856", "857"} & LEGACY_EMSIGN_PROD_CODES
+        assert not {"951", "954", "958", "981", "982"} & LEGACY_EMSIGN_SANDBOX_CODES
+        # Codes seen on real orders and posted to cert-users for each environment.
+        assert {"823", "835", "842", "843", "844", "845", "846", "847", "848", "849"} <= LEGACY_EMSIGN_PROD_CODES
+        assert {str(c) for c in range(970, 978)} <= LEGACY_EMSIGN_SANDBOX_CODES
+
+    def test_legacy_code_sets_are_disjoint(self) -> None:
+        """One combined set is only safe while prod, sandbox and SSL.com codes never collide."""
+        sslcom = {str(c) for c in range(1011, 1021)}
+        assert not LEGACY_EMSIGN_PROD_CODES & LEGACY_EMSIGN_SANDBOX_CODES
+        assert not LEGACY_EMSIGN_CODES & sslcom
