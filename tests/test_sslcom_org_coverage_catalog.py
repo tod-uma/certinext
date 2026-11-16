@@ -29,7 +29,7 @@ from certinext.accounts import AccountAccessor, OrgCaValidation
 from certinext.catalog import CatalogAccessor
 from certinext.domains import Domain, DomainAccessor
 from certinext.models.accounts import Organization
-from certinext.models.catalog import ProductCategory
+from certinext.models.catalog import LEGACY_EMSIGN_CODES, ProductCategory
 from tests.conftest import SAMPLE_DOMAIN_DATA
 
 _CA_VALIDATIONS: dict[str, Any] = {
@@ -361,8 +361,9 @@ class TestCatalogCa:
                 {"categoryName": "Private PKI Products", "products": [{"productCode": "900"}]},
             ]
         }
+        legacy = {code: "EMSIGN" for code in LEGACY_EMSIGN_CODES - {"823"}}
         assert CatalogAccessor(client).ca_by_product_code() == {
-            "823": "UNKNOWN", "955": "EMSIGN", "1011": "SSLCOM", "900": "UNKNOWN",
+            "823": "UNKNOWN", "955": "EMSIGN", "1011": "SSLCOM", "900": "UNKNOWN", **legacy,
         }
 
     def test_repeat_within_one_ca_keeps_ca(self, client: MagicMock) -> None:
@@ -373,4 +374,17 @@ class TestCatalogCa:
                 {"categoryName": "SSLCOM", "products": [{"productCode": "1011"}]},
             ]
         }
-        assert CatalogAccessor(client).ca_by_product_code() == {"1011": "SSLCOM"}
+        result = CatalogAccessor(client).ca_by_product_code()
+        assert result["1011"] == "SSLCOM"
+
+    def test_legacy_emsign_codes_survive_a_catalog_without_emsign(self, client: MagicMock) -> None:
+        """Prod dropped the emSign category (2026-11-16); its old order codes still map to EMSIGN."""
+        client.get.return_value = {"products": [{"categoryName": "SSL.com", "products": [{"productCode": "1011"}]}]}
+        result = CatalogAccessor(client).ca_by_product_code()
+        assert result["848"] == result["849"] == "EMSIGN"
+        assert result["1011"] == "SSLCOM"
+
+    def test_empty_catalog_stays_empty(self, client: MagicMock) -> None:
+        """The legacy fallback must not turn an empty catalog into a usable map."""
+        client.get.return_value = {"products": []}
+        assert CatalogAccessor(client).ca_by_product_code() == {}

@@ -180,6 +180,16 @@ Seen in both environments: ``"SSL/TLS Certificates"`` holds the emSign
 row when the vendor adds a CA category; until then its products report
 :data:`UNKNOWN_CA`."""
 
+LEGACY_EMSIGN_CODES: frozenset[str] = frozenset({"823", "835", "846", "847", "848", "849"})
+"""Product codes of already-issued emSign orders (the prod OV codes seen 2026-11-12).
+
+The vendor stopped listing the emSign category in the production catalog
+(seen 2026-11-16: only ``"SSL.com"``, 1011-1014), so these codes no longer
+map through :data:`CATEGORY_CA`, yet existing orders still carry them. The
+catalog stays authoritative: :meth:`CatalogAccessor.ca_by_product_code` uses
+this set only for a code the catalog does not list. An explicit set, not an
+"unlisted means emSign" rule (ADR 0020)."""
+
 
 class CustomField(CertiNextModel):
     """A custom field definition for a certificate product.

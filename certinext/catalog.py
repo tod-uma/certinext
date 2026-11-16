@@ -28,8 +28,8 @@ import structlog
 
 from .client import CertiNextClient
 from .exceptions import CertiNextAPIError  # noqa: F401 — referenced in Raises docstrings
-from .models.catalog import CustomField, Product, ProductCategory
-from .models.domains import UNKNOWN_CA
+from .models.catalog import LEGACY_EMSIGN_CODES, CustomField, Product, ProductCategory
+from .models.domains import EMSIGN, UNKNOWN_CA
 
 log = structlog.get_logger()
 
@@ -99,7 +99,9 @@ class CatalogAccessor:
             (:data:`~certinext.models.domains.UNKNOWN_CA` for an unmapped
             category). A code listed under categories of two different CAs
             maps to ``UNKNOWN_CA``, since category order cannot say which is
-            right.
+            right. A code in :data:`~certinext.models.catalog.LEGACY_EMSIGN_CODES`
+            that the catalog no longer lists maps to ``EMSIGN`` (the vendor
+            dropped the emSign category; existing orders keep those codes).
 
         Raises:
             CertiNextAPIError: On a non-2xx API response. Provides ``.status_code`` and ``.body``.
@@ -115,6 +117,9 @@ class CatalogAccessor:
                 elif seen != cat.ca:
                     log.warning("product_code_in_two_cas", product_code=p.product_code, cas=[seen, cat.ca])
                     result[p.product_code] = UNKNOWN_CA
+        if result:  # an empty catalog stays empty, so callers can still refuse it
+            for code in LEGACY_EMSIGN_CODES:
+                result.setdefault(code, EMSIGN)
         return result
 
     def get_custom_fields(self, product_code: str) -> list[CustomField]:
