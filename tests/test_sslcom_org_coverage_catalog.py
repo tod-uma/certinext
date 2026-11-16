@@ -29,7 +29,12 @@ from certinext.accounts import AccountAccessor, OrgCaValidation
 from certinext.catalog import CatalogAccessor
 from certinext.domains import Domain, DomainAccessor
 from certinext.models.accounts import Organization
-from certinext.models.catalog import LEGACY_EMSIGN_CODES, ProductCategory
+from certinext.models.catalog import (
+    LEGACY_EMSIGN_CODES,
+    LEGACY_EMSIGN_PROD_CODES,
+    LEGACY_EMSIGN_SANDBOX_CODES,
+    ProductCategory,
+)
 from tests.conftest import SAMPLE_DOMAIN_DATA
 
 _CA_VALIDATIONS: dict[str, Any] = {
@@ -388,3 +393,18 @@ class TestCatalogCa:
         """The legacy fallback must not turn an empty catalog into a usable map."""
         client.get.return_value = {"products": []}
         assert CatalogAccessor(client).ca_by_product_code() == {}
+
+    def test_legacy_code_sets_cover_known_profiles(self) -> None:
+        """Prod has all 56 KB profiles; sandbox has the 57 codes its catalog listed on 2026-11-16."""
+        assert len(LEGACY_EMSIGN_PROD_CODES) == 56
+        assert len(LEGACY_EMSIGN_SANDBOX_CODES) == 57
+        # Codes seen on real orders and posted to cert-users for each environment.
+        assert {"823", "835", "842", "843", "844", "845", "846", "847", "848", "849"} <= LEGACY_EMSIGN_PROD_CODES
+        assert {str(c) for c in range(970, 978)} <= LEGACY_EMSIGN_SANDBOX_CODES
+        assert not {"827", "856", "857"} & LEGACY_EMSIGN_PROD_CODES
+
+    def test_legacy_code_sets_are_disjoint(self) -> None:
+        """One combined set is only safe while prod, sandbox and SSL.com codes never collide."""
+        sslcom = {str(c) for c in range(1011, 1021)}
+        assert not LEGACY_EMSIGN_PROD_CODES & LEGACY_EMSIGN_SANDBOX_CODES
+        assert not LEGACY_EMSIGN_CODES & sslcom

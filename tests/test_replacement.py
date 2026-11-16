@@ -1042,7 +1042,8 @@ def _ca_routes() -> dict[str, Any]:
     routes = _routes()
     rows = routes[f"{_API}/reports/orders"]["content"]
     rows[1]["productCode"] = SSLCOM_CODE
-    rows.append(_order_row(4, productCode="999", orderDate="2026-10-20T00:00:00"))
+    # Not 999: that is a real sandbox emSign code in LEGACY_EMSIGN_CODES.
+    rows.append(_order_row(4, productCode="99999", orderDate="2026-10-20T00:00:00"))
     return routes
 
 
@@ -1102,7 +1103,7 @@ def test_unmapped_codes_and_unknown_ca_names_are_warned(monkeypatch: pytest.Monk
     rp.build_report(sess, CA_CRITERIA.with_overrides(cas=["EMSIGN", "SSL.COM"]), now=NOW)
     warnings = {c.args[0]: c.kwargs for c in logger.calls if c.method_name == "warning"}
     unmapped = warnings["Orders with a product code the catalog does not list; their CA is unknown"]
-    assert (unmapped["orders"], unmapped["product_codes"]) == (1, "999")
+    assert (unmapped["orders"], unmapped["product_codes"]) == (1, "99999")
     assert warnings["Requested CA not named by the product catalog; it matches nothing"]["cas"] == "SSL.COM"
 
     logger.calls.clear()
