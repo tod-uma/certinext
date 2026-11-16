@@ -70,6 +70,7 @@
 │ issue-cert          Submit a CSR to CertiNext and download the issued certificate.               │
 │ ledger              Show the CertiNext account ledger (transaction history).                     │
 │ list-certificates   List SSL/TLS certificate orders from the CertiNext orders report.            │
+│ lookup-certificate  Find certificates by SAN, CN, order, serial, request number or requestor.    │
 │ parent-dcv-status   Show DCV status and expiry for domains that require direct DCV validation.   │
 │ pending-dcv         List all active domains that have not completed DCV verification.            │
 │ replacement-report  List currently valid certificates that need replacing after a CA distrust.   │

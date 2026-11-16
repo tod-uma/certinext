@@ -1,0 +1,30 @@
+                                                                                                    
+ Usage: certinext lookup-certificate [OPTIONS] IDENTIFIER                                           
+                                                                                                    
+ Find certificates by SAN, CN, order, serial, request number or requestor.                          
+                                                                                                    
+ Exact, case-insensitive matching; wildcard names are literal. SAN/auto scans                       
+ all issued rows in the live report, including expired certificates. Details                        
+ are always fetched live; absent contact fields mean unknown availability.                          
+ Requestor search matches a full name or email and reads every order's                              
+ current details; it is excluded from auto and downloads no certificates.                           
+ Exit 1 means partial results; exit 3 means no match without known failures.                        
+                                                                                                    
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    identifier      TEXT  Literal identifier; returns every matching order [required]           │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --field                          [auto|san|cn|order|serial|requ  Identifier type; auto also      │
+│                                  est|requestor]                  scans SANs                      │
+│                                                                  [default: auto]                 │
+│ --cache            --no-cache                                    Reuse replacement-report        │
+│                                                                  downloads                       │
+│ --refresh-cache                                                  Refresh downloads; implies      │
+│                                                                  --cache                         │
+│ --cache-dir                      PATH                            Shared cache base; implies      │
+│                                                                  --cache                         │
+│ --cache-max-age                  INTEGER RANGE [x>=1]            Maximum age in days; implies    │
+│                                                                  --cache                         │
+│ --help                                                           Show this message and exit.     │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+

@@ -40,7 +40,6 @@ from certinext._config import ConfigError, cache_dir, replacement_criteria
 from certinext._inspection_cache import DEFAULT_MAX_AGE, InspectionCache
 from certinext.cli._app import app
 from certinext.cli._shared import data_console, err_console, progress_disabled, rows_table, session
-from certinext.cli_support import prompt_stderr
 
 log = structlog.get_logger()
 
@@ -125,55 +124,10 @@ def _resolve_cache(
     inspect: bool, cache: bool | None, refresh: bool, directory: Path | None,
     max_age_days: int | None = None,
 ) -> bool:
-    """Decide whether this run uses the inspection cache.
+    """Resolve the shared opt-in download cache policy (ADR 0022)."""
+    from certinext.cli._certificate_cache import _resolve_cache as resolve
 
-    ``--refresh-cache``, ``--cache-dir`` and ``--cache-max-age`` imply
-    ``--cache``. With none of the cache flags, ask on a terminal (Enter
-    means no: reusing weeks-old downloads should be a choice) and stay off
-    otherwise, so scheduled runs keep reading live.
-
-    Args:
-        inspect: Whether ``--inspect`` was given.
-        cache: ``--cache`` (True), ``--no-cache`` (False), or neither (None).
-        refresh: Whether ``--refresh-cache`` was given.
-        directory: The ``--cache-dir`` value, if any.
-        max_age_days: The ``--cache-max-age`` value, if any.
-
-    Returns:
-        Whether to use the cache.
-
-    Raises:
-        typer.BadParameter: On a cache flag without ``--inspect``, or
-            ``--no-cache`` with a flag that implies ``--cache``.
-    """
-    implied = refresh or directory is not None or max_age_days is not None
-    if cache is False:
-        if implied:
-            raise typer.BadParameter(
-                "--no-cache cannot be combined with --refresh-cache, --cache-dir or --cache-max-age",
-                param_hint="--no-cache",
-            )
-        return False
-    if not inspect:
-        if cache or implied:
-            raise typer.BadParameter(
-                "the cache holds certificate downloads, so it needs --inspect",
-                param_hint="--cache",
-            )
-        return False
-    if cache or implied:
-        return True
-    if not sys.stdin.isatty():
-        log.info("Inspection cache off (non-interactive); pass --cache to use it")
-        return False
-    try:
-        answer = prompt_stderr(
-            f"Use cached inspections up to {_MAX_AGE_DAYS} days old (faster, may be stale)? [y/N]: "
-        )
-    except EOFError:
-        print(file=sys.stderr)
-        return False
-    return answer.strip().lower() in ("y", "yes")
+    return resolve(inspect, cache, refresh, directory, max_age_days)
 
 
 def _build_cache(sess: Any, refresh: bool, directory: Path | None, max_age_days: int) -> InspectionCache:
@@ -192,11 +146,10 @@ def _build_cache(sess: Any, refresh: bool, directory: Path | None, max_age_days:
     Returns:
         The cache.
     """
+    from certinext.cli._certificate_cache import _build_cache as build
+
     base = directory if directory is not None else cache_dir() / _CACHE_SUBDIR
-    env = "sandbox" if getattr(sess, "sandbox", False) else "production"
-    return InspectionCache(
-        base.expanduser() / env, refresh=refresh, max_age=dt.timedelta(days=max_age_days)
-    )
+    return build(sess, refresh, base, max_age_days)
 
 
 def _warn_stale_chain(criteria: rp.ReplacementCriteria, max_age_days: int) -> None:

@@ -2748,3 +2748,71 @@ examples/
 ```
 
 </details>
+
+## SAN exports and certificate lookup
+
+```bash
+# Include every SAN, reusing the replacement-report inspection cache.
+certinext list-certificates --sans --cache --json > certificates.json
+certinext list-certificates --sans --cache --csv > certificates.csv
+
+# Exact lookups. Auto scans CNs, SANs, orders, serials and request numbers.
+certinext lookup-certificate node.example.org --cache --json
+certinext lookup-certificate lb.example.org --field cn --json
+certinext lookup-certificate ORDER-123 --field order --json
+certinext lookup-certificate 00:AB:CD --field serial --json
+certinext lookup-certificate REQUEST-123 --field request --json
+```
+
+`--sans` requires the optional `cryptography` dependency (`certinext[csr]`).
+The default list remains a fast orders-report read. SAN output is never shortened:
+JSON contains an array, CSV contains that array encoded as JSON within one cell,
+and the table shows every name. `null` means unknown; `[]` means the parsed leaf
+has no SAN extension. No-serial rows cannot use the cache. Failed inspections
+remain in the output with an error and cause exit 1.
+
+The cache flags `--cache/--no-cache`, `--refresh-cache`, `--cache-dir`, and
+`--cache-max-age DAYS` follow replacement-report's rules and use the same cache
+location and production/sandbox split. The default maximum age is 30 days.
+Caching remains opt-in; interactive runs ask when neither choice is supplied,
+and noninteractive runs default to live downloads. Status always comes from a
+fresh orders report. SAN listing does not prune the shared directory.
+
+Lookup returns **all** literal matches, including expired orders, within the
+live orders report's account visibility and pagination limits. Names are matched
+case-insensitively, DNS trailing dots are ignored, and wildcard SANs are literal
+(no wildcard expansion). Serials are hexadecimal, accepting `0x`, colon
+separators and leading zeros; decimal serial interpretation is not attempted.
+Use `--field` to avoid ambiguity and the expensive full SAN scan. Explicit CN,
+order, serial and request searches do not download certificates and do not accept
+cache-enabling flags.
+
+Lookup emits JSON with `matches`, `errors`, `unknown_sans`, `complete`, and
+`cache`. Each match contains the report row, optional SANs and provenance, and
+`details`: the **fresh raw order-detail response**. That preserves contact
+fields if the API returns them. Availability of the UI's Additional Email
+Recipients, Technical Point of Contact, and Certificate Download Delegation
+fields in that response has **not been live-verified**; absent fields do not
+prove there are no contacts. Details are never served from the download cache.
+Lookup exits 0 for matches with no known search failures, 1 for partial results
+(including unknown SANs in a SAN/auto scan), 2 for invalid usage, and 3 for no
+match with no known failures. See [ADR 0022](docs/adr/0022-share-certificate-download-cache-for-lookup.md).
+
+Requestor searches use an explicit field and match a full name or email exactly,
+ignoring case and surrounding whitespace:
+
+```bash
+certinext lookup-certificate person@example.org --field requestor --json
+certinext lookup-certificate "Example Person" --field requestor --json
+```
+
+This reads current order details for every report row, including pending and
+expired orders, and downloads no certificates. It can be slow for large
+accounts. `auto` does not include requestor searches. The download cache is not
+used for mutable requestor details; cache-enabling flags are inapplicable.
+`unknown_requestors` counts rows without the name or email needed for the
+query, or with an unavailable detail response. Those rows make the result incomplete (exit 1),
+so unavailable data cannot silently become a definitive no-match result.
+Requestor identity is taken from `requestor.name`/`requestor.email`, as captured
+in the saved production and sandbox response corpus; `orderedBy`, delegates,
+and additional recipients are not substituted for the requestor.

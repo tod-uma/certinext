@@ -46,6 +46,7 @@ from certinext.cli import (  # noqa: F401
     issue_cert,
     ledger,
     list_certificates,
+    lookup_certificate,
     parent_dcv_status,
     pending_dcv,
     replacement_report,

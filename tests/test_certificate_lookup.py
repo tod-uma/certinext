@@ -1,0 +1,427 @@
+# Copyright 2026 University of Maine System
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Offline SAN and lookup contract tests; all certificates and contacts are synthetic.
+
+Contact blocks below test raw pass-through only, not vendor response availability.
+"""
+
+import csv
+import datetime as dt
+import io
+import ipaddress
+import json
+from pathlib import Path
+from unittest.mock import Mock
+
+import pytest
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.x509.oid import NameOID
+
+from certinext._inspection_cache import InspectionCache
+from certinext.certificate_lookup import CertificateEntry, LookupField, enrich_sans, lookup_certificates
+from certinext.cli import main
+from certinext.exceptions import CertiNextRateLimitError
+from certinext.models.orders import OrderRecord
+from certinext.models.ssl_certificates import CertificateDownload, SslOrder
+from certinext.session import CertiNextSession
+
+
+def _download(serial: int = 171) -> CertificateDownload:
+    """Build a test leaf with DNS, IP, email, and URI SANs and a parseable chain."""
+    key = ec.generate_private_key(ec.SECP256R1())
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "lb.example.org")])
+    now = dt.datetime.now(dt.timezone.utc)
+    leaf = (
+        (
+            x509.CertificateBuilder()
+            .subject_name(name)
+            .issuer_name(name)
+            .public_key(key.public_key())
+            .serial_number(serial)
+            .not_valid_before(now - dt.timedelta(days=1))
+            .not_valid_after(now + dt.timedelta(days=1))
+            .add_extension(
+                x509.SubjectAlternativeName(
+                    [
+                        x509.DNSName("node.example.org"),
+                        x509.DNSName("*.example.org"),
+                        x509.IPAddress(ipaddress.ip_address("192.0.2.1")),
+                        x509.RFC822Name("certs@example.org"),
+                        x509.UniformResourceIdentifier("https://example.org/cert"),
+                    ]
+                ),
+                critical=False,
+            )
+            .sign(key, hashes.SHA256())
+        )
+        .public_bytes(serialization.Encoding.PEM)
+        .decode()
+    )
+    return CertificateDownload.model_validate({"certificatePem": leaf, "chainPem": [leaf]})
+
+
+def _record(order: str = "ORDER-1", serial: str = "AB") -> OrderRecord:
+    """Build a synthetic report row using the model's established wire keys."""
+    return OrderRecord.model_validate(
+        {
+            "orderNumber": order,
+            "certificateSerialNumber": serial,
+            "commonName": "lb.example.org",
+            "requestNumber": "REQ-1",
+            "certificateExpiryDate": "2020-01-01T00:00:00Z",
+        }
+    )
+
+
+def _session(*records: OrderRecord) -> Mock:
+    """Provide an offline session whose detail accessor returns a real bound order."""
+    sess = Mock(spec=CertiNextSession)
+    sess.orders = Mock()
+    sess.ssl = Mock()
+    sess.catalog = Mock()
+    sess.sandbox = False
+    sess.orders.get_list.return_value = list(records or [_record()])
+    client = Mock()
+    client.get.return_value = _download().as_dict()
+    sess.ssl.get.return_value = SslOrder.from_payload(
+        client,
+        {
+            "orderId": "ORDER-1",
+            "recipientEmails": ["current@example.org"],
+            "delegation": {"unverifiedFixtureShape": True},
+        },
+    )
+    return sess
+
+
+def test_shared_cache_and_live_contacts(tmp_path: Path) -> None:
+    """A replacement-compatible warm download avoids downloads, but not live details."""
+    sess = _session()
+    cache = InspectionCache(tmp_path)
+    cache.put("ORDER-1", "AB", _download().as_dict(), {"email": "old@example.org"})
+    result = lookup_certificates(sess, "NODE.EXAMPLE.ORG.", cache=cache)
+    assert len(result.matches) == 1 and not result.errors
+    entry = result.matches[0]
+    assert entry.from_cache
+    assert entry.sans == [
+        "node.example.org",
+        "*.example.org",
+        "192.0.2.1",
+        "certs@example.org",
+        "https://example.org/cert",
+    ]
+    assert entry.details and entry.details["recipientEmails"] == ["current@example.org"]
+    sess.ssl.get.assert_called_once_with("ORDER-1")
+    sess.ssl.get.return_value._client.get.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "field,query", [("cn", "LB.EXAMPLE.ORG."), ("order", "order-1"), ("serial", "00:AB"), ("request", "req-1")]
+)
+def test_report_identifiers_do_not_download(field: LookupField, query: str) -> None:
+    """Explicit report identifiers skip the SAN scan and preserve duplicate matches."""
+    sess = _session(_record(), _record("ORDER-2"))
+    result = lookup_certificates(sess, query, field=field)
+    assert len(result.matches) == (1 if field == "order" else 2)
+    sess.ssl.get.return_value._client.get.assert_not_called()
+
+
+def test_cold_cache_round_trip(tmp_path: Path) -> None:
+    """Cold enrichment writes entries consumable by the existing inspection cache."""
+    sess = _session()
+    cache = InspectionCache(tmp_path)
+    entries = [CertificateEntry(_record())]
+    enrich_sans(sess, entries, cache)
+    assert not entries[0].error and cache.writes == 1
+    cached = cache.get("ORDER-1", "AB")
+    assert cached and cached.download["certificatePem"]
+    second = [CertificateEntry(_record())]
+    enrich_sans(sess, second, cache)
+    assert second[0].from_cache and second[0].sans == entries[0].sans
+
+
+def test_decimal_report_serial_matches_emsign_leaf() -> None:
+    """The sandbox emSign report's decimal serial matches its downloaded leaf."""
+    sess = _session(_record(serial="171"))
+    entries = [CertificateEntry(_record(serial="171"))]
+    enrich_sans(sess, entries)
+    assert entries[0].sans and entries[0].error is None
+
+
+def test_wrong_decimal_report_serial_still_fails() -> None:
+    """Decimal compatibility never accepts a different issued certificate."""
+    sess = _session(_record(serial="172"))
+    entries = [CertificateEntry(_record(serial="172"))]
+    enrich_sans(sess, entries)
+    assert entries[0].sans is None and entries[0].error
+
+
+def test_cache_keeps_only_order_contact_name_and_email(tmp_path: Path) -> None:
+    """The shared cache stores only the documented contact fields."""
+    sess = _session()
+    sess.ssl.get.return_value = SslOrder.from_payload(
+        sess.ssl.get.return_value._client,
+        {"orderId": "ORDER-1", "orderedBy": {"name": "Example", "email": "a@example.org", "phone": "private"}},
+    )
+    cache = InspectionCache(tmp_path)
+    enrich_sans(sess, [CertificateEntry(_record())], cache)
+    hit = cache.get("ORDER-1", "AB")
+    assert hit is not None and hit.ordered_by == {"name": "Example", "email": "a@example.org"}
+
+
+def test_bad_chain_does_not_invalidate_leaf_sans(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Cache eligibility failure leaves a successful leaf SAN inspection intact."""
+    sess = _session()
+    cache = InspectionCache(tmp_path)
+    monkeypatch.setattr("certinext.certificate_lookup.inspect_download", Mock(side_effect=ValueError("bad chain")))
+    entries = [CertificateEntry(_record())]
+    enrich_sans(sess, entries, cache)
+    assert entries[0].sans and entries[0].error is None and cache.writes == 0
+
+
+def test_san_scan_retries_rate_limited_detail(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A retry delay lets a sequential scan recover from a 429."""
+    sess = _session()
+    order = sess.ssl.get.return_value
+    sess.ssl.get.side_effect = [CertiNextRateLimitError(429, {}, retry_after=0.25), order]
+    pauses = Mock()
+    monkeypatch.setattr("certinext.certificate_lookup.sleep", pauses)
+    entries = [CertificateEntry(_record())]
+    enrich_sans(sess, entries)
+    assert entries[0].sans and entries[0].error is None
+    pauses.assert_called_once_with(0.25)
+
+
+def test_exhausted_rate_limit_delays_before_next_row(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The final 429 also observes retry-after before the scan advances."""
+    sess = _session(_record(), _record("ORDER-2"))
+    sess.ssl.get.side_effect = CertiNextRateLimitError(429, {}, retry_after=0.25)
+    pauses = Mock()
+    monkeypatch.setattr("certinext.certificate_lookup.sleep", pauses)
+    entries = [CertificateEntry(r) for r in sess.orders.get_list()]
+    enrich_sans(sess, entries)
+    assert all(e.error for e in entries)
+    assert pauses.call_count == 6
+    pauses.assert_any_call(0.25)
+
+
+def test_cold_san_match_reuses_live_detail() -> None:
+    """A cold SAN match uses the order already read during that same scan."""
+    sess = _session()
+    result = lookup_certificates(sess, "node.example.org", field="san")
+    assert len(result.matches) == 1 and result.matches[0].details
+    sess.ssl.get.assert_called_once_with("ORDER-1")
+
+
+def test_bad_cache_falls_back_and_live_mismatch_fails(tmp_path: Path) -> None:
+    """A mismatched cached leaf is a miss; a mismatched live leaf is never cached."""
+    sess = _session()
+    cache = InspectionCache(tmp_path)
+    cache.put("ORDER-1", "AB", _download(172).as_dict(), {})
+    entries = [CertificateEntry(_record())]
+    enrich_sans(sess, entries, cache)
+    assert not entries[0].error and not entries[0].from_cache
+    sess.ssl.get.return_value._client.get.return_value = _download(172).as_dict()
+    cache.refresh = True
+    failed = [CertificateEntry(_record())]
+    enrich_sans(sess, failed, cache)
+    assert failed[0].sans is None and failed[0].error
+    assert cache.writes == 2  # the bad seed plus the corrected live download
+
+
+def test_unknown_sans_and_missing_order_remain_visible() -> None:
+    """Pending rows and broken issued rows are retained as unknown, never empty SANs."""
+    sess = _session(
+        OrderRecord.model_validate({"commonName": "pending.example.org"}),
+        OrderRecord.model_validate({"certificateSerialNumber": "AB"}),
+    )
+    result = lookup_certificates(sess, "absent.example.org", field="san")
+    assert not result.matches and result.unknown_sans == 2 and len(result.errors) == 1
+
+
+def test_no_wildcard_expansion() -> None:
+    """A stored wildcard SAN is matched literally, never used as a coverage rule."""
+    sess = _session()
+    assert not lookup_certificates(sess, "other.example.org", field="san").matches
+    assert lookup_certificates(sess, "*.example.org", field="san").matches
+
+
+def test_list_csv_and_lookup_cli(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    """Both commands are wired; CSV and JSON preserve all SANs and live raw details."""
+    sess = _session()
+    sess.catalog.ca_by_product_code.return_value = {}
+    monkeypatch.setattr("certinext.cli.list_certificates.session", lambda ctx: sess)
+    monkeypatch.setattr("certinext.cli.lookup_certificate.session", lambda ctx: sess)
+    assert main(["list-certificates", "--sans", "--no-cache", "--csv"]) == 0
+    rows = list(csv.DictReader(io.StringIO(capsys.readouterr().out)))
+    assert "node.example.org" in json.loads(rows[0]["sans"])
+    assert main(["lookup-certificate", "00:AB", "--field", "serial", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["matches"][0]["details"]["recipientEmails"]
+    assert main(["lookup-certificate", "absent", "--field", "order", "--json"]) == 3
+    capsys.readouterr()
+    assert main(["lookup-certificate", "--help"]) == 0
+
+
+def test_list_sans_pending_order_exits_partial(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A pending order with unknown SANs makes --sans output incomplete."""
+    sess = _session(OrderRecord.model_validate({"orderNumber": "PENDING-1"}))
+    sess.catalog.ca_by_product_code.return_value = {}
+    monkeypatch.setattr("certinext.cli.list_certificates.session", lambda ctx: sess)
+    assert main(["list-certificates", "--sans", "--no-cache", "--json"]) == 1
+    assert json.loads(capsys.readouterr().out)[0]["sans"] is None
+
+
+def test_lookup_partial_cli(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    """A failed scan exits 1 with an explicit incomplete JSON result."""
+    sess = _session()
+    sess.ssl.get.side_effect = ValueError("malformed synthetic response")
+    monkeypatch.setattr("certinext.cli.lookup_certificate.session", lambda ctx: sess)
+    assert main(["lookup-certificate", "node.example.org", "--field", "san", "--no-cache", "--json"]) == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert not payload["complete"] and payload["errors"]
+
+
+def test_no_serial_or_chain_is_never_cached(tmp_path: Path) -> None:
+    """SAN output can succeed without a chain or report serial, but cannot seed cache."""
+    sess = _session()
+    cache = InspectionCache(tmp_path)
+    download = _download().as_dict()
+    download["chainPem"] = []
+    sess.ssl.get.return_value._client.get.return_value = download
+    entries = [CertificateEntry(_record()), CertificateEntry(_record("ORDER-2", ""))]
+    enrich_sans(sess, entries, cache)
+    assert all(e.sans and not e.error for e in entries)
+    assert cache.writes == 0
+
+
+def test_expired_cache_and_refresh(tmp_path: Path) -> None:
+    """Expired entries and forced refresh both download again."""
+    sess = _session()
+    old = dt.datetime(2020, 1, 1, tzinfo=dt.timezone.utc)
+    cache = InspectionCache(tmp_path, clock=lambda: old)
+    cache.put("ORDER-1", "AB", _download().as_dict(), {})
+    current = InspectionCache(tmp_path)
+    entries = [CertificateEntry(_record())]
+    enrich_sans(sess, entries, current)
+    assert not entries[0].from_cache and current.writes == 1
+    current.refresh = True
+    enrich_sans(sess, [CertificateEntry(_record())], current)
+    assert current.writes == 2
+
+
+def test_absent_contacts_are_not_fabricated() -> None:
+    """A raw response without delegation remains without delegation in output."""
+    sess = _session()
+    sess.ssl.get.return_value = SslOrder.from_payload(Mock(), {"orderId": "ORDER-1"})
+    result = lookup_certificates(sess, "ORDER-1", field="order")
+    assert result.matches[0].details == {"orderId": "ORDER-1"}
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["list-certificates", "--cache"],
+        ["list-certificates", "--sans", "--no-cache", "--refresh-cache"],
+        ["lookup-certificate", "ORDER-1", "--field", "order", "--cache"],
+        ["lookup-certificate", "   "],
+    ],
+)
+def test_cache_usage_errors_are_local(args: list[str], capsys: pytest.CaptureFixture[str]) -> None:
+    """Conflicting or inapplicable flags fail before opening a session."""
+    assert main(args) == 2
+    capsys.readouterr()
+
+
+@pytest.mark.parametrize("environment", ["prod", "sandbox"])
+def test_requestor_from_captured_corpus(environment: str) -> None:
+    """Requestor matching uses captured response fields, not a guessed schema."""
+    fixture = Path(__file__).parent / "fixtures" / "corpus" / environment / "ssl-certificates-detail.json"
+    detail = json.loads(fixture.read_text(encoding="utf-8"))["response"]["body"]
+    sess = _session(_record(), _record("ORDER-2"))
+    client = Mock()
+    sess.ssl.get.return_value = SslOrder.from_payload(client, detail)
+    for identifier in (detail["requestor"]["name"], detail["requestor"]["email"]):
+        sess.ssl.get.reset_mock()
+        result = lookup_certificates(sess, "  " + identifier.upper() + "  ", field="requestor")
+        assert len(result.matches) == 2 and result.unknown_requestors == 0 and not result.errors
+        assert sess.ssl.get.call_count == 2  # a matching detail is not fetched again
+        client.get.assert_not_called()  # requestor search never downloads certificates
+
+
+@pytest.mark.parametrize("who", [None, "invalid", [], {}, {"name": "", "email": None}, {"name": ["bad"]}])
+def test_unavailable_requestor_is_unknown(who: object) -> None:
+    """Malformed or missing requestor data limits completeness without inventing identity."""
+    sess = _session()
+    sess.ssl.get.return_value = SslOrder.from_payload(
+        Mock(),
+        {
+            "orderId": "ORDER-1",
+            "requestor": who,
+            "orderedBy": {"name": "Example Person"},
+        },
+    )
+    result = lookup_certificates(sess, "Example Person", field="requestor")
+    assert not result.matches and result.unknown_requestors == 1
+
+
+def test_requestor_search_keeps_successes_after_detail_failure() -> None:
+    """A failed detail read cannot hide later matches or become a clean no-match result."""
+    sess = _session(_record(), OrderRecord.model_validate({"orderNumber": "PENDING-2"}))
+    client = Mock()
+    sess.ssl.get.side_effect = [
+        ValueError("synthetic malformed response"),
+        SslOrder.from_payload(client, {"requestor": {"email": "person@example.org"}}),
+    ]
+    result = lookup_certificates(sess, "person@example.org", field="requestor")
+    assert len(result.matches) == 1 and result.matches[0].record.order_number == "PENDING-2"
+    assert result.unknown_requestors == 1 and len(result.errors) == 1
+    client.get.assert_not_called()
+
+
+def test_requestor_does_not_substring_match() -> None:
+    """A name or email must match completely, without substring or wildcard expansion."""
+    sess = _session()
+    sess.ssl.get.return_value = SslOrder.from_payload(Mock(), {"requestor": {"name": "Example Person"}})
+    result = lookup_certificates(sess, "Example", field="requestor")
+    assert not result.matches and result.unknown_requestors == 0
+
+
+@pytest.mark.parametrize(
+    "who,query",
+    [({"name": "Example Person"}, "person@example.org"), ({"email": "person@example.org"}, "Example Person")],
+)
+def test_missing_requestor_target_is_unknown(who: dict[str, str], query: str) -> None:
+    """An absent name or email cannot prove a non-match for that field."""
+    sess = _session()
+    sess.ssl.get.return_value = SslOrder.from_payload(Mock(), {"requestor": who})
+    result = lookup_certificates(sess, query, field="requestor")
+    assert not result.matches and result.unknown_requestors == 1
+
+
+def test_requestor_cli(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    """CLI requestor matching reports unavailable rows explicitly and returns partial success."""
+    sess = _session(_record(), _record("ORDER-2"))
+    sess.ssl.get.side_effect = [
+        SslOrder.from_payload(Mock(), {"requestor": {"email": "person@example.org"}}),
+        SslOrder.from_payload(Mock(), {"orderId": "ORDER-2"}),
+    ]
+    monkeypatch.setattr("certinext.cli.lookup_certificate.session", lambda ctx: sess)
+    assert main(["lookup-certificate", "person@example.org", "--field", "requestor", "--json"]) == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert len(payload["matches"]) == 1 and payload["unknown_requestors"] == 1 and not payload["complete"]

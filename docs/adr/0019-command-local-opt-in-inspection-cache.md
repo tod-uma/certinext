@@ -9,8 +9,10 @@ date: 2026-10-21
 > consequence below are superseded in part by
 > [ADR 0021](0021-replacement-report-defaults-to-ca-signal.md): the default is
 > now 30 days, `--cache-max-age DAYS` overrides it, and a run with the chain
-> signal active warns when the age is over 7 days. Every other rule remains in
-> force.
+> signal active warns when the age is over 7 days.
+> [ADR 0022](0022-share-certificate-download-cache-for-lookup.md) supersedes
+> command-local cache ownership for SAN listing and certificate lookup.
+> The remaining rules stay in force.
 
 ## Context and problem statement
 
