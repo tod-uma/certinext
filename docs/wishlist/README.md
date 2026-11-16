@@ -34,3 +34,4 @@ a terminal state. Numbering is sequential and never reused.
 | [IDEA-013](IDEA-013-enforce-ruff-format.md) | Run `ruff format` and enforce it in CI | Proposed | #33 | 2026-08-26 |
 | [IDEA-014](IDEA-014-clm-certificate-report-access.md) | Request CLM certificate-report API access for server-side key filtering | Proposed | #35 | 2026-10-21 |
 | [IDEA-015](IDEA-015-list-certificates-status-values.md) | `list-certificates --status` help advertises values that return 422 | Proposed | #36 | 2026-10-21 |
+| [IDEA-016](IDEA-016-powershell-completion-env-leak.md) | Interrupted PowerShell tab completion leaves certinext silently doing nothing | Proposed | #41 | 2026-11-16 |
