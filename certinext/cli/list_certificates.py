@@ -92,6 +92,7 @@ def list_certificates(
         return cas.get(product_code or "", "")
 
     entries = [CertificateEntry(o) for o in orders]
+    unknown = 0
     if sans:
         cache = (
             _build_cache(sess, refresh_cache, cache_directory, cache_max_age or DEFAULT_MAX_AGE.days)
