@@ -2768,8 +2768,8 @@ certinext lookup-certificate REQUEST-123 --field request --json
 The default list remains a fast orders-report read. SAN output is never shortened:
 JSON contains an array, CSV contains that array encoded as JSON within one cell,
 and the table shows every name. `null` means unknown; `[]` means the parsed leaf
-has no SAN extension. No-serial rows cannot use the cache. Failed inspections
-remain in the output with an error and cause exit 1.
+has no SAN extension. No-serial rows cannot use the cache. Unknown SANs and
+failed inspections remain in the output and cause exit 1.
 
 The cache flags `--cache/--no-cache`, `--refresh-cache`, `--cache-dir`, and
 `--cache-max-age DAYS` follow replacement-report's rules and use the same cache
@@ -2781,8 +2781,11 @@ fresh orders report. SAN listing does not prune the shared directory.
 Lookup returns **all** literal matches, including expired orders, within the
 live orders report's account visibility and pagination limits. Names are matched
 case-insensitively, DNS trailing dots are ignored, and wildcard SANs are literal
-(no wildcard expansion). Serials are hexadecimal, accepting `0x`, colon
-separators and leading zeros; decimal serial interpretation is not attempted.
+(no wildcard expansion). Serial lookup treats values as hexadecimal, accepting
+`0x`, colon separators and leading zeros; it does not convert the vendor's
+decimal report serials. During SAN inspection, the downloaded leaf is checked
+against both hexadecimal and decimal forms of the report serial because
+historical emSign rows in the sandbox use decimal serials.
 Use `--field` to avoid ambiguity and the expensive full SAN scan. Explicit CN,
 order, serial and request searches do not download certificates and do not accept
 cache-enabling flags.
