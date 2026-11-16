@@ -2810,8 +2810,8 @@ This reads current order details for every report row, including pending and
 expired orders, and downloads no certificates. It can be slow for large
 accounts. `auto` does not include requestor searches. The download cache is not
 used for mutable requestor details; cache-enabling flags are inapplicable.
-`unknown_requestors` counts rows with no usable requestor name/email or an
-unavailable detail response. Those rows make the result incomplete (exit 1),
+`unknown_requestors` counts rows without the name or email needed for the
+query, or with an unavailable detail response. Those rows make the result incomplete (exit 1),
 so unavailable data cannot silently become a definitive no-match result.
 Requestor identity is taken from `requestor.name`/`requestor.email`, as captured
 in the saved production and sandbox response corpus; `orderedBy`, delegates,

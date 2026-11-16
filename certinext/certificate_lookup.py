@@ -19,19 +19,36 @@ replacement-report cache; mutable order details are fetched for every match.
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from time import sleep
+from typing import Any, Callable, Literal, TypeVar
 
 import httpx
 
 from certinext._chain import split_pem_certificates
 from certinext._inspection_cache import InspectionCache
-from certinext.exceptions import CertiNextAPIError
+from certinext.exceptions import CertiNextAPIError, CertiNextRateLimitError
 from certinext.models.orders import OrderRecord
 from certinext.models.ssl_certificates import CertificateDownload
 from certinext.replacement import inspect_download
 from certinext.session import CertiNextSession
 
 LookupField = Literal["auto", "san", "cn", "order", "serial", "request", "requestor"]
+
+_RATE_LIMIT_ATTEMPTS = 3
+_DEFAULT_RETRY_AFTER = 5.0
+_T = TypeVar("_T")
+
+
+def _retry_rate_limit(call: Callable[[], _T]) -> _T:
+    """Retry one sequential API read after the vendor's rate-limit delay."""
+    for attempt in range(1, _RATE_LIMIT_ATTEMPTS + 1):
+        try:
+            return call()
+        except CertiNextRateLimitError as exc:
+            if attempt == _RATE_LIMIT_ATTEMPTS:
+                raise
+            sleep(exc.retry_after if exc.retry_after is not None else _DEFAULT_RETRY_AFTER)
+    raise AssertionError("unreachable retry state")
 
 
 def normalize_serial(value: str) -> str:
@@ -131,23 +148,24 @@ def enrich_sans(
                         continue
                 except ValueError:
                     pass  # An invalid cache entry is a miss; try live.
+        order_number = record.order_number
         try:
-            order = sess.ssl.get(record.order_number)
-            download = order.download_certificate()
+            order = _retry_rate_limit(lambda: sess.ssl.get(order_number))
+            download = _retry_rate_limit(order.download_certificate)
             entry.sans = _parse(download, record)
-            if cache is not None and record.certificate_serial_number:
-                inspection = inspect_download(download)
-                if inspection.chain_cas:
-                    detail = order.as_dict()
-                    who = detail.get("orderedBy") or detail.get("requestor") or {}
-                    cache.put(
-                        record.order_number,
-                        record.certificate_serial_number,
-                        download.as_dict(),
-                        who if isinstance(who, dict) else {},
-                    )
         except (CertiNextAPIError, httpx.HTTPError, ValueError) as exc:
             entry.error = f"SAN inspection failed ({type(exc).__name__})"
+            continue
+        if cache is not None and record.certificate_serial_number:
+            try:
+                inspection = inspect_download(download)
+            except ValueError:
+                continue  # A cache-ineligible chain does not invalidate parsed leaf SANs.
+            if inspection.chain_cas:
+                detail = order.as_dict()
+                who = detail.get("orderedBy") or detail.get("requestor") or {}
+                contact = {key: who.get(key) for key in ("name", "email")} if isinstance(who, dict) else {}
+                cache.put(record.order_number, record.certificate_serial_number, download.as_dict(), contact)
 
 
 def _matches(entry: CertificateEntry, query: str, field: LookupField) -> bool:
@@ -177,7 +195,10 @@ def _requestor_match(details: dict[str, Any], query: str) -> bool | None:
         return None
     values = [who.get(key) for key in ("name", "email")]
     known = [v.strip().casefold() for v in values if isinstance(v, str) and v.strip()]
-    return query.casefold() in known if known else None
+    if query.casefold() in known:
+        return True
+    target = who.get("email" if "@" in query else "name")
+    return False if isinstance(target, str) and target.strip() else None
 
 
 def _read_details(sess: CertiNextSession, entry: CertificateEntry) -> None:
@@ -187,7 +208,8 @@ def _read_details(sess: CertiNextSession, entry: CertificateEntry) -> None:
     try:
         if not entry.record.order_number:
             raise ValueError("orders report omitted the order number")
-        entry.details = sess.ssl.get(entry.record.order_number).as_dict()
+        order_number = entry.record.order_number
+        entry.details = _retry_rate_limit(lambda: sess.ssl.get(order_number)).as_dict()
     except (CertiNextAPIError, httpx.HTTPError, ValueError) as exc:
         entry.error = f"detail lookup failed ({type(exc).__name__})"
 

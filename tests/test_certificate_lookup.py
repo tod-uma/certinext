@@ -34,6 +34,7 @@ from cryptography.x509.oid import NameOID
 from certinext._inspection_cache import InspectionCache
 from certinext.certificate_lookup import CertificateEntry, LookupField, enrich_sans, lookup_certificates
 from certinext.cli import main
+from certinext.exceptions import CertiNextRateLimitError
 from certinext.models.orders import OrderRecord
 from certinext.models.ssl_certificates import CertificateDownload, SslOrder
 from certinext.session import CertiNextSession
@@ -151,6 +152,42 @@ def test_cold_cache_round_trip(tmp_path: Path) -> None:
     second = [CertificateEntry(_record())]
     enrich_sans(sess, second, cache)
     assert second[0].from_cache and second[0].sans == entries[0].sans
+
+
+def test_cache_keeps_only_order_contact_name_and_email(tmp_path: Path) -> None:
+    """The shared cache stores only the documented contact fields."""
+    sess = _session()
+    sess.ssl.get.return_value = SslOrder.from_payload(
+        sess.ssl.get.return_value._client,
+        {"orderId": "ORDER-1", "orderedBy": {"name": "Example", "email": "a@example.org", "phone": "private"}},
+    )
+    cache = InspectionCache(tmp_path)
+    enrich_sans(sess, [CertificateEntry(_record())], cache)
+    hit = cache.get("ORDER-1", "AB")
+    assert hit is not None and hit.ordered_by == {"name": "Example", "email": "a@example.org"}
+
+
+def test_bad_chain_does_not_invalidate_leaf_sans(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Cache eligibility failure leaves a successful leaf SAN inspection intact."""
+    sess = _session()
+    cache = InspectionCache(tmp_path)
+    monkeypatch.setattr("certinext.certificate_lookup.inspect_download", Mock(side_effect=ValueError("bad chain")))
+    entries = [CertificateEntry(_record())]
+    enrich_sans(sess, entries, cache)
+    assert entries[0].sans and entries[0].error is None and cache.writes == 0
+
+
+def test_san_scan_retries_rate_limited_detail(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A retry delay lets a sequential scan recover from a 429."""
+    sess = _session()
+    order = sess.ssl.get.return_value
+    sess.ssl.get.side_effect = [CertiNextRateLimitError(429, {}, retry_after=0.25), order]
+    pauses = Mock()
+    monkeypatch.setattr("certinext.certificate_lookup.sleep", pauses)
+    entries = [CertificateEntry(_record())]
+    enrich_sans(sess, entries)
+    assert entries[0].sans and entries[0].error is None
+    pauses.assert_called_once_with(0.25)
 
 
 def test_bad_cache_falls_back_and_live_mismatch_fails(tmp_path: Path) -> None:
@@ -315,6 +352,18 @@ def test_requestor_does_not_substring_match() -> None:
     sess.ssl.get.return_value = SslOrder.from_payload(Mock(), {"requestor": {"name": "Example Person"}})
     result = lookup_certificates(sess, "Example", field="requestor")
     assert not result.matches and result.unknown_requestors == 0
+
+
+@pytest.mark.parametrize(
+    "who,query",
+    [({"name": "Example Person"}, "person@example.org"), ({"email": "person@example.org"}, "Example Person")],
+)
+def test_missing_requestor_target_is_unknown(who: dict[str, str], query: str) -> None:
+    """An absent name or email cannot prove a non-match for that field."""
+    sess = _session()
+    sess.ssl.get.return_value = SslOrder.from_payload(Mock(), {"requestor": who})
+    result = lookup_certificates(sess, query, field="requestor")
+    assert not result.matches and result.unknown_requestors == 1
 
 
 def test_requestor_cli(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
