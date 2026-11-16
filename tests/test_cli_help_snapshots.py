@@ -38,6 +38,7 @@ _HELP_CASES: dict[str, list[str]] = {
     "issue-cert": ["issue-cert"],
     "ledger": ["ledger"],
     "list-certificates": ["list-certificates"],
+    "lookup-certificate": ["lookup-certificate"],
     "parent-dcv-status": ["parent-dcv-status"],
     "pending-dcv": ["pending-dcv"],
     "replacement-report": ["replacement-report"],
