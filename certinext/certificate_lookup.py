@@ -45,9 +45,9 @@ def _retry_rate_limit(call: Callable[[], _T]) -> _T:
         try:
             return call()
         except CertiNextRateLimitError as exc:
+            sleep(exc.retry_after if exc.retry_after is not None else _DEFAULT_RETRY_AFTER)
             if attempt == _RATE_LIMIT_ATTEMPTS:
                 raise
-            sleep(exc.retry_after if exc.retry_after is not None else _DEFAULT_RETRY_AFTER)
     raise AssertionError("unreachable retry state")
 
 
@@ -151,6 +151,7 @@ def enrich_sans(
         order_number = record.order_number
         try:
             order = _retry_rate_limit(lambda: sess.ssl.get(order_number))
+            entry.details = order.as_dict()
             download = _retry_rate_limit(order.download_certificate)
             entry.sans = _parse(download, record)
         except (CertiNextAPIError, httpx.HTTPError, ValueError) as exc:

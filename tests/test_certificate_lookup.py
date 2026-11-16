@@ -190,6 +190,27 @@ def test_san_scan_retries_rate_limited_detail(monkeypatch: pytest.MonkeyPatch) -
     pauses.assert_called_once_with(0.25)
 
 
+def test_exhausted_rate_limit_delays_before_next_row(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The final 429 also observes retry-after before the scan advances."""
+    sess = _session(_record(), _record("ORDER-2"))
+    sess.ssl.get.side_effect = CertiNextRateLimitError(429, {}, retry_after=0.25)
+    pauses = Mock()
+    monkeypatch.setattr("certinext.certificate_lookup.sleep", pauses)
+    entries = [CertificateEntry(r) for r in sess.orders.get_list()]
+    enrich_sans(sess, entries)
+    assert all(e.error for e in entries)
+    assert pauses.call_count == 6
+    pauses.assert_any_call(0.25)
+
+
+def test_cold_san_match_reuses_live_detail() -> None:
+    """A cold SAN match uses the order already read during that same scan."""
+    sess = _session()
+    result = lookup_certificates(sess, "node.example.org", field="san")
+    assert len(result.matches) == 1 and result.matches[0].details
+    sess.ssl.get.assert_called_once_with("ORDER-1")
+
+
 def test_bad_cache_falls_back_and_live_mismatch_fails(tmp_path: Path) -> None:
     """A mismatched cached leaf is a miss; a mismatched live leaf is never cached."""
     sess = _session()
@@ -237,6 +258,17 @@ def test_list_csv_and_lookup_cli(monkeypatch: pytest.MonkeyPatch, capsys: pytest
     assert main(["lookup-certificate", "absent", "--field", "order", "--json"]) == 3
     capsys.readouterr()
     assert main(["lookup-certificate", "--help"]) == 0
+
+
+def test_list_sans_pending_order_exits_partial(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A pending order with unknown SANs makes --sans output incomplete."""
+    sess = _session(OrderRecord.model_validate({"orderNumber": "PENDING-1"}))
+    sess.catalog.ca_by_product_code.return_value = {}
+    monkeypatch.setattr("certinext.cli.list_certificates.session", lambda ctx: sess)
+    assert main(["list-certificates", "--sans", "--no-cache", "--json"]) == 1
+    assert json.loads(capsys.readouterr().out)[0]["sans"] is None
 
 
 def test_lookup_partial_cli(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:

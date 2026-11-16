@@ -143,5 +143,5 @@ def list_certificates(
         print(f"Certificates{status_label}:\n")
         data_console().print(rows_table(rows))
         print(f"\n{len(orders)} certificate(s)")
-    if any(e.error for e in entries):
+    if any(e.error for e in entries) or (sans and unknown):
         raise typer.Exit(1)
