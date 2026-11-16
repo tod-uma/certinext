@@ -35,14 +35,24 @@ SSL.com equivalent there. Untested in prod: `843`/`844`/`845` → `1012`/`1013`/
 `1014`. Don't copy a sandbox code into a prod command; list the prod catalog
 first.
 
-**The catalog can't show a credential's CA.** It lists both categories
-either way. `ProductCategory.ca` says which CA a *product* belongs to;
+**The catalog can't show a credential's CA.** What it lists doesn't depend
+on the credential (sandbox: both categories; prod: SSL.com only since
+2026-11-15). `ProductCategory.ca` says which CA a *product* belongs to;
 label orders by joining `OrderRecord.product_code` to
 `catalog.ca_by_product_code()`. That still works for translated orders,
 because the report records the SSL.com code. Don't read a code's catalog CA as
 "where an order with it goes": `970` is in the emSign category but issues from
 SSL.com on an SSL.com credential. Don't use `issuer_ca` either: emSign issues
 from InCommon-branded intermediates whose names never say emSign.
+
+**Prod dropped the emSign category (2026-11-15).** The prod catalog now lists
+only `"SSL.com"` (`1011`-`1014`), so `ca_by_product_code()` falls back to
+`LEGACY_EMSIGN_CODES` in `certinext/models/catalog.py` (prod: the 56 KB §5
+profiles; sandbox: 57 codes copied from its catalog 2026-11-16). If an emSign
+order shows up `unknown` with an "Orders with a product code the catalog does
+not list" warning, its code is missing from those tables. Confirm it's emSign
+(KB, cert chain) before adding it, and add it to the code-by-code list in
+`test_legacy_code_sets_match_their_sources` too.
 
 **`validity_years` is not the lifetime.** The SSL.com staging cert lasted 90
 days on `validityYears: 1`.
