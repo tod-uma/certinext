@@ -964,8 +964,10 @@ Each certificate is checked against up to four **signals**:
 
 The CA comes **only** from the product code, never from the issuer name:
 emSign issues from InCommon-branded intermediates, so the name can't tell the
-CAs apart. An order whose product code the catalog doesn't map gets verdict
-`unknown` (with a warning). With the `ca` signal on, the report fails (exit 1)
+CAs apart. Codes of emSign products the catalog no longer lists (prod dropped
+them on 2026-11-15) still map to `EMSIGN` from a built-in table; see
+[Working with the catalog](#working-with-the-catalog). Any other code the
+catalog doesn't map gets verdict `unknown` (with a warning). With the `ca` signal on, the report fails (exit 1)
 if the catalog can't be read or lists no products, rather than turning every
 row `unknown`.
 
@@ -2332,8 +2334,14 @@ Products have no CA field, so `ProductCategory.ca` reads the category name:
 `"SSL/TLS Certificates"` is emSign and `"SSL.com"` is SSL.com. Any other
 category is `"UNKNOWN"`, never assumed to be emSign. Join on `product_code`,
 not `issuer_ca`: emSign issues from InCommon-branded intermediates whose
-names don't mention emSign. The catalog lists every category whichever CA
-your credential uses, so it can't tell you where an order will go.
+names don't mention emSign. The catalog lists a category whichever CA your
+credential uses, so it can't tell you where an order will go.
+
+Since 2026-11-15 the production catalog lists only the SSL.com category. So
+that existing emSign orders keep their CA, `ca_by_product_code()` falls back to
+`LEGACY_EMSIGN_CODES` (in `certinext.models.catalog`): the 56 production emSign
+profile codes and the 57 sandbox codes. A code the catalog does list keeps the
+catalog's answer. An empty catalog stays empty, so callers can still refuse it.
 
 ### Working with the ledger
 

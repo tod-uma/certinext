@@ -148,7 +148,9 @@ class ProductCategory(CertiNextModel):
 
         This tells you which CA a *product* belongs to. It cannot tell you
         which CA an order will use: the API credential decides that (ADR
-        0020 amendment), and the catalog lists every category either way.
+        0020 amendment), and the catalog's listing doesn't depend on the
+        credential. (Prod stopped listing emSign on 2026-11-15; see
+        :data:`LEGACY_EMSIGN_CODES`.)
         """
         return CATEGORY_CA.get(_category_key(self.category_name or ""), UNKNOWN_CA)
 
