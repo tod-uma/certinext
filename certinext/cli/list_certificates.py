@@ -14,7 +14,6 @@
 
 """``certinext list-certificates`` — list SSL/TLS certificate orders."""
 
-import contextlib
 import csv
 import json
 import sys
@@ -28,7 +27,7 @@ from certinext._inspection_cache import DEFAULT_MAX_AGE
 from certinext.certificate_lookup import CertificateEntry, enrich_sans
 from certinext.cli._app import app
 from certinext.cli._certificate_cache import _build_cache, _resolve_cache
-from certinext.cli._shared import _check_output, _open_output, data_console, rows_table, session
+from certinext.cli._shared import _check_output, _open_output, _output_stream, data_console, rows_table, session
 from certinext.exceptions import CertiNextAPIError
 from certinext.session import CertiNextSession
 
@@ -73,6 +72,7 @@ def list_certificates(
         metavar="FILE",
         help="Write the table, JSON, or CSV to FILE (UTF-8) instead of stdout",
     ),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Overwrite an existing output file without prompting"),
     use_cache: Optional[bool] = typer.Option(None, "--cache/--no-cache", help="Reuse replacement-report downloads"),
     refresh_cache: bool = typer.Option(False, "--refresh-cache", help="Refresh downloads; implies --cache"),
     cache_directory: Optional[Path] = typer.Option(None, "--cache-dir", help="Shared cache base; implies --cache"),
@@ -88,7 +88,7 @@ def list_certificates(
     """
     if csv_output and ctx.obj.output_json:
         raise typer.BadParameter("--csv and --json are mutually exclusive")
-    _check_output(output)
+    _check_output(output, yes)
     caching = _resolve_cache(sans, use_cache, refresh_cache, cache_directory, cache_max_age, inspect_option="--sans")
     if cache_directory is not None and cache_directory.expanduser().is_file():
         raise typer.BadParameter("cache directory is a file", param_hint="--cache-dir")
@@ -140,11 +140,13 @@ def list_certificates(
         for o, e in zip(orders, entries)
     ]
     fh = _open_output(output)
-    with fh or contextlib.nullcontext(sys.stdout) as out:
+    with _output_stream(fh) as out:
         if ctx.obj.output_json:
             print(json.dumps(records, indent=2), file=out)
         elif csv_output:
-            writer = csv.DictWriter(out, fieldnames=list(rows[0]) if rows else ["order_number", "sans", "error"])
+            writer = csv.DictWriter(
+                out, fieldnames=list(rows[0]) if rows else ["order_number", "sans", "error"], lineterminator="\n"
+            )
             writer.writeheader()
             writer.writerows(rows)
         elif not orders:

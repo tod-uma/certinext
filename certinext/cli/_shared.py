@@ -31,10 +31,11 @@ prompts. Use :func:`data_console` for stdout tables and plain ``print`` for
 JSON/PEM; diagnostics go through structlog or :data:`err_console`.
 """
 
+import contextlib
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, TextIO
+from typing import Any, Iterator, TextIO
 
 import structlog
 import typer
@@ -80,7 +81,7 @@ from certinext.cli_options import (
 from certinext.cli_options import (
     connect as connect,
 )
-from certinext.cli_support import LogFormat, LogMode
+from certinext.cli_support import LogFormat, LogMode, prompt_stderr
 from certinext.session import CertiNextSession
 
 # When stdout is piped, rich caps the console at 80 columns and would wrap or
@@ -234,11 +235,12 @@ def pairs_table(data: dict[str, Any]) -> Table:
     return table
 
 
-def _check_output(path: Path | None) -> None:
+def _check_output(path: Path | None, yes: bool = False) -> None:
     """Reject an ``--output`` path that cannot work, before the slow part.
 
     Args:
         path: The ``--output`` value, or None for stdout.
+        yes: Skip confirmation before replacing an existing file.
 
     Raises:
         typer.BadParameter: If the path is a directory or its parent
@@ -250,12 +252,24 @@ def _check_output(path: Path | None) -> None:
         raise typer.BadParameter(f"{path} is a directory", param_hint="--output")
     if not path.resolve().parent.is_dir():
         raise typer.BadParameter(f"directory {path.resolve().parent} does not exist", param_hint="--output")
+    if path.exists() and not yes:
+        if not sys.stdin.isatty():
+            print(f"Output file exists: {path}; pass --yes to overwrite it", file=sys.stderr)
+            raise typer.Exit(1)
+        try:
+            answer = prompt_stderr(f"Overwrite '{path}'? [y/N]: ").strip().lower()
+        except EOFError:
+            print(file=sys.stderr)
+            answer = ""
+        if answer not in ("y", "yes"):
+            print("Aborted.", file=sys.stderr)
+            raise typer.Exit(1)
 
 
 def _open_output(path: Path | None) -> TextIO | None:
     """Open the ``--output`` file, falling back to stdout if that fails.
 
-    The report may have taken an hour to build, so a file that cannot be
+    The output may have taken an hour to build, so a file that cannot be
     opened (locked by Excel, permissions) is logged rather than fatal; the
     caller writes to stdout instead and exits 1.
 
@@ -271,6 +285,26 @@ def _open_output(path: Path | None) -> TextIO | None:
         return open(path, "w", encoding="utf-8", newline="")
     except OSError as exc:
         structlog.get_logger(__name__).error(
-            "Cannot write output file; writing the report to stdout instead", path=str(path), error=str(exc)
+            "Cannot write output file; writing the output to stdout instead", path=str(path), error=str(exc)
         )
         return None
+
+
+@contextlib.contextmanager
+def _output_stream(file: TextIO | None) -> Iterator[TextIO]:
+    """Close file output and report write or close errors without a traceback.
+
+    Args:
+        file: An open output file, or None for stdout.
+
+    Yields:
+        The output stream.
+    """
+    try:
+        with file or contextlib.nullcontext(sys.stdout) as stream:
+            yield stream
+    except OSError as exc:
+        if file is None:
+            raise
+        structlog.get_logger(__name__).error("Cannot finish writing output file", error=str(exc))
+        raise typer.Exit(1) from exc

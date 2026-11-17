@@ -17,6 +17,8 @@
 │                                                          JSON array)                             │
 │ --output         -o                FILE                  Write the table, JSON, or CSV to FILE   │
 │                                                          (UTF-8) instead of stdout               │
+│ --yes            -y                                      Overwrite an existing output file       │
+│                                                          without prompting                       │
 │ --cache              --no-cache                          Reuse replacement-report downloads      │
 │ --refresh-cache                                          Refresh downloads; implies --cache      │
 │ --cache-dir                        PATH                  Shared cache base; implies --cache      │

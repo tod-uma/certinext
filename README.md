@@ -924,6 +924,7 @@ the list still prints.
 --json            Output raw JSON instead of tabular format
 --csv             Output CSV instead of tabular format
 -o, --output FILE Write the table, JSON, or CSV to FILE (UTF-8) instead of stdout
+-y, --yes        Overwrite an existing output file without prompting
 ```
 
 #### Examples
@@ -938,9 +939,11 @@ certinext list-certificates --json -o certificates.json
 certinext list-certificates --csv -o certificates.csv
 ```
 
-Output files are overwritten. Invalid output directories are rejected before
-connecting. If the file cannot be opened, the listing goes to stdout and the
-command exits 1. Diagnostics remain on stderr.
+Existing output files require confirmation before connecting; pass `--yes` for
+unattended runs. Invalid output directories are also rejected before connecting.
+If the file cannot be opened, the listing goes to stdout and the command exits 1.
+A write or close failure exits 1 and may leave a partial file. Diagnostics remain
+on stderr.
 
 ---
 
@@ -1101,7 +1104,12 @@ intermediate, so their key type matches while their chain is trusted.
 --csv                     CSV on stdout (summary on stderr)
 --json                    JSON on stdout: times, criteria, cache, summary, summary_scope, certificates, incomplete, breakdown
 -o, --output FILE         Write the table, JSON, or CSV to FILE (UTF-8) instead of stdout
+-y, --yes                 Overwrite an existing output file without prompting
 ```
+
+Existing output files require confirmation before report building starts;
+pass `--yes` for unattended runs. A write or close failure exits 1 and may
+leave a partial file.
 
 `--inspect` makes two requests per certificate. Done one at a time, that took
 about 55 minutes for ~574 certificates in prod, so downloads run four at a time

@@ -20,7 +20,6 @@ report, and renders it as a table, JSON, or CSV. Data goes to stdout, or to
 the ``--output`` file; progress and logs go to stderr.
 """
 
-import contextlib
 import csv
 import datetime as dt
 import json
@@ -42,6 +41,7 @@ from certinext.cli._app import app
 from certinext.cli._shared import (
     _check_output,
     _open_output,
+    _output_stream,
     data_console,
     err_console,
     progress_disabled,
@@ -436,6 +436,7 @@ def replacement_report(
         None, "--output", "-o", metavar="FILE",
         help="Write the table, JSON, or CSV to FILE (UTF-8) instead of stdout",
     ),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Overwrite an existing output file without prompting"),
 ) -> None:
     """List currently valid certificates that need replacing after a CA distrust.
 
@@ -452,7 +453,7 @@ def replacement_report(
     """
     if output_csv and ctx.obj.output_json:
         raise typer.BadParameter("--csv and --json are mutually exclusive")
-    _check_output(output)
+    _check_output(output, yes)
     if cache_directory is not None and cache_directory.expanduser().is_file():
         raise typer.BadParameter(f"{cache_directory} is a file", param_hint="--cache-dir")
     criteria = _criteria(ca, issuer, key_type, chain_ca, disable_signal)
@@ -515,7 +516,7 @@ def replacement_report(
         )
 
     fh = _open_output(output)
-    with fh or contextlib.nullcontext(sys.stdout) as out:
+    with _output_stream(fh) as out:
         if ctx.obj.output_json:
             ended = (report.ended_at or report.started_at).isoformat()
             doc: dict[str, Any] = {

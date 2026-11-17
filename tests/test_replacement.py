@@ -1699,6 +1699,21 @@ def test_cli_output_unopenable_falls_back_to_stdout(
     assert json.loads(out)["summary"]["needs_replacing"] == 1
 
 
+def test_cli_existing_output_requires_yes(
+    run_cli: Callable[..., tuple[int, str, str]], tmp_path: Path
+) -> None:
+    """An unattended replacement report does not overwrite an existing file."""
+    target = tmp_path / "report.json"
+    target.write_text("old", encoding="utf-8")
+    code, out, err = run_cli(["--json", "-o", str(target)], config=G3_CONFIG)
+    assert code == 1
+    assert out == "" and "--yes" in err
+    assert target.read_text(encoding="utf-8") == "old"
+    code, out, _ = run_cli(["--json", "-o", str(target), "--yes"], config=G3_CONFIG)
+    assert code == 0 and out == ""
+    assert json.loads(target.read_text(encoding="utf-8"))["summary"]["needs_replacing"] == 1
+
+
 def test_cli_help_mentions_json(capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
     """--json is a root option, so the command's own help has to point at it."""
     monkeypatch.setenv("COLUMNS", "200")

@@ -443,7 +443,7 @@ def test_list_output_file(
     monkeypatch.setattr("certinext.cli.list_certificates.session", lambda ctx: sess)
     path = tmp_path / "certificates.txt"
     path.write_text("old content", encoding="utf-8")
-    args = ["list-certificates", option, str(path)]
+    args = ["list-certificates", option, str(path), "--yes"]
     if format_flag:
         args.append(format_flag)
     assert main(args) == 0
@@ -454,7 +454,7 @@ def test_list_output_file(
         assert json.loads(text)[0]["commonName"] == record.common_name
     elif format_flag == "--csv":
         assert list(csv.DictReader(io.StringIO(text)))[0]["common_name"] == record.common_name
-        assert b"\r\r\n" not in path.read_bytes()
+        assert b"\r\n" not in path.read_bytes()
     else:
         assert "ORDER-1" in text and "caf\u00e9.example.org" in text
         assert "1 certificate(s)" in text and "\x1b[" not in text
@@ -473,6 +473,42 @@ def test_list_invalid_output_before_session(
     assert "--output" in capsys.readouterr().err
 
 
+def test_list_existing_output_refused_before_session(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    """An unattended overwrite requires --yes before any session starts."""
+    path = tmp_path / "existing.json"
+    path.write_text("keep me", encoding="utf-8")
+    session_mock = Mock()
+    monkeypatch.setattr("certinext.cli.list_certificates.session", session_mock)
+    assert main(["list-certificates", "--json", "-o", str(path)]) == 1
+    session_mock.assert_not_called()
+    assert path.read_text(encoding="utf-8") == "keep me"
+    assert "--yes" in capsys.readouterr().err
+
+
+def test_list_existing_output_confirmed_before_session(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """An interactive answer is collected before authentication."""
+    path = tmp_path / "existing.json"
+    path.write_text("old", encoding="utf-8")
+    stdin = Mock()
+    stdin.isatty.return_value = True
+    monkeypatch.setattr("certinext.cli._shared.sys.stdin", stdin)
+    prompt = Mock(return_value="yes")
+    monkeypatch.setattr("certinext.cli._shared.prompt_stderr", prompt)
+    sess = _session()
+    sess.catalog.ca_by_product_code.return_value = {}
+
+    def checked_session(ctx: object) -> Mock:
+        """Require the overwrite answer before session creation."""
+        prompt.assert_called_once()
+        return sess
+
+    monkeypatch.setattr("certinext.cli.list_certificates.session", checked_session)
+    assert main(["list-certificates", "--json", "-o", str(path)]) == 0
+    assert json.loads(path.read_text(encoding="utf-8"))[0]["orderNumber"] == "ORDER-1"
+
+
 def test_list_output_open_failure_preserves_listing(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
 ) -> None:
@@ -485,6 +521,29 @@ def test_list_output_open_failure_preserves_listing(
     captured = capsys.readouterr()
     assert json.loads(captured.out)[0]["orderNumber"] == "ORDER-1"
     assert "Cannot write output file" in captured.err
+
+
+def test_list_output_close_failure_exits_cleanly(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    """A flush or close error is visible and produces a failing status."""
+
+    class FailingClose(io.StringIO):
+        """Stand in for a file whose final flush fails."""
+
+        def close(self) -> None:
+            """Fail as a filesystem close can fail after writes."""
+            super().close()
+            raise OSError("disk full")
+
+    sess = _session()
+    sess.catalog.ca_by_product_code.return_value = {}
+    monkeypatch.setattr("certinext.cli.list_certificates.session", lambda ctx: sess)
+    monkeypatch.setattr("certinext.cli._shared.open", lambda *_a, **_kw: FailingClose(), raising=False)
+    assert main(["list-certificates", "--json", "-o", str(tmp_path / "out.json")]) == 1
+    captured = capsys.readouterr()
+    assert not captured.out
+    assert "Cannot finish writing output file" in captured.err
 
 
 @pytest.mark.parametrize("format_flag", [None, "--json", "--csv"])
