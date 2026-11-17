@@ -1786,7 +1786,10 @@ def test_cli_json_has_start_end_and_cache_fields(run_cli: Callable[..., tuple[in
 
 
 @pytest.mark.parametrize(
-    "cache_flags", [["--cache"], ["--no-cache"], ["--refresh-cache"], ["--cache-max-age", "3"]]
+    "cache_flags", [
+        ["--cache"], ["--no-cache"], ["--refresh-cache"],
+        ["--cache-max-age", "3"], ["--no-cache", "--refresh-cache"],
+    ]
 )
 def test_cli_cache_options_without_inspection_continue(
     run_cli: Callable[..., tuple[int, str, str]], cache_flags: list[str]
@@ -1796,6 +1799,26 @@ def test_cli_cache_options_without_inspection_continue(
     assert code == 0
     assert json.loads(out)["cache"] == {"enabled": False}
     assert "Cache options ignored" in err
+
+
+def test_cli_ignores_file_cache_dir_without_inspection(
+    run_cli: Callable[..., tuple[int, str, str]], tmp_path: Path
+) -> None:
+    """A cache directory naming a file does not block a report without downloads."""
+    blocker = tmp_path / "cache-file"
+    blocker.write_text("x", encoding="utf-8")
+    code, out, err = run_cli(["--json", "--cache-dir", str(blocker)])
+    assert code == 0
+    assert json.loads(out)["cache"] == {"enabled": False}
+    assert "Cache options ignored" in err
+    assert blocker.read_text(encoding="utf-8") == "x"
+
+
+def test_cli_no_cache_flags_has_no_ignored_notice(run_cli: Callable[..., tuple[int, str, str]]) -> None:
+    """A report with no cache options emits no ignored-options diagnostic."""
+    code, _, err = run_cli(["--json"])
+    assert code == 0
+    assert "Cache options ignored" not in err
 
 
 def test_cli_cache_off_without_a_terminal(run_cli: Callable[..., tuple[int, str, str]], tmp_path: Path) -> None:

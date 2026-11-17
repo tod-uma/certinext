@@ -65,7 +65,7 @@ def _resolve_cache(
     implied = refresh or directory is not None or max_age_days is not None
     if not inspect:
         if cache is not None or implied:
-            print(f"Cache options ignored: certificate downloads require {inspect_option}.", file=sys.stderr)
+            log.warning("Cache options ignored", reason=f"certificate downloads require {inspect_option}")
         return False
     if cache is False:
         if implied:

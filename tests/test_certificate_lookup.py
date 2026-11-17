@@ -439,15 +439,37 @@ def test_requestor_cli_ignores_cache(monkeypatch: pytest.MonkeyPatch, capsys: py
     sess.ssl.get.assert_called_once()
 
 
-def test_report_field_lookup_ignores_cache(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+@pytest.mark.parametrize(
+    "cache_flags",
+    [["--cache"], ["--no-cache"], ["--refresh-cache"], ["--cache-max-age", "3"], ["--no-cache", "--refresh-cache"]],
+)
+def test_report_field_lookup_ignores_cache(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], cache_flags: list[str]
+) -> None:
     """A report-field lookup continues when cache options cannot help it."""
     sess = _session()
     sess.ssl.get.return_value = SslOrder.from_payload(Mock(), {"orderId": "ORDER-1"})
     monkeypatch.setattr("certinext.cli.lookup_certificate.session", lambda ctx: sess)
-    assert main(["lookup-certificate", "ORDER-1", "--field", "order", "--cache", "--json"]) == 0
+    assert main(["lookup-certificate", "ORDER-1", "--field", "order", *cache_flags, "--json"]) == 0
     output = capsys.readouterr()
     assert json.loads(output.out)["cache"]["enabled"] is False
     assert "Cache options ignored" in output.err
+
+
+def test_report_field_lookup_ignores_file_cache_dir(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    """A non-scanning lookup accepts an unused cache directory naming a file."""
+    sess = _session()
+    sess.ssl.get.return_value = SslOrder.from_payload(Mock(), {"orderId": "ORDER-1"})
+    monkeypatch.setattr("certinext.cli.lookup_certificate.session", lambda ctx: sess)
+    blocker = tmp_path / "cache-file"
+    blocker.write_text("x", encoding="utf-8")
+    assert main(["lookup-certificate", "ORDER-1", "--field", "order", "--cache-dir", str(blocker), "--json"]) == 0
+    output = capsys.readouterr()
+    assert json.loads(output.out)["cache"]["enabled"] is False
+    assert "Cache options ignored" in output.err
+    assert blocker.read_text(encoding="utf-8") == "x"
 
 
 @pytest.mark.parametrize("cache_flag", ["--cache", "--no-cache"])
@@ -462,6 +484,50 @@ def test_listing_without_sans_ignores_cache(
     output = capsys.readouterr()
     assert "ORDER-1" in output.out
     assert "Cache options ignored" in output.err
+
+
+def test_listing_ignores_cache_directory_without_creating_it(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    """An unused directory option neither rejects a file nor creates a new directory."""
+    sess = _session()
+    sess.catalog.ca_by_product_code.return_value = {}
+    monkeypatch.setattr("certinext.cli.list_certificates.session", lambda ctx: sess)
+    blocker = tmp_path / "file"
+    blocker.write_text("x", encoding="utf-8")
+    new_dir = tmp_path / "new-cache"
+    for path in (blocker, new_dir):
+        assert main(["list-certificates", "--cache-dir", str(path), "--json"]) == 0
+        output = capsys.readouterr()
+        assert "ORDER-1" in output.out
+        assert "Cache options ignored" in output.err
+    assert blocker.read_text(encoding="utf-8") == "x"
+    assert not new_dir.exists()
+
+
+def test_listing_without_cache_flags_has_no_ignored_notice(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """An ordinary listing has no cache diagnostic."""
+    sess = _session()
+    sess.catalog.ca_by_product_code.return_value = {}
+    monkeypatch.setattr("certinext.cli.list_certificates.session", lambda ctx: sess)
+    assert main(["list-certificates", "--json"]) == 0
+    assert "Cache options ignored" not in capsys.readouterr().err
+
+
+def test_ignored_cache_notice_uses_json_logging(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The cache notice remains a JSON log event under the JSON log format."""
+    sess = _session()
+    sess.catalog.ca_by_product_code.return_value = {}
+    monkeypatch.setattr("certinext.cli.list_certificates.session", lambda ctx: sess)
+    assert main(["--log-format", "json", "list-certificates", "--cache", "--json"]) == 0
+    output = capsys.readouterr()
+    notices = [json.loads(line) for line in output.err.splitlines() if "Cache options ignored" in line]
+    assert len(notices) == 1
+    assert notices[0]["event"] == "Cache options ignored"
 
 
 @pytest.mark.parametrize("option", ["-o", "--output"])
