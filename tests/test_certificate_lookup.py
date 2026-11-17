@@ -338,14 +338,12 @@ def test_absent_contacts_are_not_fabricated() -> None:
 @pytest.mark.parametrize(
     "args",
     [
-        ["list-certificates", "--cache"],
         ["list-certificates", "--sans", "--no-cache", "--refresh-cache"],
-        ["lookup-certificate", "ORDER-1", "--field", "order", "--cache"],
         ["lookup-certificate", "   "],
     ],
 )
 def test_cache_usage_errors_are_local(args: list[str], capsys: pytest.CaptureFixture[str]) -> None:
-    """Conflicting or inapplicable flags fail before opening a session."""
+    """Conflicting or invalid flags fail before opening a session."""
     assert main(args) == 2
     capsys.readouterr()
 
@@ -427,6 +425,43 @@ def test_requestor_cli(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFi
     assert main(["lookup-certificate", "person@example.org", "--field", "requestor", "--json"]) == 1
     payload = json.loads(capsys.readouterr().out)
     assert len(payload["matches"]) == 1 and payload["unknown_requestors"] == 1 and not payload["complete"]
+
+
+def test_requestor_cli_ignores_cache(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    """An unnecessary cache flag warns without preventing the live requestor lookup."""
+    sess = _session()
+    sess.ssl.get.return_value = SslOrder.from_payload(Mock(), {"requestor": {"email": "person@example.org"}})
+    monkeypatch.setattr("certinext.cli.lookup_certificate.session", lambda ctx: sess)
+    assert main(["lookup-certificate", "person@example.org", "--field", "requestor", "--cache", "--json"]) == 0
+    output = capsys.readouterr()
+    assert json.loads(output.out)["cache"]["enabled"] is False
+    assert "Cache options ignored" in output.err
+    sess.ssl.get.assert_called_once()
+
+
+def test_report_field_lookup_ignores_cache(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    """A report-field lookup continues when cache options cannot help it."""
+    sess = _session()
+    sess.ssl.get.return_value = SslOrder.from_payload(Mock(), {"orderId": "ORDER-1"})
+    monkeypatch.setattr("certinext.cli.lookup_certificate.session", lambda ctx: sess)
+    assert main(["lookup-certificate", "ORDER-1", "--field", "order", "--cache", "--json"]) == 0
+    output = capsys.readouterr()
+    assert json.loads(output.out)["cache"]["enabled"] is False
+    assert "Cache options ignored" in output.err
+
+
+@pytest.mark.parametrize("cache_flag", ["--cache", "--no-cache"])
+def test_listing_without_sans_ignores_cache(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], cache_flag: str
+) -> None:
+    """A regular listing still runs when an unnecessary cache flag is present."""
+    sess = _session()
+    sess.catalog.ca_by_product_code.return_value = {}
+    monkeypatch.setattr("certinext.cli.list_certificates.session", lambda ctx: sess)
+    assert main(["list-certificates", cache_flag, "--json"]) == 0
+    output = capsys.readouterr()
+    assert "ORDER-1" in output.out
+    assert "Cache options ignored" in output.err
 
 
 @pytest.mark.parametrize("option", ["-o", "--output"])

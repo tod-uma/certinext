@@ -1747,12 +1747,9 @@ def test_cli_help_mentions_json(capsys: pytest.CaptureFixture[str], monkeypatch:
         (["--disable-signal", "issuer", "--disable-signal", "key", "--disable-signal", "chain"], NO_CA_CONFIG),
         (["--key-type", "ECDSA"], None),
         ([], '[replacement]\nkey_types = "EC"\n'),
-        (["--cache"], None),
-        (["--refresh-cache"], None),
         (["--inspect", "--no-cache", "--refresh-cache"], None),
         (["--inspect", "--no-cache", "--cache-dir", "cache"], None),
         (["--inspect", "--no-cache", "--cache-max-age", "3"], None),
-        (["--cache-max-age", "3"], None),
         (["--inspect", "--cache-max-age", "0"], None),
         (["--disable-signal", "ca"], None),
         (["--issued-since", "11/16/2026"], None),
@@ -1763,8 +1760,8 @@ def test_cli_usage_and_config_errors_exit_2(
 ) -> None:
     """Conflicting outputs, a bad --output path, no enabled signal, bad flags and a bad config all exit 2.
 
-    Also cache flags without --inspect, --no-cache combined with a flag that implies --cache,
-    a zero --cache-max-age, and a non-ISO --issued-since.
+    Also --no-cache combined with a flag that implies --cache, a zero
+    --cache-max-age, and a non-ISO --issued-since.
     """
     code, _, _ = run_cli(argv, config=config)
     assert code == 2
@@ -1786,6 +1783,19 @@ def test_cli_json_has_start_end_and_cache_fields(run_cli: Callable[..., tuple[in
     assert doc["started_at"] == NOW.isoformat()
     assert doc["generated_at"] == doc["ended_at"] >= doc["started_at"]
     assert doc["cache"] == {"enabled": False}
+
+
+@pytest.mark.parametrize(
+    "cache_flags", [["--cache"], ["--no-cache"], ["--refresh-cache"], ["--cache-max-age", "3"]]
+)
+def test_cli_cache_options_without_inspection_continue(
+    run_cli: Callable[..., tuple[int, str, str]], cache_flags: list[str]
+) -> None:
+    """A report without downloads ignores cache options and keeps running."""
+    code, out, err = run_cli(["--json", *cache_flags])
+    assert code == 0
+    assert json.loads(out)["cache"] == {"enabled": False}
+    assert "Cache options ignored" in err
 
 
 def test_cli_cache_off_without_a_terminal(run_cli: Callable[..., tuple[int, str, str]], tmp_path: Path) -> None:

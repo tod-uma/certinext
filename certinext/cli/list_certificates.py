@@ -73,7 +73,9 @@ def list_certificates(
         help="Write the table, JSON, or CSV to FILE (UTF-8) instead of stdout",
     ),
     yes: bool = typer.Option(False, "--yes", "-y", help="Overwrite an existing output file without prompting"),
-    use_cache: Optional[bool] = typer.Option(None, "--cache/--no-cache", help="Reuse replacement-report downloads"),
+    use_cache: Optional[bool] = typer.Option(
+        None, "--cache/--no-cache", help="Reuse certificate downloads with --sans; ignored without --sans"
+    ),
     refresh_cache: bool = typer.Option(False, "--refresh-cache", help="Refresh downloads; implies --cache"),
     cache_directory: Optional[Path] = typer.Option(None, "--cache-dir", help="Shared cache base; implies --cache"),
     cache_max_age: Optional[int] = typer.Option(
@@ -89,7 +91,7 @@ def list_certificates(
     if csv_output and ctx.obj.output_json:
         raise typer.BadParameter("--csv and --json are mutually exclusive")
     caching = _resolve_cache(sans, use_cache, refresh_cache, cache_directory, cache_max_age, inspect_option="--sans")
-    if cache_directory is not None and cache_directory.expanduser().is_file():
+    if caching and cache_directory is not None and cache_directory.expanduser().is_file():
         raise typer.BadParameter("cache directory is a file", param_hint="--cache-dir")
     _check_output(output, yes)
     sess = session(ctx)
