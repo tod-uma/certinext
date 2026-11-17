@@ -305,6 +305,8 @@ def _output_stream(file: TextIO | None) -> Iterator[TextIO]:
             yield stream
     except OSError as exc:
         if file is None:
+            if isinstance(exc, BrokenPipeError):
+                raise typer.Exit(1) from exc
             raise
         structlog.get_logger(__name__).error("Cannot finish writing output file", error=str(exc))
         raise typer.Exit(1) from exc

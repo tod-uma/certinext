@@ -88,10 +88,10 @@ def list_certificates(
     """
     if csv_output and ctx.obj.output_json:
         raise typer.BadParameter("--csv and --json are mutually exclusive")
-    _check_output(output, yes)
     caching = _resolve_cache(sans, use_cache, refresh_cache, cache_directory, cache_max_age, inspect_option="--sans")
     if cache_directory is not None and cache_directory.expanduser().is_file():
         raise typer.BadParameter("cache directory is a file", param_hint="--cache-dir")
+    _check_output(output, yes)
     sess = session(ctx)
 
     orders = sess.orders.get_list(status=status)

@@ -1714,6 +1714,21 @@ def test_cli_existing_output_requires_yes(
     assert json.loads(target.read_text(encoding="utf-8"))["summary"]["needs_replacing"] == 1
 
 
+def test_cli_invalid_cache_dir_precedes_overwrite_prompt(
+    run_cli: Callable[..., tuple[int, str, str]], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A bad cache directory is rejected before asking to replace output."""
+    output = tmp_path / "report.json"
+    output.write_text("keep me", encoding="utf-8")
+    blocker = tmp_path / "cache-file"
+    blocker.write_text("x", encoding="utf-8")
+    monkeypatch.setattr("sys.stdin", _Tty("yes\n"))
+    code, _, err = run_cli(["--inspect", "--cache-dir", str(blocker), "-o", str(output)])
+    assert code == 2
+    assert "Overwrite" not in err
+    assert output.read_text(encoding="utf-8") == "keep me"
+
+
 def test_cli_help_mentions_json(capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
     """--json is a root option, so the command's own help has to point at it."""
     monkeypatch.setenv("COLUMNS", "200")

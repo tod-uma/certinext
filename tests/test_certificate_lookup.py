@@ -26,6 +26,7 @@ from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
+import typer
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
@@ -34,6 +35,7 @@ from cryptography.x509.oid import NameOID
 from certinext._inspection_cache import InspectionCache
 from certinext.certificate_lookup import CertificateEntry, LookupField, enrich_sans, lookup_certificates
 from certinext.cli import main
+from certinext.cli._shared import _output_stream
 from certinext.exceptions import CertiNextRateLimitError
 from certinext.models.orders import OrderRecord
 from certinext.models.ssl_certificates import CertificateDownload, SslOrder
@@ -485,6 +487,36 @@ def test_list_existing_output_refused_before_session(
     session_mock.assert_not_called()
     assert path.read_text(encoding="utf-8") == "keep me"
     assert "--yes" in capsys.readouterr().err
+
+
+def test_list_invalid_cache_dir_precedes_overwrite_prompt(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    """A bad cache directory is reported before asking to replace output."""
+    output = tmp_path / "existing.json"
+    output.write_text("keep me", encoding="utf-8")
+    blocker = tmp_path / "cache-file"
+    blocker.write_text("x", encoding="utf-8")
+    stdin = Mock()
+    stdin.isatty.return_value = True
+    monkeypatch.setattr("certinext.cli._shared.sys.stdin", stdin)
+    prompt = Mock(return_value="yes")
+    monkeypatch.setattr("certinext.cli._shared.prompt_stderr", prompt)
+    assert main(["list-certificates", "--sans", "--cache-dir", str(blocker), "-o", str(output)]) == 2
+    prompt.assert_not_called()
+    assert output.read_text(encoding="utf-8") == "keep me"
+    assert "--cache-dir" in capsys.readouterr().err
+
+
+def test_stdout_broken_pipe_exits_without_oserror(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A consumer closing stdout is translated to a normal CLI exit."""
+    stream = Mock()
+    stream.write.side_effect = BrokenPipeError("closed")
+    monkeypatch.setattr("certinext.cli._shared.sys.stdout", stream)
+    with pytest.raises(typer.Exit) as exc:
+        with _output_stream(None) as out:
+            out.write("data")
+    assert exc.value.exit_code == 1
 
 
 def test_list_existing_output_confirmed_before_session(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

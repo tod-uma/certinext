@@ -453,12 +453,12 @@ def replacement_report(
     """
     if output_csv and ctx.obj.output_json:
         raise typer.BadParameter("--csv and --json are mutually exclusive")
-    _check_output(output, yes)
     if cache_directory is not None and cache_directory.expanduser().is_file():
         raise typer.BadParameter(f"{cache_directory} is a file", param_hint="--cache-dir")
     criteria = _criteria(ca, issuer, key_type, chain_ca, disable_signal)
     # Before session(): a credential prompt must not interleave with this one.
     caching = _resolve_cache(inspect, use_cache, refresh_cache, cache_directory, cache_max_age)
+    _check_output(output, yes)
     max_age_days = cache_max_age if cache_max_age is not None else _MAX_AGE_DAYS
     if caching:
         _warn_stale_chain(criteria, max_age_days)
