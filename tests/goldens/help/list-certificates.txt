@@ -8,17 +8,21 @@
  because emSign issues from InCommon-branded intermediates.                                         
                                                                                                     
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --status                         STATUS                Filter by certificate status (e.g.        │
-│                                                        issued, expired, pending-dcv,             │
-│                                                        pending-csr, revoked, cancelled)          │
-│ --sans                                                 Download and show every SAN; reuse        │
-│                                                        --cache if enabled                        │
-│ --csv                                                  Write CSV to stdout (SANs as a JSON       │
-│                                                        array)                                    │
-│ --cache            --no-cache                          Reuse replacement-report downloads        │
-│ --refresh-cache                                        Refresh downloads; implies --cache        │
-│ --cache-dir                      PATH                  Shared cache base; implies --cache        │
-│ --cache-max-age                  INTEGER RANGE [x>=1]  Maximum age in days; implies --cache      │
-│ --help                                                 Show this message and exit.               │
+│ --status                           STATUS                Filter by certificate status (e.g.      │
+│                                                          issued, expired, pending-dcv,           │
+│                                                          pending-csr, revoked, cancelled)        │
+│ --sans                                                   Download and show every SAN; reuse      │
+│                                                          --cache if enabled                      │
+│ --csv                                                    Write CSV instead of a table (SANs as a │
+│                                                          JSON array)                             │
+│ --output         -o                FILE                  Write the table, JSON, or CSV to FILE   │
+│                                                          (UTF-8) instead of stdout               │
+│ --yes            -y                                      Overwrite an existing output file       │
+│                                                          without prompting                       │
+│ --cache              --no-cache                          Reuse replacement-report downloads      │
+│ --refresh-cache                                          Refresh downloads; implies --cache      │
+│ --cache-dir                        PATH                  Shared cache base; implies --cache      │
+│ --cache-max-age                    INTEGER RANGE [x>=1]  Maximum age in days; implies --cache    │
+│ --help                                                   Show this message and exit.             │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 

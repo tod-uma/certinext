@@ -27,7 +27,7 @@ from certinext._inspection_cache import DEFAULT_MAX_AGE
 from certinext.certificate_lookup import CertificateEntry, enrich_sans
 from certinext.cli._app import app
 from certinext.cli._certificate_cache import _build_cache, _resolve_cache
-from certinext.cli._shared import data_console, rows_table, session
+from certinext.cli._shared import _check_output, _open_output, _output_stream, data_console, rows_table, session
 from certinext.exceptions import CertiNextAPIError
 from certinext.session import CertiNextSession
 
@@ -64,7 +64,15 @@ def list_certificates(
         help=("Filter by certificate status (e.g. issued, expired, pending-dcv, pending-csr, revoked, cancelled)"),
     ),
     sans: bool = typer.Option(False, "--sans", help="Download and show every SAN; reuse --cache if enabled"),
-    csv_output: bool = typer.Option(False, "--csv", help="Write CSV to stdout (SANs as a JSON array)"),
+    csv_output: bool = typer.Option(False, "--csv", help="Write CSV instead of a table (SANs as a JSON array)"),
+    output: Optional[Path] = typer.Option(
+        None,
+        "--output",
+        "-o",
+        metavar="FILE",
+        help="Write the table, JSON, or CSV to FILE (UTF-8) instead of stdout",
+    ),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Overwrite an existing output file without prompting"),
     use_cache: Optional[bool] = typer.Option(None, "--cache/--no-cache", help="Reuse replacement-report downloads"),
     refresh_cache: bool = typer.Option(False, "--refresh-cache", help="Refresh downloads; implies --cache"),
     cache_directory: Optional[Path] = typer.Option(None, "--cache-dir", help="Shared cache base; implies --cache"),
@@ -83,6 +91,7 @@ def list_certificates(
     caching = _resolve_cache(sans, use_cache, refresh_cache, cache_directory, cache_max_age, inspect_option="--sans")
     if cache_directory is not None and cache_directory.expanduser().is_file():
         raise typer.BadParameter("cache directory is a file", param_hint="--cache-dir")
+    _check_output(output, yes)
     sess = session(ctx)
 
     orders = sess.orders.get_list(status=status)
@@ -130,19 +139,23 @@ def list_certificates(
         }
         for o, e in zip(orders, entries)
     ]
-    if ctx.obj.output_json:
-        print(json.dumps(records, indent=2))
-    elif csv_output:
-        writer = csv.DictWriter(sys.stdout, fieldnames=list(rows[0]) if rows else ["order_number", "sans", "error"])
-        writer.writeheader()
-        writer.writerows(rows)
-    elif not orders:
-        label = f" with status '{status}'" if status else ""
-        print(f"(no certificates{label})")
-    else:
-        status_label = f" ({status})" if status else ""
-        print(f"Certificates{status_label}:\n")
-        data_console().print(rows_table(rows))
-        print(f"\n{len(orders)} certificate(s)")
-    if any(e.error for e in entries) or (sans and unknown):
+    fh = _open_output(output)
+    with _output_stream(fh) as out:
+        if ctx.obj.output_json:
+            print(json.dumps(records, indent=2), file=out)
+        elif csv_output:
+            writer = csv.DictWriter(
+                out, fieldnames=list(rows[0]) if rows else ["order_number", "sans", "error"], lineterminator="\n"
+            )
+            writer.writeheader()
+            writer.writerows(rows)
+        elif not orders:
+            label = f" with status '{status}'" if status else ""
+            print(f"(no certificates{label})", file=out)
+        else:
+            status_label = f" ({status})" if status else ""
+            print(f"Certificates{status_label}:\n", file=out)
+            data_console(fh).print(rows_table(rows))
+            print(f"\n{len(orders)} certificate(s)", file=out)
+    if (output is not None and fh is None) or any(e.error for e in entries) or (sans and unknown):
         raise typer.Exit(1)

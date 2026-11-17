@@ -111,6 +111,8 @@
 │ --output           -o                FILE                          Write the table, JSON, or CSV │
 │                                                                    to FILE (UTF-8) instead of    │
 │                                                                    stdout                        │
+│ --yes              -y                                              Overwrite an existing output  │
+│                                                                    file without prompting        │
 │ --help                                                             Show this message and exit.   │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 

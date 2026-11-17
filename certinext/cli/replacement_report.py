@@ -20,7 +20,6 @@ report, and renders it as a table, JSON, or CSV. Data goes to stdout, or to
 the ``--output`` file; progress and logs go to stderr.
 """
 
-import contextlib
 import csv
 import datetime as dt
 import json
@@ -28,7 +27,7 @@ import sys
 from dataclasses import asdict
 from enum import Enum
 from pathlib import Path
-from typing import Any, Optional, TextIO
+from typing import Any, Optional
 
 import structlog
 import typer
@@ -39,7 +38,16 @@ from certinext import replacement as rp
 from certinext._config import ConfigError, cache_dir, replacement_criteria
 from certinext._inspection_cache import DEFAULT_MAX_AGE, InspectionCache
 from certinext.cli._app import app
-from certinext.cli._shared import data_console, err_console, progress_disabled, rows_table, session
+from certinext.cli._shared import (
+    _check_output,
+    _open_output,
+    _output_stream,
+    data_console,
+    err_console,
+    progress_disabled,
+    rows_table,
+    session,
+)
 
 log = structlog.get_logger()
 
@@ -316,46 +324,6 @@ def _csv_value(value: Any) -> Any:
     return "" if value is None else value
 
 
-def _check_output(path: Path | None) -> None:
-    """Reject an ``--output`` path that cannot work, before the slow part.
-
-    Args:
-        path: The ``--output`` value, or None for stdout.
-
-    Raises:
-        typer.BadParameter: If the path is a directory or its parent
-            directory does not exist.
-    """
-    if path is None:
-        return
-    if path.is_dir():
-        raise typer.BadParameter(f"{path} is a directory", param_hint="--output")
-    if not path.resolve().parent.is_dir():
-        raise typer.BadParameter(f"directory {path.resolve().parent} does not exist", param_hint="--output")
-
-
-def _open_output(path: Path | None) -> TextIO | None:
-    """Open the ``--output`` file, falling back to stdout if that fails.
-
-    The report may have taken an hour to build, so a file that cannot be
-    opened (locked by Excel, permissions) is logged rather than fatal; the
-    caller writes to stdout instead and exits 1.
-
-    Args:
-        path: The ``--output`` value, or None for stdout.
-
-    Returns:
-        The open file (UTF-8, LF line endings), or None to use stdout.
-    """
-    if path is None:
-        return None
-    try:
-        return open(path, "w", encoding="utf-8", newline="")
-    except OSError as exc:
-        log.error("Cannot write output file; writing the report to stdout instead", path=str(path), error=str(exc))
-        return None
-
-
 @app.command()
 def replacement_report(
     ctx: typer.Context,
@@ -468,6 +436,7 @@ def replacement_report(
         None, "--output", "-o", metavar="FILE",
         help="Write the table, JSON, or CSV to FILE (UTF-8) instead of stdout",
     ),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Overwrite an existing output file without prompting"),
 ) -> None:
     """List currently valid certificates that need replacing after a CA distrust.
 
@@ -484,12 +453,12 @@ def replacement_report(
     """
     if output_csv and ctx.obj.output_json:
         raise typer.BadParameter("--csv and --json are mutually exclusive")
-    _check_output(output)
     if cache_directory is not None and cache_directory.expanduser().is_file():
         raise typer.BadParameter(f"{cache_directory} is a file", param_hint="--cache-dir")
     criteria = _criteria(ca, issuer, key_type, chain_ca, disable_signal)
     # Before session(): a credential prompt must not interleave with this one.
     caching = _resolve_cache(inspect, use_cache, refresh_cache, cache_directory, cache_max_age)
+    _check_output(output, yes)
     max_age_days = cache_max_age if cache_max_age is not None else _MAX_AGE_DAYS
     if caching:
         _warn_stale_chain(criteria, max_age_days)
@@ -547,7 +516,7 @@ def replacement_report(
         )
 
     fh = _open_output(output)
-    with fh or contextlib.nullcontext(sys.stdout) as out:
+    with _output_stream(fh) as out:
         if ctx.obj.output_json:
             ended = (report.ended_at or report.started_at).isoformat()
             doc: dict[str, Any] = {

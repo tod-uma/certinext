@@ -1691,12 +1691,42 @@ def test_cli_output_unopenable_falls_back_to_stdout(
         """Stand in for ``open`` on a file another program holds locked."""
         raise PermissionError("locked")
 
-    monkeypatch.setattr("certinext.cli.replacement_report.open", locked, raising=False)
+    monkeypatch.setattr("certinext.cli._shared.open", locked, raising=False)
     code, out, _ = run_cli(
         ["--json", "-o", str(tmp_path / "report.json")], config=G3_CONFIG
     )
     assert code == 1
     assert json.loads(out)["summary"]["needs_replacing"] == 1
+
+
+def test_cli_existing_output_requires_yes(
+    run_cli: Callable[..., tuple[int, str, str]], tmp_path: Path
+) -> None:
+    """An unattended replacement report does not overwrite an existing file."""
+    target = tmp_path / "report.json"
+    target.write_text("old", encoding="utf-8")
+    code, out, err = run_cli(["--json", "-o", str(target)], config=G3_CONFIG)
+    assert code == 1
+    assert out == "" and "--yes" in err
+    assert target.read_text(encoding="utf-8") == "old"
+    code, out, _ = run_cli(["--json", "-o", str(target), "--yes"], config=G3_CONFIG)
+    assert code == 0 and out == ""
+    assert json.loads(target.read_text(encoding="utf-8"))["summary"]["needs_replacing"] == 1
+
+
+def test_cli_invalid_cache_dir_precedes_overwrite_prompt(
+    run_cli: Callable[..., tuple[int, str, str]], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A bad cache directory is rejected before asking to replace output."""
+    output = tmp_path / "report.json"
+    output.write_text("keep me", encoding="utf-8")
+    blocker = tmp_path / "cache-file"
+    blocker.write_text("x", encoding="utf-8")
+    monkeypatch.setattr("sys.stdin", _Tty("yes\n"))
+    code, _, err = run_cli(["--inspect", "--cache-dir", str(blocker), "-o", str(output)])
+    assert code == 2
+    assert "Overwrite" not in err
+    assert output.read_text(encoding="utf-8") == "keep me"
 
 
 def test_cli_help_mentions_json(capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
