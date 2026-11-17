@@ -17,8 +17,9 @@
 │ --field                          [auto|san|cn|order|serial|requ  Identifier type; auto also      │
 │                                  est|requestor]                  scans SANs                      │
 │                                                                  [default: auto]                 │
-│ --cache            --no-cache                                    Reuse replacement-report        │
-│                                                                  downloads                       │
+│ --cache            --no-cache                                    Reuse certificate downloads for │
+│                                                                  SAN/auto; ignored for other     │
+│                                                                  fields                          │
 │ --refresh-cache                                                  Refresh downloads; implies      │
 │                                                                  --cache                         │
 │ --cache-dir                      PATH                            Shared cache base; implies      │

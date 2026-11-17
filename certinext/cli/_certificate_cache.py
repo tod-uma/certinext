@@ -49,7 +49,7 @@ def _resolve_cache(
 
     Args:
         inspect: Whether certificate downloads are enabled.
-        inspect_option: Command-specific download option for usage errors.
+        inspect_option: Command-specific option required to use cached downloads.
         cache: ``--cache`` (True), ``--no-cache`` (False), or neither (None).
         refresh: Whether ``--refresh-cache`` was given.
         directory: The ``--cache-dir`` value, if any.
@@ -59,22 +59,19 @@ def _resolve_cache(
         Whether to use the cache.
 
     Raises:
-        typer.BadParameter: On a cache flag without ``--inspect``, or
-            ``--no-cache`` with a flag that implies ``--cache``.
+        typer.BadParameter: On ``--no-cache`` with a flag that implies ``--cache``
+            when downloads are enabled.
     """
     implied = refresh or directory is not None or max_age_days is not None
+    if not inspect:
+        if cache is not None or implied:
+            log.warning("Cache options ignored", reason=f"certificate downloads require {inspect_option}")
+        return False
     if cache is False:
         if implied:
             raise typer.BadParameter(
                 "--no-cache cannot be combined with --refresh-cache, --cache-dir or --cache-max-age",
                 param_hint="--no-cache",
-            )
-        return False
-    if not inspect:
-        if cache or implied:
-            raise typer.BadParameter(
-                f"the cache holds certificate downloads, so it needs {inspect_option}",
-                param_hint="--cache",
             )
         return False
     if cache or implied:

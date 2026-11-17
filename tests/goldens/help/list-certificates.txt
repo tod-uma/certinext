@@ -19,7 +19,8 @@
 │                                                          (UTF-8) instead of stdout               │
 │ --yes            -y                                      Overwrite an existing output file       │
 │                                                          without prompting                       │
-│ --cache              --no-cache                          Reuse replacement-report downloads      │
+│ --cache              --no-cache                          Reuse certificate downloads with        │
+│                                                          --sans; ignored without --sans          │
 │ --refresh-cache                                          Refresh downloads; implies --cache      │
 │ --cache-dir                        PATH                  Shared cache base; implies --cache      │
 │ --cache-max-age                    INTEGER RANGE [x>=1]  Maximum age in days; implies --cache    │

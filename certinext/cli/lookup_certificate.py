@@ -46,7 +46,9 @@ def lookup_certificate(
     ctx: typer.Context,
     identifier: str = typer.Argument(..., help="Literal identifier; returns every matching order"),
     field: _Field = typer.Option(_Field.auto, "--field", help="Identifier type; auto also scans SANs"),
-    use_cache: Optional[bool] = typer.Option(None, "--cache/--no-cache", help="Reuse replacement-report downloads"),
+    use_cache: Optional[bool] = typer.Option(
+        None, "--cache/--no-cache", help="Reuse certificate downloads for SAN/auto; ignored for other fields"
+    ),
     refresh_cache: bool = typer.Option(False, "--refresh-cache", help="Refresh downloads; implies --cache"),
     cache_directory: Optional[Path] = typer.Option(None, "--cache-dir", help="Shared cache base; implies --cache"),
     cache_max_age: Optional[int] = typer.Option(
@@ -73,7 +75,7 @@ def lookup_certificate(
         cache_max_age,
         inspect_option="--field san or --field auto",
     )
-    if cache_directory is not None and cache_directory.expanduser().is_file():
+    if caching and cache_directory is not None and cache_directory.expanduser().is_file():
         raise typer.BadParameter("cache directory is a file", param_hint="--cache-dir")
     sess = session(ctx)
     cache = (

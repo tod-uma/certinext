@@ -1126,6 +1126,8 @@ opt-in:
 
 - With neither `--cache` nor `--no-cache`, the command asks on a terminal
   (Enter means no). In a scheduled job or a pipe it stays off without asking.
+- Without `--inspect`, cache options are accepted but ignored with a warning;
+  no cache directory is created or checked. This includes `--no-cache`.
 - Entries are keyed on order number **and** serial number, so a reissue or
   rekey is always downloaded fresh. The orders report, and so every order's
   status, is still read live each run: a revoked or expired certificate drops
@@ -2793,6 +2795,8 @@ location and production/sandbox split. The default maximum age is 30 days.
 Caching remains opt-in; interactive runs ask when neither choice is supplied,
 and noninteractive runs default to live downloads. Status always comes from a
 fresh orders report. SAN listing does not prune the shared directory.
+Without `--sans`, cache options are accepted but ignored with a warning;
+the listing does not create or check a cache directory.
 
 Lookup returns **all** literal matches, including expired orders, within the
 live orders report's account visibility and pagination limits. Names are matched
@@ -2803,8 +2807,9 @@ decimal report serials. During SAN inspection, the downloaded leaf is checked
 against both hexadecimal and decimal forms of the report serial because
 historical emSign rows in the sandbox use decimal serials.
 Use `--field` to avoid ambiguity and the expensive full SAN scan. Explicit CN,
-order, serial and request searches do not download certificates and do not accept
-cache-enabling flags.
+order, serial, request number and requestor searches do not download
+certificates. Cache options are accepted but ignored with a warning for these
+fields, and no cache directory is created or checked.
 
 Lookup emits JSON with `matches`, `errors`, `unknown_sans`, `complete`, and
 `cache`. Each match contains the report row, optional SANs and provenance, and
