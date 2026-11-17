@@ -425,3 +425,103 @@ def test_requestor_cli(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFi
     assert main(["lookup-certificate", "person@example.org", "--field", "requestor", "--json"]) == 1
     payload = json.loads(capsys.readouterr().out)
     assert len(payload["matches"]) == 1 and payload["unknown_requestors"] == 1 and not payload["complete"]
+
+
+@pytest.mark.parametrize("option", ["-o", "--output"])
+@pytest.mark.parametrize("format_flag", [None, "--json", "--csv"])
+def test_list_output_file(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    option: str,
+    format_flag: str | None,
+) -> None:
+    """Both output spellings save the selected format without data on stdout."""
+    record = OrderRecord.model_validate({**_record().as_dict(), "commonName": "caf\u00e9.example.org"})
+    sess = _session(record)
+    sess.catalog.ca_by_product_code.return_value = {}
+    monkeypatch.setattr("certinext.cli.list_certificates.session", lambda ctx: sess)
+    path = tmp_path / "certificates.txt"
+    path.write_text("old content", encoding="utf-8")
+    args = ["list-certificates", option, str(path)]
+    if format_flag:
+        args.append(format_flag)
+    assert main(args) == 0
+    assert not capsys.readouterr().out
+    text = path.read_text(encoding="utf-8")
+    assert "old content" not in text
+    if format_flag == "--json":
+        assert json.loads(text)[0]["commonName"] == record.common_name
+    elif format_flag == "--csv":
+        assert list(csv.DictReader(io.StringIO(text)))[0]["common_name"] == record.common_name
+        assert b"\r\r\n" not in path.read_bytes()
+    else:
+        assert "ORDER-1" in text and "caf\u00e9.example.org" in text
+        assert "1 certificate(s)" in text and "\x1b[" not in text
+
+
+@pytest.mark.parametrize("invalid", ["directory", "missing-parent"])
+def test_list_invalid_output_before_session(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path, invalid: str
+) -> None:
+    """Unusable output paths fail before authentication or API calls."""
+    session_mock = Mock()
+    monkeypatch.setattr("certinext.cli.list_certificates.session", session_mock)
+    path = tmp_path if invalid == "directory" else tmp_path / "missing" / "out.json"
+    assert main(["list-certificates", "--json", "-o", str(path)]) == 2
+    session_mock.assert_not_called()
+    assert "--output" in capsys.readouterr().err
+
+
+def test_list_output_open_failure_preserves_listing(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    """A locked file falls back to stdout and reports failure like replacement-report."""
+    sess = _session()
+    sess.catalog.ca_by_product_code.return_value = {}
+    monkeypatch.setattr("certinext.cli.list_certificates.session", lambda ctx: sess)
+    monkeypatch.setattr("certinext.cli._shared.open", Mock(side_effect=PermissionError("locked")), raising=False)
+    assert main(["list-certificates", "--json", "-o", str(tmp_path / "out.json")]) == 1
+    captured = capsys.readouterr()
+    assert json.loads(captured.out)[0]["orderNumber"] == "ORDER-1"
+    assert "Cannot write output file" in captured.err
+
+
+@pytest.mark.parametrize("format_flag", [None, "--json", "--csv"])
+def test_list_empty_output_file(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    format_flag: str | None,
+) -> None:
+    """Empty results still produce the selected file format."""
+    sess = _session()
+    sess.orders.get_list.return_value = []
+    monkeypatch.setattr("certinext.cli.list_certificates.session", lambda ctx: sess)
+    path = tmp_path / "empty.txt"
+    args = ["list-certificates", "-o", str(path)]
+    if format_flag:
+        args.append(format_flag)
+    assert main(args) == 0
+    assert not capsys.readouterr().out
+    text = path.read_text(encoding="utf-8")
+    if format_flag == "--json":
+        assert json.loads(text) == []
+    elif format_flag == "--csv":
+        assert list(csv.reader(io.StringIO(text))) == [["order_number", "sans", "error"]]
+    else:
+        assert "(no certificates)" in text
+
+
+def test_list_partial_sans_output_file(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    """Partial inspection writes the data file while retaining stderr and exit status."""
+    sess = _session(OrderRecord.model_validate({"orderNumber": "PENDING-1"}))
+    sess.catalog.ca_by_product_code.return_value = {}
+    monkeypatch.setattr("certinext.cli.list_certificates.session", lambda ctx: sess)
+    path = tmp_path / "partial.json"
+    assert main(["list-certificates", "--sans", "--no-cache", "--json", "-o", str(path)]) == 1
+    captured = capsys.readouterr()
+    assert not captured.out and "SANs unknown" in captured.err
+    assert json.loads(path.read_text(encoding="utf-8"))[0]["sans"] is None

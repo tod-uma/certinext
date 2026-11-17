@@ -922,6 +922,8 @@ the list still prints.
 ```
 --status STATUS   Filter by certificate status (issued, expired, pending-dcv, etc.)
 --json            Output raw JSON instead of tabular format
+--csv             Output CSV instead of tabular format
+-o, --output FILE Write the table, JSON, or CSV to FILE (UTF-8) instead of stdout
 ```
 
 #### Examples
@@ -932,7 +934,13 @@ certinext list-certificates --status issued
 certinext list-certificates --status expired
 certinext list-certificates --status pending-dcv
 certinext list-certificates --sandbox --json
+certinext list-certificates --json -o certificates.json
+certinext list-certificates --csv -o certificates.csv
 ```
+
+Output files are overwritten. Invalid output directories are rejected before
+connecting. If the file cannot be opened, the listing goes to stdout and the
+command exits 1. Diagnostics remain on stderr.
 
 ---
 

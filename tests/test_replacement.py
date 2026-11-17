@@ -1691,7 +1691,7 @@ def test_cli_output_unopenable_falls_back_to_stdout(
         """Stand in for ``open`` on a file another program holds locked."""
         raise PermissionError("locked")
 
-    monkeypatch.setattr("certinext.cli.replacement_report.open", locked, raising=False)
+    monkeypatch.setattr("certinext.cli._shared.open", locked, raising=False)
     code, out, _ = run_cli(
         ["--json", "-o", str(tmp_path / "report.json")], config=G3_CONFIG
     )

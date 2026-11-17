@@ -28,7 +28,7 @@ import sys
 from dataclasses import asdict
 from enum import Enum
 from pathlib import Path
-from typing import Any, Optional, TextIO
+from typing import Any, Optional
 
 import structlog
 import typer
@@ -39,7 +39,15 @@ from certinext import replacement as rp
 from certinext._config import ConfigError, cache_dir, replacement_criteria
 from certinext._inspection_cache import DEFAULT_MAX_AGE, InspectionCache
 from certinext.cli._app import app
-from certinext.cli._shared import data_console, err_console, progress_disabled, rows_table, session
+from certinext.cli._shared import (
+    _check_output,
+    _open_output,
+    data_console,
+    err_console,
+    progress_disabled,
+    rows_table,
+    session,
+)
 
 log = structlog.get_logger()
 
@@ -314,46 +322,6 @@ def _csv_value(value: Any) -> Any:
     if isinstance(value, list):
         return ";".join(str(v) for v in value)
     return "" if value is None else value
-
-
-def _check_output(path: Path | None) -> None:
-    """Reject an ``--output`` path that cannot work, before the slow part.
-
-    Args:
-        path: The ``--output`` value, or None for stdout.
-
-    Raises:
-        typer.BadParameter: If the path is a directory or its parent
-            directory does not exist.
-    """
-    if path is None:
-        return
-    if path.is_dir():
-        raise typer.BadParameter(f"{path} is a directory", param_hint="--output")
-    if not path.resolve().parent.is_dir():
-        raise typer.BadParameter(f"directory {path.resolve().parent} does not exist", param_hint="--output")
-
-
-def _open_output(path: Path | None) -> TextIO | None:
-    """Open the ``--output`` file, falling back to stdout if that fails.
-
-    The report may have taken an hour to build, so a file that cannot be
-    opened (locked by Excel, permissions) is logged rather than fatal; the
-    caller writes to stdout instead and exits 1.
-
-    Args:
-        path: The ``--output`` value, or None for stdout.
-
-    Returns:
-        The open file (UTF-8, LF line endings), or None to use stdout.
-    """
-    if path is None:
-        return None
-    try:
-        return open(path, "w", encoding="utf-8", newline="")
-    except OSError as exc:
-        log.error("Cannot write output file; writing the report to stdout instead", path=str(path), error=str(exc))
-        return None
 
 
 @app.command()
