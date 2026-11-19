@@ -71,16 +71,21 @@ def _int_or_none(value: Any) -> int | None:
         return None
 
 
-def _list_or_empty(value: Any) -> list[Any]:
-    """Return ``value`` when it is a list, else an empty list.
+def _dicts_only(value: Any) -> list[dict[str, Any]]:
+    """Return the dict elements of ``value`` when it is a list, else ``[]``.
+
+    Non-dict elements are dropped rather than failing validation (ADR
+    0005); :meth:`~CertiNextModel.as_dict` still returns them as received.
 
     Args:
         value: The raw wire value.
 
     Returns:
-        The list, or ``[]``.
+        The list's dict elements, in order, or ``[]``.
     """
-    return value if isinstance(value, list) else []
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, dict)]
 
 
 def _dict_or_none(value: Any) -> dict[str, Any] | None:
@@ -97,7 +102,7 @@ def _dict_or_none(value: Any) -> dict[str, Any] | None:
 
 _Flag = Annotated[bool | None, BeforeValidator(_flag_or_none)]
 _Int = Annotated[int | None, BeforeValidator(_int_or_none)]
-_DictList = Annotated[list[dict[str, Any]], BeforeValidator(_list_or_empty)]
+_DictList = Annotated[list[dict[str, Any]], BeforeValidator(_dicts_only)]
 _Dict = Annotated[dict[str, Any] | None, BeforeValidator(_dict_or_none)]
 
 

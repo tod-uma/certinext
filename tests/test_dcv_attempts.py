@@ -218,6 +218,21 @@ class TestLeniency:
         assert diag.token_is_stale is None
         assert diag.attempt_timestamp is None
 
+    def test_non_dict_list_elements_dropped(self) -> None:
+        """Non-dict elements of a dict-list field are dropped, not fatal; the wire keeps them."""
+        payload = {
+            "diagnostics": {
+                "perspectives": ["bad", {"resolver": "a"}, None],
+                "nextSteps": [{"key": "k"}, 7],
+            }
+        }
+        attempt = DcvAttempt.model_validate(payload)
+        diag = attempt.diagnostics
+        assert diag is not None
+        assert diag.perspectives == [{"resolver": "a"}]
+        assert diag.next_steps == [{"key": "k"}]
+        assert attempt.as_dict()["diagnostics"]["perspectives"] == ["bad", {"resolver": "a"}, None]
+
     def test_numeric_attempt_id_becomes_str(self) -> None:
         """An integer attemptId is coerced to str."""
         assert DcvAttemptSummary.model_validate({"attemptId": 729645}).attempt_id == "729645"
