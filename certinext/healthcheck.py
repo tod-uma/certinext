@@ -220,10 +220,14 @@ REGISTRY: tuple[Probe, ...] = (
           lambda s, c: s.domain.get(c["domain_id"]), requires=("domain_id",)),
     Probe("domain.get_dcv", 2, "GET /domains/{id}/dcv",
           lambda s, c: c["domain"].get_dcv(), requires=("domain",)),
-    Probe("domain.last_dcv_attempt", 2, "GET /domains/{id}/dcv/attempts/last",
-          lambda s, c: c["domain"].last_dcv_attempt(), requires=("domain",)),
-    Probe("domain.dcv_attempt_history", 2, "GET /domains/{id}/dcv/attempts",
-          lambda s, c: c["domain"].dcv_attempt_history(), requires=("domain",)),
+    # /dcv/attempts/last is deliberately not probed: it returns 404 for most
+    # emSign domains that do have history (production, 2026-11-19), and the
+    # library no longer depends on it — the newest attempt is read by id.
+    Probe("domain.dcv_attempts", 2, "GET /domains/{id}/dcv/attempts (all pages)",
+          lambda s, c: c["domain"].dcv_attempts(), requires=("domain",), count_of=_count),
+    Probe("domain.get_dcv_attempt", 2, "GET /domains/{id}/dcv/attempts/{attemptId}",
+          lambda s, c: c["domain"].get_dcv_attempt(c["attempt_id"]),
+          requires=("domain", "attempt_id")),
     Probe("ssl.get", 2, "GET /ssl-certificates/{id}",
           lambda s, c: s.ssl.get(c["order_id"]), requires=("order_id",)),
     Probe("ssl.download_certificate", 2, "GET /ssl-certificates/{id}/certificate",
@@ -388,6 +392,10 @@ def _feed_context(ctx: dict[str, Any], probe: Probe, payload: Any) -> None:
         ctx["domain"] = payload[0]
         if payload[0].id:
             ctx["domain_id"] = payload[0].id
+    elif name == "domain.dcv_attempts":
+        # Newest first, so this is the attempt /attempts/last would describe.
+        if payload[0].attempt_id:
+            ctx["attempt_id"] = payload[0].attempt_id
     elif name == "orders.get_page":
         if payload[0].order_number:
             ctx["order_id"] = payload[0].order_number
