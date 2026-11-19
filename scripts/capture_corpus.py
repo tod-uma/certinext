@@ -52,6 +52,11 @@ The mapping (see :data:`_KEY_RULES` and the ``_pseudo_*`` functions):
 - **Geography is kept** (``organizationStateName``, ``organizationLocality``,
   country fields): it appears verbatim in publicly-logged OV certificates and
   identifies nothing beyond the institution's public address.
+- **Free text** (raw DNS answers, CAA records, URLs, CA and resolver
+  messages; see :data:`_FREE_TEXT_KEYS`) — every email and hostname embedded
+  in the string is pseudonymized as above; the surrounding text is kept.
+- **Vendor sentinel ids** (``sslcom-latest``; :data:`_SENTINEL_IDS`) are
+  kept: they are literals the models must parse, not account data.
 - **Response headers** — ``Set-Cookie`` and auth-related headers are
   dropped; everything else is kept verbatim.
 
@@ -133,6 +138,30 @@ _ID_KEYS = {
     "requestnumber", "requestid", "attemptid",
 }
 
+#: Identifier values that are vendor literals, not account data. They pass
+#: through unchanged: ``sslcom-latest`` is the attempt id the vendor gives
+#: every SSL.com-validated domain, and the models must be tested against it.
+_SENTINEL_IDS = {"sslcom-latest"}
+
+#: JSON keys whose string values are free text — raw DNS answers, CAA
+#: records, URLs, CA and resolver messages — that can embed hostnames and
+#: email addresses anywhere inside the string (a CAA ``iodef`` record carries
+#: a contact email). Every embedded email and hostname is pseudonymized in
+#: place; the rest of the text is kept.
+_FREE_TEXT_KEYS = {
+    "rawdata", "consensusvalue", "queryname", "recordvalue", "filecontent",
+    "responseurlvalue", "consensusurl", "camessage", "errormessage",
+}
+
+#: One pass over free text: an email, or else a hostname (two or more labels,
+#: alphabetic final label, optional trailing root dot). Emails are tried first
+#: so their host part is not rewritten separately. IPv4 addresses never match
+#: (numeric final label).
+_EMBEDDED_NAME = re.compile(
+    r"(?P<email>[\w.+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+)"
+    r"|(?P<host>\b(?:[A-Za-z0-9_](?:[A-Za-z0-9_-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}\b\.?)"
+)
+
 
 def _hash(text: str, length: int = 7) -> str:
     """Return the first ``length`` hex chars of the salted SHA-256 of ``text``."""
@@ -164,7 +193,7 @@ def _pseudo_id(value: Any) -> Any:
     parsing and shape expectations still hold. Other strings map to
     ``id-<8 hex>``.
     """
-    if isinstance(value, bool) or value is None:
+    if isinstance(value, bool) or value is None or value in _SENTINEL_IDS:
         return value
     if isinstance(value, int) or (isinstance(value, str) and value.isdigit()):
         digits = len(str(abs(int(value))))
@@ -200,6 +229,30 @@ def _looks_like_email(value: str) -> bool:
     return bool(re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", value))
 
 
+def _scrub_text(value: str) -> str:
+    """Pseudonymize every email and hostname embedded in free text.
+
+    Used for :data:`_FREE_TEXT_KEYS`. A hostname keeps its trailing root dot
+    (``example.edu.`` in a DNS answer stays fully qualified), and the text
+    around each match — record types, TTLs, IP addresses — is unchanged.
+
+    Args:
+        value: The free-text string.
+
+    Returns:
+        The string with each embedded email and hostname replaced.
+    """
+    def repl(m: re.Match[str]) -> str:
+        """Return the pseudonym for one email or hostname match."""
+        if m.group("email"):
+            return _pseudo_email(m.group("email"))
+        host = m.group("host")
+        dot = "." if host.endswith(".") else ""
+        return _pseudo_domain(host.rstrip(".")) + dot
+
+    return _EMBEDDED_NAME.sub(repl, value)
+
+
 def sanitize(node: Any, *, org_name_keys: bool = False) -> Any:
     """Recursively pseudonymize a JSON structure per the documented mapping.
 
@@ -221,7 +274,9 @@ def sanitize(node: Any, *, org_name_keys: bool = False) -> Any:
         for key, value in node.items():
             lk = key.lower()
             if isinstance(value, str) and value:
-                if lk in _EMAIL_KEYS or _looks_like_email(value):
+                if lk in _FREE_TEXT_KEYS:
+                    out[key] = _scrub_text(value)
+                elif lk in _EMAIL_KEYS or _looks_like_email(value):
                     out[key] = _pseudo_email(value)
                 elif lk in _DOMAIN_KEYS:
                     out[key] = _pseudo_domain(value)
@@ -322,7 +377,27 @@ def _first_list(body: Any) -> list[Any]:
     return []
 
 
-def capture(client: CertiNextClient, out_dir: Path, raw_dir: Path | None) -> int:
+def _capture_attempts(one: Any, slug: str, dom_id: str) -> None:
+    """Capture a domain's DCV attempt history and its newest attempt by id.
+
+    Records ``<slug>`` (the history list, server-default page) and
+    ``<slug>-detail`` (``GET .../dcv/attempts/{attemptId}`` for the newest
+    row). The detail read is the one that works for emSign domains, whose
+    ``/attempts/last`` returns 404 (production, 2026-11-19).
+
+    Args:
+        one: The per-endpoint capture callable from :func:`capture`.
+        slug: Base slug for the two files.
+        dom_id: The domain id.
+    """
+    history = one(slug, f"/api/certinext/v2/domains/{dom_id}/dcv/attempts")
+    rows = [r for r in _first_list(history) if isinstance(r, dict) and r.get("attemptId")]
+    if rows:
+        attempt_id = rows[0]["attemptId"]
+        one(f"{slug}-detail", f"/api/certinext/v2/domains/{dom_id}/dcv/attempts/{attempt_id}")
+
+
+def capture(client: CertiNextClient, out_dir: Path, raw_dir: Path | None, only: str | None = None) -> int:
     """Capture all corpus endpoints into ``out_dir``; return count of failures.
 
     Endpoint order matters: tier-2 captures derive their ids from tier-1
@@ -333,6 +408,11 @@ def capture(client: CertiNextClient, out_dir: Path, raw_dir: Path | None) -> int
         client: Authenticated low-level client.
         out_dir: Directory for sanitized corpus files (created if needed).
         raw_dir: Optional directory for unsanitized copies (never commit).
+        only: When set, write only files whose slug starts with this
+            prefix. Every endpoint is still fetched, because later ids
+            derive from earlier bodies; the filter only limits the files
+            written, so a targeted recapture leaves unrelated fixtures
+            untouched.
     """
     out_dir.mkdir(parents=True, exist_ok=True)
     if raw_dir:
@@ -341,12 +421,27 @@ def capture(client: CertiNextClient, out_dir: Path, raw_dir: Path | None) -> int
     captured: dict[str, Any] = {}
     failures = 0
 
-    def one(slug: str, path: str, params: dict[str, Any] | None = None, *, org_names: bool = False) -> Any:
-        """Capture one endpoint; record failures without aborting the run."""
+    def one(
+        slug: str,
+        path: str,
+        params: dict[str, Any] | None = None,
+        *,
+        org_names: bool = False,
+        optional_404: bool = False,
+    ) -> Any:
+        """Capture one endpoint; record failures without aborting the run.
+
+        ``optional_404`` turns a 404 into a note instead of a failure, for
+        reads the vendor is known to refuse for some records; the existing
+        fixture for that slug is left as it was.
+        """
         nonlocal failures
         try:
             resp = raw_get(client, path, params)
         except (CertiNextAPIError, httpx.HTTPError) as exc:
+            if optional_404 and isinstance(exc, CertiNextAPIError) and exc.status_code == 404:
+                print(f"  note  {slug}: 404, existing fixture kept ({exc})", file=sys.stderr)
+                return None
             print(f"  FAIL  {slug}: {exc}", file=sys.stderr)
             failures += 1
             return None
@@ -354,6 +449,9 @@ def capture(client: CertiNextClient, out_dir: Path, raw_dir: Path | None) -> int
             body = resp.json()
         except ValueError:
             body = resp.text
+        captured[slug] = body
+        if only is not None and not slug.startswith(only):
+            return body
         headers = {k: v for k, v in resp.headers.items() if k.lower() not in _DROP_HEADERS}
         record = {
             "request": {"method": "GET", "path": sanitize_path(path), "params": sanitize(params) if params else None},
@@ -375,7 +473,6 @@ def capture(client: CertiNextClient, out_dir: Path, raw_dir: Path | None) -> int
                 json.dumps(raw_record, indent=2, sort_keys=True) + "\n", encoding="utf-8"
             )
         print(f"  ok    {slug}", file=sys.stderr)
-        captured[slug] = body
         return body
 
     # --- Tier 1: no derived input ------------------------------------------
@@ -413,18 +510,33 @@ def capture(client: CertiNextClient, out_dir: Path, raw_dir: Path | None) -> int
     if codes:
         one("catalog-custom-fields", f"/api/certinext/v2/catalog/products/{min(codes)}/custom-fields")
 
-    domains = _first_list(domains_body)
-    dom = min(
-        (d for d in domains if isinstance(d, dict) and d.get("domainId")),
-        key=lambda d: str(d.get("domainName", "")),
-        default=None,
-    )
+    domains = [d for d in _first_list(domains_body) if isinstance(d, dict) and d.get("domainId")]
+    dom = min(domains, key=lambda d: str(d.get("domainName", "")), default=None)
     if dom:
         dom_id = dom["domainId"]
         one("domains-detail", f"/api/certinext/v2/domains/{dom_id}")
         one("domains-dcv", f"/api/certinext/v2/domains/{dom_id}/dcv")
-        one("domains-dcv-attempts-last", f"/api/certinext/v2/domains/{dom_id}/dcv/attempts/last")
-        one("domains-dcv-attempts", f"/api/certinext/v2/domains/{dom_id}/dcv/attempts")
+        # emSign domains' /attempts/last returns 404 "No DCV attempts found"
+        # even with a non-empty history (production, 2026-11-19).
+        one(
+            "domains-dcv-attempts-last", f"/api/certinext/v2/domains/{dom_id}/dcv/attempts/last",
+            optional_404=True,
+        )
+        _capture_attempts(one, "domains-dcv-attempts", dom_id)
+
+    # The same DCV reads for the first SSL.com-validated domain: its attempts
+    # have a different shape (attempt id ``sslcom-latest``, CA diagnostics).
+    sslcom = min(
+        (d for d in domains if str(d.get("validatedBy") or "").upper() == "SSLCOM"),
+        key=lambda d: str(d.get("domainName", "")),
+        default=None,
+    )
+    if sslcom:
+        sid = sslcom["domainId"]
+        one("domains-dcv-attempts-last-sslcom", f"/api/certinext/v2/domains/{sid}/dcv/attempts/last")
+        _capture_attempts(one, "domains-dcv-attempts-sslcom", sid)
+    else:
+        print("  note  no SSL.com-validated domain on the captured domains page", file=sys.stderr)
 
     orders = _first_list(orders_body)
     # ssl-certificates endpoints are keyed by the report row's orderNumber.
@@ -459,6 +571,10 @@ def main() -> None:
         "--keep-raw", metavar="DIR", default=None,
         help="also write unsanitized copies to DIR (keep outside the repo; never commit)",
     )
+    parser.add_argument(
+        "--only", metavar="PREFIX", default=None,
+        help="write only files whose slug starts with PREFIX (e.g. domains-dcv-attempts); all endpoints are still read",
+    )
     args = parser.parse_args()
 
     env = "sandbox" if args.sandbox else "prod"
@@ -466,7 +582,7 @@ def main() -> None:
     out_dir = Path(args.out_root) / env
     raw_dir = Path(args.keep_raw) / env if args.keep_raw else None
     print(f"Capturing {env} corpus to {out_dir} (read-only GETs)", file=sys.stderr)
-    failures = capture(client, out_dir, raw_dir)
+    failures = capture(client, out_dir, raw_dir, args.only)
     if failures:
         print(f"{failures} endpoint(s) failed — corpus incomplete", file=sys.stderr)
         raise SystemExit(1)
