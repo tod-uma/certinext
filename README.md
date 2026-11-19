@@ -860,7 +860,8 @@ certinext domains change-dcv-method DOMAIN_ID DNS-TXT
 
 #### last-dcv-attempt
 
-Show the most recent DCV attempt for a domain.
+Show the most recent DCV attempt for a domain, with its diagnostics. Exits 1
+when the domain has no attempts.
 
 ```bash
 certinext domains last-dcv-attempt DOMAIN_ID
@@ -868,11 +869,17 @@ certinext domains last-dcv-attempt DOMAIN_ID
 
 #### dcv-attempt-history
 
-Show the full DCV attempt history for a domain.
+Show every DCV attempt for a domain, newest first (all pages). `--json`
+prints the rows as the API sent them.
 
 ```bash
 certinext domains dcv-attempt-history DOMAIN_ID
 ```
+
+Changed in 1.5.0: `last-dcv-attempt` no longer reads the API's
+`/dcv/attempts/last`, which returns 404 for most emSign domains, and
+`dcv-attempt-history` prints a list of rows from every page instead of the
+first page's wrapper object.
 
 </details>
 

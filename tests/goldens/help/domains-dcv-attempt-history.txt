@@ -1,7 +1,11 @@
                                                                                                     
  Usage: certinext domains dcv-attempt-history [OPTIONS] ID                                          
                                                                                                     
- Get DCV attempt history for a domain.                                                              
+ Get the full DCV attempt history for a domain, newest first.                                       
+                                                                                                    
+ Follows every page. --json prints the rows as received; the table                                  
+ shows the same columns for every row, blank where the vendor omits a                               
+ field.                                                                                             
                                                                                                     
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
 │ *    ID      TEXT  Domain ID [required]                                                          │

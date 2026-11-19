@@ -354,8 +354,20 @@ def last_dcv_attempt(
     ctx: typer.Context,
     domain_id: str = typer.Argument(..., metavar="ID", help="Domain ID"),
 ) -> None:
-    """Get the last DCV attempt for a domain."""
-    _show_data(ctx, session(ctx).domain.get(domain_id).last_dcv_attempt())
+    """Get the most recent DCV attempt for a domain, with diagnostics.
+
+    Reads the newest history row and fetches it by id, so it also works
+    for emSign domains whose /dcv/attempts/last returns 404. Prints the
+    attempt as received, plus attemptId when the wire omits it.
+    \f
+    Raises:
+        typer.Exit: With code 1 when the domain has no DCV attempts.
+    """
+    attempt = session(ctx).domain.get(domain_id).latest_dcv_attempt()
+    if attempt is None:
+        print(f"No DCV attempts found for domain {domain_id}.", file=sys.stderr)
+        raise typer.Exit(1)
+    _show_data(ctx, {"attemptId": attempt.attempt_id, **attempt.as_dict()})
 
 
 @domains_app.command("dcv-attempt-history")
@@ -363,5 +375,26 @@ def dcv_attempt_history(
     ctx: typer.Context,
     domain_id: str = typer.Argument(..., metavar="ID", help="Domain ID"),
 ) -> None:
-    """Get DCV attempt history for a domain."""
-    _show_data(ctx, session(ctx).domain.get(domain_id).dcv_attempt_history())
+    """Get the full DCV attempt history for a domain, newest first.
+
+    Follows every page. --json prints the rows as received; the table
+    shows the same columns for every row, blank where the vendor omits a
+    field.
+    """
+    rows = session(ctx).domain.get(domain_id).dcv_attempts()
+    if ctx.obj.output_json:
+        _show_data(ctx, [r.as_dict() for r in rows])
+        return
+    _show_data(
+        ctx,
+        [
+            {
+                "attemptId": r.attempt_id,
+                "attemptedAt": r.attempted_at.isoformat() if r.attempted_at else None,
+                "overallStatus": r.overall_status,
+                "failureClass": r.failure_class,
+                "method": r.method,
+            }
+            for r in rows
+        ],
+    )
