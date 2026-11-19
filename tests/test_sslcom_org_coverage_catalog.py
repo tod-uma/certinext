@@ -206,6 +206,7 @@ class TestAccountAccessorCaValidation:
         with pytest.raises(ValueError, match="subscriber_agreement_accepted=True"):
             acc.submit_ca_validation("1000001", subscriber_agreement_accepted=False)
         with pytest.raises(ValueError):
+            # Deliberately the wrong type: only the literal True may count as agreement, not a truthy string.
             acc.submit_ca_validation("1000001", subscriber_agreement_accepted="yes")  # type: ignore[arg-type]
         client.post.assert_not_called()
 

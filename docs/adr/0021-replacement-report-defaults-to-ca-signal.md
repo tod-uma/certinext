@@ -127,7 +127,7 @@ catalog failure and empty catalog, `replaced_by`/`possibly_replaced_by`/
 `renewed` (including newest-wins and an unevaluated-CA coverer), the
 `outstanding` counts and filter, `--issued-since`, the CLI JSON/CSV fields and
 summary line, and the cache max-age rules. Production verification steps are in
-[the plan](../plans/replacement-report-ca-migration.md). An external review
+[the plan](../plans/archive/replacement-report-ca-migration.md). An external review
 (self-reported GPT-6, Codex VS Code extension, 2026-11-12) found the issues behind
 5a, the unevaluated-CA coverer, the empty-catalog case, and the scoped-filter
 limit; all were fixed or documented.
@@ -185,7 +185,7 @@ limit; all were fixed or documented.
 - Amends [0018](0018-classify-replacement-on-configurable-signals.md) (default
   criteria) and [0019](0019-command-local-opt-in-inspection-cache.md) (7-day
   age bound). Related: [0020](0020-multi-ca-domains-fail-closed-and-opt-in-create-recovery.md)
-  (multi-CA branching), [the plan](../plans/replacement-report-ca-migration.md),
+  (multi-CA branching), [the plan](../plans/archive/replacement-report-ca-migration.md),
   certinext #40.
 
 ---

@@ -1172,7 +1172,9 @@ def test_scoped_report_sees_replacement_outside_scope_uninspected(
 ) -> None:
     """#40: an out-of-scope SSL.com cert with the same CN still counts, as a possible replacement."""
     sess, api = _session(monkeypatch, _cross_scope_routes())
-    report = rp.build_report(sess, CA_CRITERIA, now=NOW, **scope)  # type: ignore[arg-type]
+    report = rp.build_report(
+        sess, CA_CRITERIA, now=NOW, originators=scope.get("originators"), groups=scope.get("groups"),
+    )
     assert [r.facts.order_number for r in report.rows] == ["ORDER-00001"]
     assert report.rows[0].possibly_replaced_by == "ORDER-00005"
     assert not any("ssl-certificates" in c for c in api.calls)
@@ -1188,7 +1190,8 @@ def test_scoped_report_sees_replacement_outside_scope_inspected(
     seen: list[str] = []
     report = rp.build_report(
         sess, CA_CRITERIA, inspect=True, now=NOW, on_total=totals.append,
-        on_progress=lambda f: seen.append(f.order_number), **scope,  # type: ignore[arg-type]
+        on_progress=lambda f: seen.append(f.order_number),
+        originators=scope.get("originators"), groups=scope.get("groups"),
     )
     [row] = report.rows
     assert (row.facts.order_number, row.replaced_by, row.replaced_by_ca, row.outstanding) == (
