@@ -62,8 +62,17 @@ class CatalogAccessor:
         """
         self._client = client
 
-    def list_products(self) -> list[ProductCategory]:
+    def list_products(self, *, group_number: str | None = None) -> list[ProductCategory]:
         """Return all certificate product categories available to the account.
+
+        Args:
+            group_number: Only products enabled for this group (a
+                :attr:`~certinext.models.accounts.Group.group_number`), passed
+                as the API's ``groupNumber`` param. The filter is real:
+                probed in production 2026-11-19, different groups returned
+                different product sets, some of them empty. An unknown group
+                number also returns an empty list rather than an error, so an
+                empty result does not prove the group exists.
 
         Returns:
             List of :class:`ProductCategory` objects, each containing a list
@@ -72,7 +81,8 @@ class CatalogAccessor:
         Raises:
             CertiNextAPIError: On a non-2xx API response. Provides ``.status_code`` and ``.body``.
         """
-        result = self._client.get(_PRODUCTS_BASE)
+        params = {"groupNumber": group_number} if group_number is not None else None
+        result = self._client.get(_PRODUCTS_BASE, params=params)
         raw: list[Any] = []
         if isinstance(result, list):
             raw = result

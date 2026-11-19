@@ -300,6 +300,22 @@ class TestCatalogAccessorListProducts:
         accessor = CatalogAccessor(client)
         assert accessor.list_products() == []
 
+    def test_group_number_forwarded(self) -> None:
+        """list_products(group_number=...) passes it as groupNumber."""
+        client, mock_session = _make_client()
+        mock_session.get.return_value = _ok_response(self._CATALOG_PAYLOAD)
+        CatalogAccessor(client).list_products(group_number="1234567890")
+        _, kwargs = mock_session.get.call_args
+        assert kwargs["params"]["groupNumber"] == "1234567890"
+
+    def test_no_params_without_group_number(self) -> None:
+        """list_products() sends no groupNumber when group_number is None."""
+        client, mock_session = _make_client()
+        mock_session.get.return_value = _ok_response(self._CATALOG_PAYLOAD)
+        CatalogAccessor(client).list_products()
+        _, kwargs = mock_session.get.call_args
+        assert "groupNumber" not in (kwargs.get("params") or {})
+
 
 # ---------------------------------------------------------------------------
 # CatalogAccessor.get_custom_fields

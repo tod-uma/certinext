@@ -223,6 +223,22 @@ class TestLedgerAccessorGetPage:
         accessor = LedgerAccessor(client)
         assert accessor.get_page(page=99) == []
 
+    def test_group_number_forwarded(self) -> None:
+        """get_page() passes group_number as groupNumber."""
+        client, mock_session = _make_client()
+        mock_session.get.return_value = _ok_response([])
+        LedgerAccessor(client).get_page(group_number="1234567890")
+        _, kwargs = mock_session.get.call_args
+        assert kwargs["params"]["groupNumber"] == "1234567890"
+
+    def test_no_group_number_when_none(self) -> None:
+        """get_page() omits groupNumber when group_number is None."""
+        client, mock_session = _make_client()
+        mock_session.get.return_value = _ok_response([])
+        LedgerAccessor(client).get_page()
+        _, kwargs = mock_session.get.call_args
+        assert "groupNumber" not in kwargs["params"]
+
 
 # ---------------------------------------------------------------------------
 # LedgerAccessor.get_list
@@ -254,6 +270,18 @@ class TestLedgerAccessorGetList:
         result = accessor.get_list(page_size=2)
         assert len(result) == 3
         assert mock_session.get.call_count == 2
+
+    def test_group_number_forwarded_on_every_page(self) -> None:
+        """get_list() passes group_number as groupNumber on each page request."""
+        client, mock_session = _make_client()
+        mock_session.get.side_effect = [
+            _ok_response([_make_record(1), _make_record(2)]),
+            _ok_response([_make_record(3)]),
+        ]
+        LedgerAccessor(client).get_list(page_size=2, group_number="1234567890")
+        assert mock_session.get.call_count == 2
+        for call in mock_session.get.call_args_list:
+            assert call.kwargs["params"]["groupNumber"] == "1234567890"
 
     def test_empty_account(self) -> None:
         """get_list() returns [] when no ledger records exist."""

@@ -50,12 +50,14 @@ class LedgerAccessor:
         """
         self._client = client
 
-    def _fetch_page(self, page: int, size: int) -> tuple[list[Any], int | None]:
+    def _fetch_page(self, page: int, size: int, group_number: str | None = None) -> tuple[list[Any], int | None]:
         """Fetch one raw ledger page plus the server-reported total page count.
 
         Args:
             page: 1-based page number.
             size: Number of records per page; maximum 100.
+            group_number: Optional group filter, passed as the API's
+                ``groupNumber`` param. See :meth:`get_list`.
 
         Returns:
             ``(rows, total_pages)`` — ``total_pages`` is taken from the
@@ -66,6 +68,8 @@ class LedgerAccessor:
             CertiNextAPIError: On a non-2xx API response.
         """
         params: dict[str, Any] = {"page": page, "size": size}
+        if group_number is not None:
+            params["groupNumber"] = group_number
         result = self._client.get(_BASE, params=params)
         if isinstance(result, list):
             return result, None
@@ -81,6 +85,8 @@ class LedgerAccessor:
         self,
         page: int = 1,
         size: int = 100,
+        *,
+        group_number: str | None = None,
     ) -> list[LedgerRecord]:
         """Fetch a single page of ledger entries.
 
@@ -93,6 +99,7 @@ class LedgerAccessor:
         Args:
             page: 1-based page number (default: 1).
             size: Number of records per page; maximum 100 (default: 100).
+            group_number: Optional group filter. See :meth:`get_list`.
 
         Returns:
             List of :class:`LedgerRecord` objects for this page.
@@ -100,12 +107,14 @@ class LedgerAccessor:
         Raises:
             CertiNextAPIError: On a non-2xx API response. Provides ``.status_code`` and ``.body``.
         """
-        raw, _ = self._fetch_page(page, size)
+        raw, _ = self._fetch_page(page, size, group_number)
         return [LedgerRecord.model_validate(item) for item in raw if isinstance(item, dict)]
 
     def get_list(
         self,
         page_size: int = 100,
+        *,
+        group_number: str | None = None,
     ) -> list[LedgerRecord]:
         """Return all ledger entries by iterating through all pages automatically.
 
@@ -116,8 +125,18 @@ class LedgerAccessor:
         after the last would repeat the last page forever. The short-page
         rule remains only as a fallback for bare-array responses.
 
+        The API has no date filter for the ledger, so consumers that want
+        history have to pull it in full.
+
         Args:
             page_size: Records per page; maximum 100 (default: 100).
+            group_number: Optional group filter (a
+                :attr:`~certinext.models.accounts.Group.group_number`), passed
+                as the API's ``groupNumber`` param on every page request. The
+                server recognises the parameter (a non-numeric value is
+                rejected with HTTP 422), but whether it filters correctly is
+                **unverified**: the production ledger was empty when probed
+                on 2026-11-19, with or without the filter.
 
         Returns:
             Combined list of :class:`LedgerRecord` objects from all pages.
@@ -128,7 +147,7 @@ class LedgerAccessor:
         records: list[LedgerRecord] = []
         page = 1
         while True:
-            raw, total_pages = self._fetch_page(page, page_size)
+            raw, total_pages = self._fetch_page(page, page_size, group_number)
             records.extend(LedgerRecord.model_validate(item) for item in raw if isinstance(item, dict))
             if total_pages is not None:
                 if page >= total_pages:

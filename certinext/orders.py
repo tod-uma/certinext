@@ -58,6 +58,7 @@ class OrderAccessor:
         status: str | None = None,
         since: date | None = None,
         until: date | None = None,
+        group_number: str | None = None,
     ) -> tuple[list[Any], int | None]:
         """Fetch one raw report page plus the server-reported total page count.
 
@@ -71,6 +72,8 @@ class OrderAccessor:
                 ``from`` param. See :meth:`get_list`.
             until: Optional end date (inclusive), passed as the API's ``to``
                 param. See :meth:`get_list`.
+            group_number: Optional group filter, passed as the API's
+                ``groupNumber`` param. See :meth:`get_list`.
 
         Returns:
             ``(rows, total_pages)`` — ``total_pages`` is taken from the
@@ -87,6 +90,8 @@ class OrderAccessor:
             params["from"] = since.isoformat()
         if until is not None:
             params["to"] = until.isoformat()
+        if group_number is not None:
+            params["groupNumber"] = group_number
         result = self._client.get(_BASE, params=params)
         if isinstance(result, list):
             return result, None
@@ -105,6 +110,8 @@ class OrderAccessor:
         status: str | None = None,
         since: date | None = None,
         until: date | None = None,
+        *,
+        group_number: str | None = None,
     ) -> list[OrderRecord]:
         """Fetch a single page of orders from the report endpoint.
 
@@ -123,6 +130,7 @@ class OrderAccessor:
                 anything about the returned records' ``certificate_status``.
             since: Optional start date (inclusive). See :meth:`get_list`.
             until: Optional end date (inclusive). See :meth:`get_list`.
+            group_number: Optional group filter. See :meth:`get_list`.
 
         Returns:
             List of `OrderRecord` objects for this page.
@@ -130,7 +138,7 @@ class OrderAccessor:
         Raises:
             CertiNextAPIError: On a non-2xx API response. Provides ``.status_code`` and ``.body``.
         """
-        raw, _ = self._fetch_page(page, size, status, since, until)
+        raw, _ = self._fetch_page(page, size, status, since, until, group_number)
         return [OrderRecord.model_validate(item) for item in raw if isinstance(item, dict)]
 
     def get_list(
@@ -139,6 +147,8 @@ class OrderAccessor:
         page_size: int = 100,
         since: date | None = None,
         until: date | None = None,
+        *,
+        group_number: str | None = None,
     ) -> list[OrderRecord]:
         """Return all orders by iterating through all pages automatically.
 
@@ -176,6 +186,15 @@ class OrderAccessor:
                 param on every page request. Per the OpenAPI spec, a
                 date-only value is expanded to end-of-day server-side before
                 filtering.
+            group_number: Optional group filter (a
+                :attr:`~certinext.models.accounts.Group.group_number`), passed
+                as the API's ``groupNumber`` param on every page request.
+                Confirmed working in production 2026-11-19: each group's
+                server-filtered count matched a client-side count of
+                :attr:`OrderRecord.group_number` exactly, and a group with no
+                orders returned zero rows. The server rejects a non-numeric
+                value with HTTP 422. (Unlike ``groupNumber`` on ``/domains``,
+                which the vendor ignores — see #21.)
 
         Returns:
             Combined list of `OrderRecord` objects from all pages.
@@ -186,7 +205,7 @@ class OrderAccessor:
         records: list[OrderRecord] = []
         page = 1
         while True:
-            raw, total_pages = self._fetch_page(page, page_size, status, since, until)
+            raw, total_pages = self._fetch_page(page, page_size, status, since, until, group_number)
             records.extend(OrderRecord.model_validate(item) for item in raw if isinstance(item, dict))
             if total_pages is not None:
                 if page >= total_pages:
@@ -201,6 +220,8 @@ class OrderAccessor:
         domain: str,
         status: str | None = "issued",
         page_size: int = 100,
+        *,
+        group_number: str | None = None,
     ) -> list[OrderRecord]:
         """Return orders whose CN matches ``domain`` (case-insensitive).
 
@@ -218,6 +239,9 @@ class OrderAccessor:
                 :meth:`get_list` for what this does and doesn't guarantee
                 about the results). Pass ``None`` to include all statuses.
             page_size: Records per page; maximum 100 (default: 100).
+            group_number: Optional server-side group filter, narrowing the
+                pages fetched before the client-side CN match. See
+                :meth:`get_list`.
 
         Returns:
             List of :class:`OrderRecord` objects whose
@@ -234,6 +258,6 @@ class OrderAccessor:
                 print(f"Active cert: order {matches[0].order_number}")
         """
         domain_lower = domain.lower()
-        all_records = self.get_list(status=status, page_size=page_size)
+        all_records = self.get_list(status=status, page_size=page_size, group_number=group_number)
         log.debug("find_by_domain total orders", count=len(all_records))
         return [r for r in all_records if (r.common_name or "").lower() == domain_lower]
