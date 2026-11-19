@@ -78,6 +78,21 @@ class TestFreeTextScrubbing:
         out = cc.sanitize({"caMessage": "contact soc@example.edu"})["caMessage"]
         assert out == "contact " + cc._pseudo_email("soc@example.edu")
 
+    @pytest.mark.parametrize(
+        ("text", "secret"),
+        [
+            ("answer bücher.de.", "bücher"),
+            ("answer пример.рф", "пример"),
+            ("mailto:soc@bücher.de", "soc@"),
+            ("answer example.xn--p1ai", "example"),
+            ("answer host.xn--bcher-kva.de", "xn--bcher-kva"),
+        ],
+    )
+    def test_internationalized_names_scrubbed(self, cc: ModuleType, text: str, secret: str) -> None:
+        """Unicode and punycode names inside free text lose every non-TLD label."""
+        out = cc.sanitize({"rawData": text})["rawData"]
+        assert secret not in out
+
 
 class TestSentinelIds:
     """Vendor literal ids survive; real ids are still pseudonymized."""

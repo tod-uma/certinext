@@ -156,10 +156,13 @@ _FREE_TEXT_KEYS = {
 #: One pass over free text: an email, or else a hostname (two or more labels,
 #: alphabetic final label, optional trailing root dot). Emails are tried first
 #: so their host part is not rewritten separately. IPv4 addresses never match
-#: (numeric final label).
+#: (numeric final label). ``\w`` is Unicode-aware, so internationalized names
+#: (``bücher.de``) are caught as well as their punycode (``xn--bcher-kva.de``);
+#: a punycode final label (``.xn--p1ai``) matches as far as ``xn``, which still
+#: pseudonymizes every label before it.
 _EMBEDDED_NAME = re.compile(
-    r"(?P<email>[\w.+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+)"
-    r"|(?P<host>\b(?:[A-Za-z0-9_](?:[A-Za-z0-9_-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}\b\.?)"
+    r"(?P<email>[\w.+-]+@[\w-]+(?:\.[\w-]+)+)"
+    r"|(?P<host>\b(?:\w(?:[\w-]{0,61}\w)?\.)+[^\W\d_]{2,63}\b\.?)"
 )
 
 
