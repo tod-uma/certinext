@@ -53,7 +53,15 @@ Errors:
     on a transport error or a transient status; API calls are not retried.
 """
 
-from .accounts import AccountAccessor, AccountInfo, CaLevelValidation, Group, Organization, OrgCaValidation
+from .accounts import (
+    AccountAccessor,
+    AccountInfo,
+    BusinessCategory,
+    CaLevelValidation,
+    Group,
+    Organization,
+    OrgCaValidation,
+)
 from .catalog import CatalogAccessor, CustomField, Product, ProductCategory
 from .client import CertiNextClient, TimeoutSpec
 from .csr import CsrInfo
@@ -192,6 +200,7 @@ __all__ = [
     # Accounts
     "AccountAccessor",
     "AccountInfo",
+    "BusinessCategory",
     "CaLevelValidation",
     "Group",
     "Organization",
