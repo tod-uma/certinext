@@ -89,6 +89,7 @@ from .exceptions import (
     CertiNextTimeoutError,
 )
 from .ledger import LedgerAccessor, LedgerRecord
+from .models.dcv_attempts import SSLCOM_LATEST, DcvAttempt, DcvAttemptSummary, DcvDiagnostics
 from .orders import CertificateStatus, OrderAccessor, OrderRecord
 from .session import CertiNextSession
 from .ssl_certificates import (
@@ -222,6 +223,10 @@ __all__ = [
     "DcvStatus",
     "DomainStatus",
     "VALID_DCV_METHODS",
+    "DcvAttempt",
+    "DcvAttemptSummary",
+    "DcvDiagnostics",
+    "SSLCOM_LATEST",
     # Ledger
     "LedgerAccessor",
     "LedgerRecord",

@@ -2121,8 +2121,14 @@ domain.verify(option_id="...")     # non-emSign only: check a different entry of
 domain.change_dcv_method("DNS-TXT")   # emSign only; accepted values: "DNS-TXT", "HTTP-URL"
                                       # (raises ValueError for any other CA)
 domain.reinitiate_dcv()            # emSign only: force a fresh challenge token
-attempt = domain.last_dcv_attempt()   # returns raw API response dict
-history = domain.dcv_attempt_history() # returns raw API response dict or list
+
+# DCV attempts (typed; read-only)
+for row in domain.dcv_attempts():  # every page, newest first -> list[DcvAttemptSummary]
+    print(row.attempt_id, row.attempted_at, row.overall_status, row.failure_class)
+attempt = domain.get_dcv_attempt(row.attempt_id)  # -> DcvAttempt with .diagnostics
+latest = domain.latest_dcv_attempt()  # newest attempt's details, or None if there are none
+if latest and latest.diagnostics:
+    print(latest.status, latest.diagnostics.failure_class or latest.diagnostics.ca_status)
 
 # Is the DCV token about to expire?
 if domain.dcv_expires_soon(days=30):
@@ -2139,6 +2145,19 @@ parent = domain.dcv_covering_parent(all_domains)
 raw = domain.as_dict()
 row = domain.to_row()
 ```
+
+An SSL.com-validated domain keeps only its CA's latest result: its history
+is one row with attempt id `"sslcom-latest"` (`certinext.SSLCOM_LATEST`), and
+its diagnostics carry `ca_status`, `ca_message`, `mpic` and `valid_till`.
+emSign attempts have numeric ids and per-resolver `perspectives`,
+`consensus` and `next_steps` instead.
+
+`latest_dcv_attempt()` reads the newest history row and fetches it by id. It
+avoids `GET .../dcv/attempts/last`, which in production returns 404 for most
+emSign domains even when they have history.
+
+`last_dcv_attempt()` and `dcv_attempt_history()` (raw dicts; the latter only
+the first page) are deprecated since 1.5.0 and will be removed in 2.0.
 
 #### Example: verify all pending domains
 
@@ -2199,6 +2218,17 @@ avoid re-fetching the entire order history on every call:
 from datetime import date
 
 recent = sess.orders.get_list(status="issued", since=date(2026, 7, 1), until=date(2026, 7, 31))
+```
+
+Limit any of these to one billing group with `group_number=` (a
+`Group.group_number` from `sess.accounts.list_groups()`); the server
+filters, and rejects a non-numeric value with HTTP 422. The same keyword
+works on `sess.ledger.get_page()`/`get_list()` and
+`sess.catalog.list_products()`:
+
+```python
+group_orders = sess.orders.get_list(group_number="1234567890")
+group_products = sess.catalog.list_products(group_number="1234567890")
 ```
 
 #### OrderRecord properties
@@ -2289,6 +2319,10 @@ for o in orgs:
 
 # Fetch a single organization by its number
 org = sess.accounts.get_organization("1234567")
+
+# Business categories: the values business_category_id takes (SSL.com EV)
+names = {c.id: c.name for c in sess.accounts.list_business_categories()}
+print(names.get(org.business_category_id))
 ```
 
 `Organization` also exposes detail-endpoint properties not present in the

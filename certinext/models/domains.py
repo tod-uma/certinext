@@ -20,6 +20,7 @@ Wire shapes are validated leniently per ADR 0005; see
 :meth:`Domain.from_payload`) so its verb methods keep working.
 """
 
+import warnings
 from collections.abc import Iterable
 from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
@@ -29,10 +30,15 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator,
 
 from ..client import CertiNextClient
 from ._base import CertiNextModel, _LenientDatetime, _LenientDatetimeUTC
+from .dcv_attempts import DcvAttempt, DcvAttemptSummary
 
 log = structlog.get_logger()
 
 _BASE = "/api/certinext/v2/domains"
+
+#: Server-side maximum ``limit`` on ``GET /domains/{id}/dcv/attempts``;
+#: larger values are silently capped (production, 2026-11-19).
+_DCV_ATTEMPTS_MAX_LIMIT = 50
 
 DomainStatus = Literal["ACTIVE", "INACTIVE", "EXPIRED"]
 """Valid values returned by :attr:`Domain.status` (per the OpenAPI spec at
@@ -850,6 +856,15 @@ class Domain(CertiNextModel):
     def last_dcv_attempt(self) -> dict[str, Any]:
         """Return details of the most recent DCV attempt for this domain.
 
+        .. deprecated:: 1.5.0
+            Use :meth:`latest_dcv_attempt`, which returns a typed
+            :class:`~certinext.models.dcv_attempts.DcvAttempt` and works for
+            emSign domains. Removal is planned for 2.0.
+
+        This reads ``/dcv/attempts/last``, which in production returns 404
+        "No DCV attempts found" for most emSign domains even when their
+        history is not empty (45 of 47 sampled, 2026-11-19).
+
         Returns:
             Raw API response dict. Contains attempt metadata such as timestamp
             and result; exact keys depend on the API version.
@@ -857,11 +872,24 @@ class Domain(CertiNextModel):
         Raises:
             CertiNextAPIError: On a non-2xx API response. Provides ``.status_code`` and ``.body``.
         """
+        warnings.warn(
+            "Domain.last_dcv_attempt() is deprecated; use latest_dcv_attempt()",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         result = self._require_client().get(f"{_BASE}/{self.id}/dcv/attempts/last")
         return result if isinstance(result, dict) else {}
 
     def dcv_attempt_history(self) -> dict[str, Any] | list[Any]:
-        """Return the full DCV attempt history for this domain.
+        """Return the first page of DCV attempt history for this domain.
+
+        .. deprecated:: 1.5.0
+            Use :meth:`dcv_attempts`, which follows every page and returns
+            typed :class:`~certinext.models.dcv_attempts.DcvAttemptSummary`
+            rows. Removal is planned for 2.0.
+
+        Despite its name this returns only the server's default first page
+        (20 rows).
 
         Returns:
             Raw API response. May be a list of attempt dicts or a wrapper dict
@@ -870,4 +898,105 @@ class Domain(CertiNextModel):
         Raises:
             CertiNextAPIError: On a non-2xx API response. Provides ``.status_code`` and ``.body``.
         """
+        warnings.warn(
+            "Domain.dcv_attempt_history() is deprecated; use dcv_attempts()",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         return self._require_client().get(f"{_BASE}/{self.id}/dcv/attempts")
+
+    def dcv_attempts(self, *, page_size: int = _DCV_ATTEMPTS_MAX_LIMIT) -> list[DcvAttemptSummary]:
+        """Return this domain's full DCV attempt history, newest first.
+
+        Follows ``offset``/``limit`` paging to the end. Behaviour confirmed
+        in production on 2026-11-19: ``offset`` is a **row** offset (not a
+        page index, despite the wrapper's ``page`` field); ``limit`` is
+        capped at 50 server-side without an error; and an offset past the
+        end returns an empty page rather than repeating the last one.
+
+        An SSL.com-validated domain has exactly one row, whose
+        :attr:`~DcvAttemptSummary.attempt_id` is
+        :data:`~certinext.models.dcv_attempts.SSLCOM_LATEST`.
+
+        Args:
+            page_size: Rows per request, 1–50 (default 50, the server's
+                maximum).
+
+        Returns:
+            Every :class:`~certinext.models.dcv_attempts.DcvAttemptSummary`
+            in the history.
+
+        Raises:
+            ValueError: If ``page_size`` is outside 1–50.
+            CertiNextAPIError: On a non-2xx API response. Provides ``.status_code`` and ``.body``.
+        """
+        if not 1 <= page_size <= _DCV_ATTEMPTS_MAX_LIMIT:
+            raise ValueError(f"page_size must be between 1 and {_DCV_ATTEMPTS_MAX_LIMIT}, got {page_size}")
+        client = self._require_client()
+        rows: list[DcvAttemptSummary] = []
+        offset = 0
+        while True:
+            result = client.get(
+                f"{_BASE}/{self.id}/dcv/attempts", params={"offset": offset, "limit": page_size}
+            )
+            if isinstance(result, list):
+                raw, total = result, None
+            elif isinstance(result, dict):
+                content = result.get("content")
+                raw = content if isinstance(content, list) else []
+                total_val = result.get("totalElements")
+                total = total_val if isinstance(total_val, int) else None
+            else:
+                raw, total = [], None
+            rows.extend(DcvAttemptSummary.model_validate(r) for r in raw if isinstance(r, dict))
+            offset += len(raw)
+            # An empty page always ends the walk, so a server that ignored
+            # ``offset`` could not loop forever.
+            if not raw or (total is not None and offset >= total) or (total is None and len(raw) < page_size):
+                return rows
+
+    def get_dcv_attempt(self, attempt_id: str) -> DcvAttempt:
+        """Return the full details of one DCV attempt.
+
+        Args:
+            attempt_id: An id from :meth:`dcv_attempts`: a numeric string
+                (emSign) or ``"sslcom-latest"`` (SSL.com).
+
+        Returns:
+            The :class:`~certinext.models.dcv_attempts.DcvAttempt`. The wire
+            carries ``attemptId`` only for SSL.com attempts, so for emSign
+            ones :attr:`~DcvAttempt.attempt_id` is filled in from
+            ``attempt_id``; :meth:`~CertiNextModel.as_dict` still returns
+            the payload exactly as received.
+
+        Raises:
+            CertiNextAPIError: On a non-2xx API response (502 when SSL.com
+                cannot be reached). Provides ``.status_code`` and ``.body``.
+        """
+        result = self._require_client().get(f"{_BASE}/{self.id}/dcv/attempts/{attempt_id}")
+        attempt = DcvAttempt.model_validate(result if isinstance(result, dict) else {})
+        if attempt.attempt_id is None:
+            attempt.attempt_id = str(attempt_id)
+        return attempt
+
+    def latest_dcv_attempt(self) -> DcvAttempt | None:
+        """Return the full details of this domain's most recent DCV attempt.
+
+        Reads the newest history row, then fetches it by id. It does not use
+        ``/dcv/attempts/last``, which in production returns 404 for most
+        emSign domains even when they have history (2026-11-19).
+
+        Returns:
+            The newest :class:`~certinext.models.dcv_attempts.DcvAttempt`,
+            or ``None`` when the domain has no attempts.
+
+        Raises:
+            CertiNextAPIError: On a non-2xx API response. Provides ``.status_code`` and ``.body``.
+        """
+        result = self._require_client().get(f"{_BASE}/{self.id}/dcv/attempts", params={"offset": 0, "limit": 1})
+        raw = result.get("content") if isinstance(result, dict) else result
+        rows = [r for r in raw if isinstance(r, dict)] if isinstance(raw, list) else []
+        newest = DcvAttemptSummary.model_validate(rows[0]) if rows else None
+        if newest is None or not newest.attempt_id:
+            return None
+        return self.get_dcv_attempt(newest.attempt_id)

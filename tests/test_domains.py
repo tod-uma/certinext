@@ -454,13 +454,15 @@ class TestDomainAPIMethods:
     def test_last_dcv_attempt_calls_get(self, domain: Domain, mock_client: MagicMock) -> None:
         """last_dcv_attempt() calls GET /domains/{id}/dcv/attempts/last."""
         mock_client.get.return_value = {"attemptedAt": "2026-05-04T21:27:14Z"}
-        domain.last_dcv_attempt()
+        with pytest.warns(DeprecationWarning):
+            domain.last_dcv_attempt()
         mock_client.get.assert_called_once_with(f"/api/certinext/v2/domains/{domain.id}/dcv/attempts/last")
 
     def test_dcv_attempt_history_calls_get(self, domain: Domain, mock_client: MagicMock) -> None:
         """dcv_attempt_history() calls GET /domains/{id}/dcv/attempts."""
         mock_client.get.return_value = []
-        domain.dcv_attempt_history()
+        with pytest.warns(DeprecationWarning):
+            domain.dcv_attempt_history()
         mock_client.get.assert_called_once_with(f"/api/certinext/v2/domains/{domain.id}/dcv/attempts")
 
 

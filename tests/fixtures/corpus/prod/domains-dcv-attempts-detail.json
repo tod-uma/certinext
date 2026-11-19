@@ -1,0 +1,226 @@
+{
+  "request": {
+    "method": "GET",
+    "params": null,
+    "path": "/api/certinext/v2/domains/JTi2RgZHTUsj0J4Jz4Yz2QvMnTpIse056dohb6R71P0bWARw/dcv/attempts/3510768"
+  },
+  "response": {
+    "body": {
+      "diagnostics": {
+        "attemptTimestamp": "2026-10-26 19:12:49",
+        "consensus": {
+          "agreed": true,
+          "consensusStatusCode": "",
+          "consensusUrl": "",
+          "consensusValue": "x1ae89fe.edu.\t\t599\tIN\tCAA\t0 iodef \"mailto:user-466037@example.invalid\"\nx1ae89fe.edu.\t\t599\tIN\tCAA\t0 issue \"x85325ac.com\"\nx1ae89fe.edu.\t\t599\tIN\tCAA\t0 issue \"xbfbf543.com\"\nx1ae89fe.edu.\t\t599\tIN\tCAA\t0 issue \"xd278fc0.org\"\nx1ae89fe.edu.\t\t599\tIN\tCAA\t0 issue \"x80b5f82.goog\"\nx1ae89fe.edu.\t\t599\tIN\tCAA\t0 issue \"xa800e83.com\"\nx1ae89fe.edu.\t\t599\tIN\tCAA\t0 issue \"xc9479a9.com\"\nx1ae89fe.edu.\t\t599\tIN\tCAA\t0 issue \"x37fe756.x1800246.com\"\nx1ae89fe.edu.\t\t599\tIN\tCAA\t0 issuewild \"xbfbf543.com\"\nx1ae89fe.edu.\t\t599\tIN\tCAA\t0 issuewild \"xd278fc0.org\"\nx1ae89fe.edu.\t\t599\tIN\tCAA\t0 issuewild \"xa800e83.com\"\n",
+          "perspectiveCount": 5,
+          "quorumCount": 5,
+          "rirDiversityMet": true,
+          "totalPerspectivesQueried": 5
+        },
+        "domainId": "14387",
+        "domainName": "xeffb310.xe466bde.x1ae89fe.edu",
+        "expected": {
+          "domainName": "xeffb310.xe466bde.x1ae89fe.edu",
+          "fileContent": "A65805E9FE887FD1752AC46CCFB71D25",
+          "fileName": "CB0B752CE2F76BC9E75D58A02AE27DE6.txt",
+          "recordValue": "986E0246E85FF8B3B7F6C631A4494C8E"
+        },
+        "failureClass": "OK",
+        "method": "CAA_PRECHECK",
+        "nextSteps": [],
+        "overallStatus": "VERIFIED",
+        "perspectives": [
+          {
+            "dnssec": {
+              "evidence": {
+                "adFlag": false,
+                "answerRRSIG": [],
+                "authorityDS": [],
+                "authorityRRSIG": [],
+                "queryName": "x1ae89fe.edu.",
+                "resolver": "1.1.1.1",
+                "timestamp": "2026-10-26T19:12:48Z"
+              },
+              "validated": false
+            },
+            "errorCode": "",
+            "errorMessage": "",
+            "failureClass": "OK",
+            "found": {
+              "rawData": "x1ae89fe.edu.\t\t600\tIN\tCAA\t0 iodef \"mailto:user-466037@example.invalid\"\nx1ae89fe.edu.\t\t600\tIN\tCAA\t0 issue \"x85325ac.com\"\nx1ae89fe.edu.\t\t600\tIN\tCAA\t0 issue \"xbfbf543.com\"\nx1ae89fe.edu.\t\t600\tIN\tCAA\t0 issue \"xd278fc0.org\"\nx1ae89fe.edu.\t\t600\tIN\tCAA\t0 issue \"x80b5f82.goog\"\nx1ae89fe.edu.\t\t600\tIN\tCAA\t0 issue \"xa800e83.com\"\nx1ae89fe.edu.\t\t600\tIN\tCAA\t0 issue \"xc9479a9.com\"\nx1ae89fe.edu.\t\t600\tIN\tCAA\t0 issue \"x37fe756.x1800246.com\"\nx1ae89fe.edu.\t\t600\tIN\tCAA\t0 issuewild \"xbfbf543.com\"\nx1ae89fe.edu.\t\t600\tIN\tCAA\t0 issuewild \"xd278fc0.org\"\nx1ae89fe.edu.\t\t600\tIN\tCAA\t0 issuewild \"xa800e83.com\"\n",
+              "ttl": "600"
+            },
+            "geo": {
+              "lat": "",
+              "lon": ""
+            },
+            "httpStatusCode": "",
+            "latencyMs": "352",
+            "region": "Europe",
+            "resolverId": "3",
+            "resolverIp": "3.120.195.69",
+            "responseUrlValue": "",
+            "status": "OK",
+            "timestamp": "2026-10-26T19:12:48Z"
+          },
+          {
+            "dnssec": {
+              "evidence": {
+                "adFlag": false,
+                "answerRRSIG": [],
+                "authorityDS": [],
+                "authorityRRSIG": [],
+                "queryName": "x1ae89fe.edu.",
+                "resolver": "208.67.222.222",
+                "timestamp": "2026-10-26T19:12:49Z"
+              },
+              "validated": false
+            },
+            "errorCode": "",
+            "errorMessage": "",
+            "failureClass": "OK",
+            "found": {
+              "rawData": "x1ae89fe.edu.\t\t600\tIN\tCAA\t0 iodef \"mailto:user-466037@example.invalid\"\nx1ae89fe.edu.\t\t600\tIN\tCAA\t0 issue \"x85325ac.com\"\nx1ae89fe.edu.\t\t600\tIN\tCAA\t0 issue \"xbfbf543.com\"\nx1ae89fe.edu.\t\t600\tIN\tCAA\t0 issue \"xd278fc0.org\"\nx1ae89fe.edu.\t\t600\tIN\tCAA\t0 issue \"x80b5f82.goog\"\nx1ae89fe.edu.\t\t600\tIN\tCAA\t0 issue \"xa800e83.com\"\nx1ae89fe.edu.\t\t600\tIN\tCAA\t0 issue \"xc9479a9.com\"\nx1ae89fe.edu.\t\t600\tIN\tCAA\t0 issue \"x37fe756.x1800246.com\"\nx1ae89fe.edu.\t\t600\tIN\tCAA\t0 issuewild \"xbfbf543.com\"\nx1ae89fe.edu.\t\t600\tIN\tCAA\t0 issuewild \"xd278fc0.org\"\nx1ae89fe.edu.\t\t600\tIN\tCAA\t0 issuewild \"xa800e83.com\"\n",
+              "ttl": "600"
+            },
+            "geo": {
+              "lat": "37.751",
+              "lon": "-97.822"
+            },
+            "httpStatusCode": "",
+            "latencyMs": "527",
+            "region": "South America",
+            "resolverId": "5",
+            "resolverIp": "54.20.15.58",
+            "responseUrlValue": "",
+            "status": "OK",
+            "timestamp": "2026-10-26T19:12:48Z"
+          },
+          {
+            "dnssec": {
+              "evidence": {
+                "adFlag": false,
+                "answerRRSIG": [],
+                "authorityDS": [],
+                "authorityRRSIG": [],
+                "queryName": "x1ae89fe.edu.",
+                "resolver": "9.9.9.9",
+                "timestamp": "2026-10-26T19:12:48Z"
+              },
+              "validated": false
+            },
+            "errorCode": "",
+            "errorMessage": "",
+            "failureClass": "OK",
+            "found": {
+              "rawData": "x1ae89fe.edu.\t\t599\tIN\tCAA\t0 iodef \"mailto:user-466037@example.invalid\"\nx1ae89fe.edu.\t\t599\tIN\tCAA\t0 issue \"x85325ac.com\"\nx1ae89fe.edu.\t\t599\tIN\tCAA\t0 issue \"xbfbf543.com\"\nx1ae89fe.edu.\t\t599\tIN\tCAA\t0 issue \"xd278fc0.org\"\nx1ae89fe.edu.\t\t599\tIN\tCAA\t0 issue \"x80b5f82.goog\"\nx1ae89fe.edu.\t\t599\tIN\tCAA\t0 issue \"xa800e83.com\"\nx1ae89fe.edu.\t\t599\tIN\tCAA\t0 issue \"xc9479a9.com\"\nx1ae89fe.edu.\t\t599\tIN\tCAA\t0 issue \"x37fe756.x1800246.com\"\nx1ae89fe.edu.\t\t599\tIN\tCAA\t0 issuewild \"xbfbf543.com\"\nx1ae89fe.edu.\t\t599\tIN\tCAA\t0 issuewild \"xd278fc0.org\"\nx1ae89fe.edu.\t\t599\tIN\tCAA\t0 issuewild \"xa800e83.com\"\n",
+              "ttl": "599"
+            },
+            "geo": {
+              "lat": "",
+              "lon": ""
+            },
+            "httpStatusCode": "",
+            "latencyMs": "289",
+            "region": "USA West",
+            "resolverId": "4",
+            "resolverIp": "184.169.133.24",
+            "responseUrlValue": "",
+            "status": "OK",
+            "timestamp": "2026-10-26T19:12:48Z"
+          },
+          {
+            "dnssec": {
+              "evidence": {
+                "adFlag": false,
+                "answerRRSIG": [],
+                "authorityDS": [],
+                "authorityRRSIG": [],
+                "queryName": "x1ae89fe.edu.",
+                "resolver": "8.8.8.8",
+                "timestamp": "2026-10-26T19:12:48Z"
+              },
+              "validated": false
+            },
+            "errorCode": "",
+            "errorMessage": "",
+            "failureClass": "OK",
+            "found": {
+              "rawData": "x1ae89fe.edu.\t\t600\tIN\tCAA\t0 iodef \"mailto:user-466037@example.invalid\"\nx1ae89fe.edu.\t\t600\tIN\tCAA\t0 issue \"x85325ac.com\"\nx1ae89fe.edu.\t\t600\tIN\tCAA\t0 issue \"xbfbf543.com\"\nx1ae89fe.edu.\t\t600\tIN\tCAA\t0 issue \"xd278fc0.org\"\nx1ae89fe.edu.\t\t600\tIN\tCAA\t0 issue \"x80b5f82.goog\"\nx1ae89fe.edu.\t\t600\tIN\tCAA\t0 issue \"xa800e83.com\"\nx1ae89fe.edu.\t\t600\tIN\tCAA\t0 issue \"xc9479a9.com\"\nx1ae89fe.edu.\t\t600\tIN\tCAA\t0 issue \"x37fe756.x1800246.com\"\nx1ae89fe.edu.\t\t600\tIN\tCAA\t0 issuewild \"xbfbf543.com\"\nx1ae89fe.edu.\t\t600\tIN\tCAA\t0 issuewild \"xd278fc0.org\"\nx1ae89fe.edu.\t\t600\tIN\tCAA\t0 issuewild \"xa800e83.com\"\n",
+              "ttl": "600"
+            },
+            "geo": {
+              "lat": "37.751",
+              "lon": "-97.822"
+            },
+            "httpStatusCode": "",
+            "latencyMs": "65",
+            "region": "USA",
+            "resolverId": "2",
+            "resolverIp": "18.209.154.175",
+            "responseUrlValue": "",
+            "status": "OK",
+            "timestamp": "2026-10-26T19:12:48Z"
+          },
+          {
+            "dnssec": {
+              "evidence": {
+                "adFlag": false,
+                "answerRRSIG": [],
+                "authorityDS": [],
+                "authorityRRSIG": [],
+                "queryName": "x1ae89fe.edu.",
+                "resolver": "1.0.0.1",
+                "timestamp": "2026-10-26T19:12:49Z"
+              },
+              "validated": false
+            },
+            "errorCode": "",
+            "errorMessage": "",
+            "failureClass": "OK",
+            "found": {
+              "rawData": "x1ae89fe.edu.\t\t600\tIN\tCAA\t0 iodef \"mailto:user-466037@example.invalid\"\nx1ae89fe.edu.\t\t600\tIN\tCAA\t0 issue \"x85325ac.com\"\nx1ae89fe.edu.\t\t600\tIN\tCAA\t0 issue \"xbfbf543.com\"\nx1ae89fe.edu.\t\t600\tIN\tCAA\t0 issue \"xd278fc0.org\"\nx1ae89fe.edu.\t\t600\tIN\tCAA\t0 issue \"x80b5f82.goog\"\nx1ae89fe.edu.\t\t600\tIN\tCAA\t0 issue \"xa800e83.com\"\nx1ae89fe.edu.\t\t600\tIN\tCAA\t0 issue \"xc9479a9.com\"\nx1ae89fe.edu.\t\t600\tIN\tCAA\t0 issue \"x37fe756.x1800246.com\"\nx1ae89fe.edu.\t\t600\tIN\tCAA\t0 issuewild \"xbfbf543.com\"\nx1ae89fe.edu.\t\t600\tIN\tCAA\t0 issuewild \"xd278fc0.org\"\nx1ae89fe.edu.\t\t600\tIN\tCAA\t0 issuewild \"xa800e83.com\"\n",
+              "ttl": "600"
+            },
+            "geo": {
+              "lat": "",
+              "lon": ""
+            },
+            "httpStatusCode": "",
+            "latencyMs": "975",
+            "region": "Singapore",
+            "resolverId": "1",
+            "resolverIp": "13.251.51.229",
+            "responseUrlValue": "",
+            "status": "OK",
+            "timestamp": "2026-10-26T19:12:49Z"
+          }
+        ],
+        "schemaVersion": 1,
+        "tokenIsStale": false
+      },
+      "domainId": "id-4c801ca1",
+      "status": "VERIFIED"
+    },
+    "headers": {
+      "access-control-allow-methods": "GET, POST",
+      "cache-control": "no-store, no-cache,no-store,private,must-revalidate,max-stale=0,post-check=0,pre-check=0",
+      "connection": "keep-alive",
+      "content-security-policy": "frame-ancestors 'self';manifest-src 'self';",
+      "content-type": "application/json",
+      "date": "Thu, 19 Nov 2026 20:55:13 GMT",
+      "expires": "Thu, 01 Jan 1970 00:00:00 GMT",
+      "pragma": "no-cache, no-cache",
+      "referrer-policy": "origin-when-cross-origin",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-api-version": "2.0.0",
+      "x-content-type-options": "nosniff",
+      "x-frame-options": "DENY",
+      "x-xss-protection": "0; mode=block"
+    },
+    "status": 200
+  }
+}
