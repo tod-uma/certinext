@@ -1,12 +1,13 @@
 ---
-status: in-progress
+status: done
 depends-on: [replacement-report, replacement-report-cache]
 implements-adr: [0021]
 ---
 
 # Plan: replacement-report tracks the emSign → SSL.com DV migration
 
-**Status:** in progress. Approved by Tod 2026-11-12. Phase 0 is done: !147 merged, v1.4.0rc6 released (GitLab,
+**Status:** done (2026-11-19). Verification 4 was rerun after the cutoff and found 0 emSign certificates issued
+since 2026-11-16 (see "Results"); shipped in stable v1.4.0. Approved by Tod 2026-11-12. Phase 0 is done: !147 merged, v1.4.0rc6 released (GitLab,
 GitHub and PyPI verified), and branch `feat/replacement-report-ca-migration` was cut with a bump to 1.4.0rc7.
 **Phase 1 is done (2026-11-12)**; see the "Done" note under Phase 1 for what was pulled forward from Phases 2–3.
 **Phase 2 is done (2026-11-12)**, including the Phase 3 CLI tests; see its "Done" note. The Codex external review
@@ -414,6 +415,9 @@ newer candidate, and that a cache-dependent rule is out.
   group-name warning; the summary shows `replaced` under `--outstanding` (the rc8 fix holds in prod).
 - 4 (before the cutoff, with `--issued-since 2026-11-09`): 13 emSign certs, the last issued 2026-11-10; SSL.com
   from 2026-11-10 on. Plausible. **Rerun after 2026-11-16 with `--issued-since 2026-11-16`; expect 0.**
+- 4 (rerun 2026-11-19, rc14 code, prod, read-only, no `--inspect`): `--all --issued-since 2026-11-16 --ca EMSIGN`
+  found 73 valid certificates issued since the cutoff: 0 emSign, all 73 `ok`, 0 unknown, 0 incomplete. As
+  expected.
 - 5: under the G3 criteria with `ca` disabled, every `replace` row matches `issuer+key+chain`, every `conflict` is
   an EC cert matching `key` only, and every `ok` row is RSA with nothing matched: the same semantics as v1.3.0.
   Counts differ from the 2026-10-22 baseline (297/19) because the population turned over, not from a regression.
