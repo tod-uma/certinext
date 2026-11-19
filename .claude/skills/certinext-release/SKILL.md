@@ -92,6 +92,12 @@ Cut a release for certinext. The tag message is the source of truth — GitLab C
      package never appear, while GitHub/PyPI publish anyway. Don't re-tag. Retry the job instead
      (`glab ci retry <job-id>`), and the release jobs run once it passes. That worked for v1.4.0rc3.
      Each retry places one more sandbox order, so ask Tod first.
+
+     **A job that fails with `runner_system_failure`** (`ERROR: Preparation failed: starting pod
+     watcher: not synced`, no script output) is the Kubernetes runner failing to start the pod, not
+     the code. Check the log tail, then `glab ci retry <job-id>` without asking, as long as the job
+     isn't `integration-cert-issuance` (which places a sandbox order). Seen on `build-test` in the
+     !160 MR pipeline (2026-11-19); the retry passed and auto-merge then fired.
    - **GitHub Actions** — `publish-pypi` job passes; GitHub release appears with the same description.
      The mirror is `tod-uma/certinext` (pyproject's URLs; not `tod-detre`, which 404s):
      `gh release view vX.Y.Z -R tod-uma/certinext --json tagName,isPrerelease` and
