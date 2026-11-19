@@ -935,6 +935,7 @@ class Domain(CertiNextModel):
         client = self._require_client()
         rows: list[DcvAttemptSummary] = []
         offset = 0
+        previous: list[Any] | None = None
         while True:
             result = client.get(
                 f"{_BASE}/{self.id}/dcv/attempts", params={"offset": offset, "limit": page_size}
@@ -948,10 +949,15 @@ class Domain(CertiNextModel):
                 total = total_val if isinstance(total_val, int) else None
             else:
                 raw, total = [], None
+            # A page identical to the last one means the server ignored
+            # ``offset``: stop without adding the repeat. Without this, a
+            # bare-list response (no ``totalElements``) of full pages would
+            # loop forever.
+            if raw and raw == previous:
+                return rows
+            previous = raw
             rows.extend(DcvAttemptSummary.model_validate(r) for r in raw if isinstance(r, dict))
             offset += len(raw)
-            # An empty page always ends the walk, so a server that ignored
-            # ``offset`` could not loop forever.
             if not raw or (total is not None and offset >= total) or (total is None and len(raw) < page_size):
                 return rows
 

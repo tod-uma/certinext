@@ -99,6 +99,13 @@ class TestDcvAttemptsPager:
         assert len(domain.dcv_attempts(page_size=2)) == 1
         assert mock_client.get.call_count == 1
 
+    def test_offset_ignored_stops_without_repeats(self, domain: Domain, mock_client: MagicMock) -> None:
+        """A bare-list server that ignores offset ends after the repeat, adding it once."""
+        mock_client.get.return_value = [_row("2"), _row("1")]
+        rows = domain.dcv_attempts(page_size=2)
+        assert [r.attempt_id for r in rows] == ["2", "1"]
+        assert mock_client.get.call_count == 2
+
     @pytest.mark.parametrize("size", [0, 51])
     def test_page_size_bounds(self, domain: Domain, mock_client: MagicMock, size: int) -> None:
         """page_size outside 1-50 is refused before any request."""
