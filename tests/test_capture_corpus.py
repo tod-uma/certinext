@@ -67,6 +67,20 @@ class TestFreeTextScrubbing:
         out = cc.sanitize({"consensusValue": "a.example.edu", "domainName": "a.example.edu"})
         assert out["consensusValue"] == out["domainName"]
 
+    @pytest.mark.parametrize(
+        ("value", "secret"),
+        [("ABC123.txt", "ABC123"), ("www.example.edu.txt", "example")],
+    )
+    def test_dcv_token_filename_scrubbed(self, cc: ModuleType, value: str, secret: str) -> None:
+        """expected.fileName is free text: a token or domain inside it is pseudonymized."""
+        out = cc.sanitize({"expected": {"fileName": value}})["expected"]["fileName"]
+        assert secret not in out
+        assert out.endswith(".txt")
+
+    def test_empty_filename_kept(self, cc: ModuleType) -> None:
+        """An empty fileName (DNS-method attempts) stays empty."""
+        assert cc.sanitize({"fileName": ""}) == {"fileName": ""}
+
     def test_ip_addresses_untouched(self, cc: ModuleType) -> None:
         """IPv4 addresses inside free text are not mistaken for hostnames."""
         assert cc.sanitize({"errorMessage": "timeout from 3.120.195.69"})["errorMessage"] == (

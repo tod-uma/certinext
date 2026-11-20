@@ -147,10 +147,12 @@ _SENTINEL_IDS = {"sslcom-latest"}
 #: records, URLs, CA and resolver messages — that can embed hostnames and
 #: email addresses anywhere inside the string (a CAA ``iodef`` record carries
 #: a contact email). Every embedded email and hostname is pseudonymized in
-#: place; the rest of the text is kept.
+#: place; the rest of the text is kept. ``fileName`` (an HTTP DCV token file,
+#: ``ABC.txt``) is listed so a filename that ever embeds a domain cannot leak;
+#: a plain token filename is hostname-shaped and is pseudonymized too.
 _FREE_TEXT_KEYS = {
     "rawdata", "consensusvalue", "queryname", "recordvalue", "filecontent",
-    "responseurlvalue", "consensusurl", "camessage", "errormessage",
+    "filename", "responseurlvalue", "consensusurl", "camessage", "errormessage",
 }
 
 #: One pass over free text: an email, or else a hostname (two or more labels,
