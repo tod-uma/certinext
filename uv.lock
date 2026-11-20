@@ -104,14 +104,16 @@ dependencies = [
     { name = "httpx" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
-    { name = "rich" },
     { name = "structlog" },
     { name = "tomli", marker = "python_full_version < '3.11'" },
-    { name = "tomlkit" },
-    { name = "typer" },
 ]
 
 [package.optional-dependencies]
+cli = [
+    { name = "rich" },
+    { name = "tomlkit" },
+    { name = "typer" },
+]
 csr = [
     { name = "cryptography" },
 ]
@@ -122,7 +124,10 @@ dev = [
     { name = "mypy" },
     { name = "pyright" },
     { name = "pytest" },
+    { name = "rich" },
     { name = "ruff" },
+    { name = "tomlkit" },
+    { name = "typer" },
 ]
 dns = [
     { name = "dnspython" },
@@ -145,14 +150,17 @@ requires-dist = [
     { name = "pydantic-settings", specifier = ">=2.3" },
     { name = "pyright", marker = "extra == 'dev'", specifier = ">=1.1" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
-    { name = "rich", specifier = ">=13" },
+    { name = "rich", marker = "extra == 'cli'", specifier = ">=13" },
+    { name = "rich", marker = "extra == 'dev'", specifier = ">=13" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.4" },
     { name = "structlog", specifier = ">=23.2" },
     { name = "tomli", marker = "python_full_version < '3.11'", specifier = ">=2.0" },
-    { name = "tomlkit", specifier = ">=0.13" },
-    { name = "typer", specifier = ">=0.12" },
+    { name = "tomlkit", marker = "extra == 'cli'", specifier = ">=0.13" },
+    { name = "tomlkit", marker = "extra == 'dev'", specifier = ">=0.13" },
+    { name = "typer", marker = "extra == 'cli'", specifier = ">=0.12" },
+    { name = "typer", marker = "extra == 'dev'", specifier = ">=0.12" },
 ]
-provides-extras = ["dev", "keyring", "csr", "dns"]
+provides-extras = ["cli", "dev", "keyring", "csr", "dns"]
 
 [[package]]
 name = "cffi"

@@ -18,9 +18,23 @@ One typer app with a subcommand per operation; the 0.3.x script names remain
 installed as aliases that pre-select their subcommand (see
 :mod:`certinext.cli._aliases`). Command modules are imported here for their
 registration side effect on :data:`certinext.cli._app.app`.
+
+The CLI's dependencies (typer, rich, tomlkit) come with the ``cli`` extra
+(ADR 0026); without them, importing this package raises an ImportError that
+says how to install it.
 """
 
 import sys
+
+try:
+    import rich  # noqa: F401 - presence check only
+    import tomlkit  # noqa: F401 - presence check only
+    import typer  # noqa: F401 - presence check only
+except ImportError as _missing:  # pragma: no cover - exercised in a subprocess test
+    raise ImportError(
+        f"The certinext command-line tools need the 'cli' extra ({_missing.name} is missing). "
+        "Install with: uv tool install 'certinext[cli]'  (or: pip install 'certinext[cli]')"
+    ) from _missing
 
 import httpx
 import structlog

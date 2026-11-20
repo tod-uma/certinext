@@ -41,15 +41,16 @@ import time
 from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
 import structlog
 from pydantic import ValidationError
-from rich.console import Console
-from rich.table import Table
 
 from certinext.exceptions import CertiNextAPIError, CertiNextRateLimitError
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from rich.table import Table
 from certinext.session import CertiNextSession
 
 log = structlog.get_logger()
@@ -542,8 +543,11 @@ _OUTCOME_STYLES = {
 }
 
 
-def results_table(results: list[ProbeResult]) -> Table:
+def results_table(results: list[ProbeResult]) -> "Table":
     """Build the human-readable results table as a rich :class:`~rich.table.Table`.
+
+    rich comes with the ``cli`` extra, so it is imported here: the probes
+    themselves run without it.
 
     Args:
         results: The probe results from :func:`run`.
@@ -551,6 +555,8 @@ def results_table(results: list[ProbeResult]) -> Table:
     Returns:
         A rich table with one row per probe, outcome-colored on TTYs.
     """
+    from rich.table import Table  # noqa: PLC0415 - optional [cli] dependency
+
     table = Table(box=None, pad_edge=False)
     table.add_column("probe")
     table.add_column("tier", justify="right")
@@ -581,6 +587,8 @@ def render_table(results: list[ProbeResult]) -> str:
         The :func:`results_table` output rendered without styling, suitable
         for logs or string assertions.
     """
+    from rich.console import Console  # noqa: PLC0415 - optional [cli] dependency
+
     console = Console(width=200, no_color=True, force_terminal=False)
     with console.capture() as capture:
         console.print(results_table(results))

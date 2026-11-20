@@ -57,8 +57,8 @@ The short version, for an agent wiring up certinext without reading the
 whole README:
 
 ```bash
-uv tool install "certinext[csr,keyring]"   # CLI
-uv add certinext                            # or, as a library dependency
+uv tool install "certinext[cli,csr,keyring]"   # CLI
+uv add certinext                                # or, as a library dependency
 ```
 
 ```python
@@ -96,12 +96,14 @@ To install the `certinext` CLI (issuing certificates, listing
 domains, etc.):
 
 ```bash
-uv tool install "certinext[csr,keyring]"
+uv tool install "certinext[cli,csr,keyring]"
 ```
 
 That's the whole install — the command now works from any terminal. (If a
 command isn't found, run `uv tool update-shell` and open a new terminal.)
-The two extras are recommended for CLI use: `csr` enables CSR parsing for
+The `cli` extra is required for the commands: since 1.5 the library alone
+does not pull in typer, rich or tomlkit ([ADR 0026](docs/adr/0026-cli-dependencies-in-an-extra.md)).
+The other two are recommended: `csr` enables CSR parsing for
 `certinext issue-cert`, and `keyring` lets the commands store and read
 credentials in the OS keychain.
 
@@ -144,13 +146,14 @@ uv add certinext
 
 Add extras only if your code uses them: `certinext[csr]` (CSR parsing),
 `certinext[keyring]` (OS keychain credential lookup), `certinext[dns]`
-(DNS lookups).
+(DNS lookups), `certinext[cli]` (building on `certinext.cli_options` or the
+typer app, or saving stored defaults).
 
 **Pre-releases** — to get the latest alpha/beta/rc ahead of the next stable
 release, add `--prerelease=allow`:
 
 ```bash
-uv tool install --prerelease=allow "certinext[csr,keyring]"   # CLI tools
+uv tool install --prerelease=allow "certinext[cli,csr,keyring]"   # CLI tools
 uv add certinext --prerelease=allow                           # library
 ```
 
@@ -158,7 +161,7 @@ uv add certinext --prerelease=allow                           # library
 the UMS GitLab package registry:
 
 ```bash
-uv tool install certinext \
+uv tool install "certinext[cli]" \
   --extra-index-url https://gitlab.its.maine.edu/api/v4/groups/2236/-/packages/pypi/simple
 ```
 
@@ -186,14 +189,14 @@ installed).
 `uv tool`):
 
 ```bash
-pipx install "certinext[csr,keyring]"
+pipx install "certinext[cli,csr,keyring]"
 ```
 
 Or with plain pip (installs into the active Python environment, not
 isolated):
 
 ```bash
-pip install "certinext[csr,keyring]"
+pip install "certinext[cli,csr,keyring]"
 ```
 
 **Library in your project**:
@@ -202,7 +205,7 @@ pip install "certinext[csr,keyring]"
 pip install certinext
 ```
 
-**Optional extras** — add any of `csr`, `keyring`, or `dns` after the fact,
+**Optional extras** — add any of `cli`, `csr`, `keyring`, or `dns` after the fact,
 e.g. the `keyring` extra needed by `certinext setup keyring`:
 
 ```bash
@@ -213,7 +216,7 @@ pip install "certinext[keyring]"
 release, add `--pre`/`--pip-args=--pre`:
 
 ```bash
-pipx install --pip-args=--pre "certinext[csr,keyring]"
+pipx install --pip-args=--pre "certinext[cli,csr,keyring]"
 pip install --pre certinext
 ```
 
@@ -583,7 +586,7 @@ The complete copy-paste path from nothing to an issued certificate
 from):
 
 ```bash
-uv tool install "certinext[csr,keyring]"
+uv tool install "certinext[cli,csr,keyring]"
 certinext setup keyring      # store API credentials in the OS keychain (once)
 certinext setup defaults     # store requestor/cert defaults (once, optional)
 certinext issue-cert example.com.csr --cert-out cert.pem --fullchain-out fullchain.pem
@@ -1756,8 +1759,11 @@ without copying any of it:
 - **`certinext.cli_support`** — framework-agnostic: `resolve_connection()`,
   `build_session()`, `setup_logging()`, `prompt_stderr()`,
   `require_credential()`, `fatal_api_error()`, `log_caught_exception()`,
-  `format_truncated_traceback()`. Depends on no argument-parsing library.
-- **`certinext.cli_options`** — typer-specific: `Annotated` option aliases
+  `format_truncated_traceback()`. Depends on no argument-parsing library
+  and works without the `cli` extra (saving stored defaults is the
+  exception: that write needs `tomlkit`).
+- **`certinext.cli_options`** — typer-specific, so it needs
+  `certinext[cli]`: `Annotated` option aliases
   (`ProfileOption`, `SandboxOption`, `BaseUrlOption`, `TokenUrlOption`,
   `AccountNumberOption`, `ClientSecretOption`, `ScopeOption`, `JsonOption`,
   `VerboseOption`, `LogFormatOption`, `LogModeOption`, `DebugLogPathOption`)
