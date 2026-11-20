@@ -668,12 +668,15 @@ def build_session(
     client_secret: str | None = None,
     scope: str = "",
     prompt: bool = True,
+    client_secret_file: str | None = None,
 ) -> certinext.CertiNextSession:
     """Resolve credentials and return a configured :class:`~certinext.CertiNextSession`.
 
     Reads credentials in priority order: explicit argument → keyring →
     environment variable → interactive prompt (the first three via
-    :class:`~certinext.settings.CertiNextSettings`). When ``account_number``
+    :class:`~certinext.settings.CertiNextSettings`, which also reads the
+    secret from ``client_secret_file`` or ``CERTINEXT_CLIENT_SECRET_FILE``;
+    ADR 0024). When ``account_number``
     is provided explicitly the keyring is **not** consulted for the client
     secret, because the stored secret belongs to the previously configured
     account and would cause an authentication failure if used with a
@@ -690,6 +693,9 @@ def build_session(
             prompting interactively when credentials are absent. Use this in
             setup scripts that want to attempt an API call but handle missing
             credentials gracefully without blocking on user input.
+        client_secret_file: Explicit path to a file holding the client
+            secret, or None. Ranks with ``client_secret``; passing both
+            raises :exc:`ValueError`.
 
     Returns:
         An authenticated :class:`~certinext.CertiNextSession`.
@@ -697,6 +703,9 @@ def build_session(
     Raises:
         CredentialsNotFoundError: If ``prompt=False`` and credentials are not
             available from the keyring or environment.
+        CertiNextSecretFileError: If a configured secret file is unusable.
+        ValueError: If both ``client_secret`` and ``client_secret_file`` are
+            given.
     """
     # Only pass kwargs the caller actually set: an init value of None would
     # still outrank the keyring and env sources inside pydantic-settings.
@@ -707,6 +716,8 @@ def build_session(
         init_kwargs["client_id"] = account_number
     if client_secret:
         init_kwargs["client_secret"] = client_secret
+    if client_secret_file:
+        init_kwargs["client_secret_file"] = client_secret_file
     settings = CertiNextSettings(**init_kwargs)
 
     client_id = require_credential(

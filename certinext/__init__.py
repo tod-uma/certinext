@@ -53,6 +53,9 @@ Errors:
     on a transport error or a transient status; API calls are not retried.
 """
 
+import os
+
+from ._secret_file import read_secret_file
 from .accounts import (
     AccountAccessor,
     AccountInfo,
@@ -86,6 +89,7 @@ from .exceptions import (
     CertiNextNotFoundError,
     CertiNextOrderRecoveryError,
     CertiNextRateLimitError,
+    CertiNextSecretFileError,
     CertiNextTimeoutError,
 )
 from .ledger import LedgerAccessor, LedgerRecord
@@ -138,6 +142,7 @@ def session(
     sandbox: bool = False,
     timeout: TimeoutSpec | None = None,
     create_timeout: TimeoutSpec | None = None,
+    client_secret_file: str | os.PathLike[str] | None = None,
 ) -> CertiNextSession:
     """Create and return a new `CertiNextSession`.
 
@@ -164,10 +169,24 @@ def session(
         create_timeout: Timeout for certificate creation only. Default: 10s
             connect, 180s read, because the vendor can take over a minute to
             answer while still creating the order.
+        client_secret_file: Path to a file holding the client secret, used
+            instead of ``client_secret`` (ADR 0024). On POSIX the file must
+            not be world-readable or world-writable; its trailing newline is
+            stripped. Read once, here.
 
     Returns:
         A configured `CertiNextSession` ready to make API calls.
+
+    Raises:
+        ValueError: If both ``client_secret`` and ``client_secret_file`` are
+            given.
+        CertiNextSecretFileError: If ``client_secret_file`` is missing,
+            unreadable, unsafe or empty.
     """
+    if client_secret_file is not None and os.fspath(client_secret_file).strip():
+        if client_secret:
+            raise ValueError("pass client_secret or client_secret_file, not both")
+        client_secret = read_secret_file(client_secret_file)
     resolved_base = base_url or (SANDBOX_BASE_URL if sandbox else BASE_URL)
     resolved_token = token_url or (SANDBOX_TOKEN_URL if sandbox else TOKEN_URL)
     return CertiNextSession(
@@ -191,6 +210,7 @@ __all__ = [
     "CertiNextConflictError",
     "CertiNextNotFoundError",
     "CertiNextRateLimitError",
+    "CertiNextSecretFileError",
     "CertiNextTimeoutError",
     "CertiNextCreateTimeoutError",
     "CertiNextOrderRecoveryError",

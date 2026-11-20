@@ -298,8 +298,10 @@ All scripts resolve credentials in this priority order:
 
 1. Explicit CLI argument (`--account-number`, `--client-secret`)
 2. OS keychain (active profile; see above)
-3. Environment variables (`CERTINEXT_CLIENT_ID`, `CERTINEXT_CLIENT_SECRET`)
-4. Interactive prompt (falls back to `getpass` for secrets)
+3. For the secret only: the file named by `CERTINEXT_CLIENT_SECRET_FILE`
+   (see [Secret file](#secret-file) below)
+4. Environment variables (`CERTINEXT_CLIENT_ID`, `CERTINEXT_CLIENT_SECRET`)
+5. Interactive prompt (falls back to `getpass` for secrets)
 
 </details>
 
@@ -315,6 +317,25 @@ reports that no usable OS keyring backend was found. Options:
 - **Skip the keyring.** All scripts fall back to the `CERTINEXT_CLIENT_ID` and
   `CERTINEXT_CLIENT_SECRET` environment variables (see the resolution order
   above).
+
+- <a id="secret-file"></a>**Secret file (recommended for services).** Put the
+  secret in a file only the service account can read and point
+  `CERTINEXT_CLIENT_SECRET_FILE` at it. Unlike an environment variable, the
+  secret then isn't visible in `/proc/<pid>/environ`.
+
+  ```bash
+  install -m 0400 -o certinext /dev/null /etc/certinext/client.secret
+  # write the secret into it (a trailing newline is fine), then:
+  CERTINEXT_CLIENT_ID=ACCT CERTINEXT_CLIENT_SECRET_FILE=/etc/certinext/client.secret certinext pending-dcv
+  ```
+
+  With systemd, `LoadCredential=client.secret:/etc/certinext/client.secret`
+  plus `Environment=CERTINEXT_CLIENT_SECRET_FILE=%d/client.secret` works too.
+  The file must be a regular file with no world read or write bit (0400 or
+  0440). A missing, unsafe or empty file is an error; it never falls back to
+  `CERTINEXT_CLIENT_SECRET`. A keychain entry for the profile still wins.
+  Library callers pass `certinext.session(client_secret_file=...)` instead.
+  See [ADR 0024](docs/adr/0024-client-secret-file-source.md).
 
 - **WSL: bridge to the Windows Credential Manager** with
   [keyring-pybridge](https://pypi.org/project/keyring-pybridge/), which

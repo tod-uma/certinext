@@ -312,3 +312,27 @@ class CertiNextOrderRecoveryError(LookupError):
         else:
             detail = "no order was found (the vendor may not have created it)"
         super().__init__(f"Could not recover the order for {common_name!r}: {detail}")
+
+
+class CertiNextSecretFileError(ValueError):
+    """Raised when a client-secret file is missing, unreadable, unsafe or empty.
+
+    A configured secret file that cannot be used is a configuration error,
+    so this subclasses :exc:`ValueError`. It never falls through to a
+    lower-precedence credential source: a path that was set but is broken
+    fails closed rather than quietly authenticating with something else.
+
+    The message names the path and the problem, never the file's content.
+
+    Attributes:
+        path: The configured path, as given.
+    """
+
+    def __init__(self, path: str, problem: str) -> None:
+        """
+        Args:
+            path: The configured path, as given.
+            problem: What is wrong with it, e.g. ``"file not found"``.
+        """
+        self.path = path
+        super().__init__(f"Client secret file {path!r}: {problem}")

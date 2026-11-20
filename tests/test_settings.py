@@ -21,10 +21,12 @@ silently revert to the library default (env above everything but init).
 """
 
 from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
 from pydantic import SecretStr
 
+from certinext.exceptions import CertiNextSecretFileError
 from certinext.settings import CertiNextSettings
 
 #: Fake keyring backing store: (service, key) -> value.
@@ -47,7 +49,7 @@ def fake_keyring(monkeypatch: pytest.MonkeyPatch) -> Iterator[_FakeStore]:
         "certinext.settings.keyring_get",
         lambda service, key: store.get((service, key)),
     )
-    for var in ("CERTINEXT_CLIENT_ID", "CERTINEXT_CLIENT_SECRET", "CERTINEXT_PROFILE"):
+    for var in ("CERTINEXT_CLIENT_ID", "CERTINEXT_CLIENT_SECRET", "CERTINEXT_CLIENT_SECRET_FILE", "CERTINEXT_PROFILE"):
         monkeypatch.delenv(var, raising=False)
     yield store
 
@@ -157,3 +159,136 @@ def test_no_sources_resolve_to_none() -> None:
     assert settings.client_id is None
     assert settings.client_secret is None
     assert settings.profile is None
+
+
+# --- Client-secret file (ADR 0024) -----------------------------------------
+# Full secret order: explicit client_secret / client_secret_file -> keyring
+# -> CERTINEXT_CLIENT_SECRET_FILE -> CERTINEXT_CLIENT_SECRET.
+
+
+def _secret_file(tmp_path: Path, name: str, content: str) -> Path:
+    """Write an owner-only secret file.
+
+    Args:
+        tmp_path: pytest's per-test directory.
+        name: File name.
+        content: Secret text (a trailing newline is added, as editors do).
+
+    Returns:
+        The file's path.
+    """
+    path = tmp_path / name
+    path.write_text(content + "\n", encoding="utf-8")
+    path.chmod(0o400)
+    return path
+
+
+def _secret(settings: CertiNextSettings) -> str | None:
+    """Return the resolved secret's plain value, or None.
+
+    Args:
+        settings: Resolved settings.
+
+    Returns:
+        The secret, or None when nothing resolved.
+    """
+    return settings.client_secret.get_secret_value() if settings.client_secret else None
+
+
+def test_env_secret_file_outranks_env_secret(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """CERTINEXT_CLIENT_SECRET_FILE beats CERTINEXT_CLIENT_SECRET."""
+    monkeypatch.setenv("CERTINEXT_CLIENT_SECRET_FILE", str(_secret_file(tmp_path, "s", "file-secret")))
+    monkeypatch.setenv("CERTINEXT_CLIENT_SECRET", "env-secret")
+    assert _secret(CertiNextSettings()) == "file-secret"
+
+
+def test_keyring_outranks_env_secret_file(
+    fake_keyring: _FakeStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A keyring secret beats CERTINEXT_CLIENT_SECRET_FILE."""
+    fake_keyring[("certinext", "CERTINEXT_CLIENT_SECRET")] = "kr-secret"
+    monkeypatch.setenv("CERTINEXT_CLIENT_SECRET_FILE", str(_secret_file(tmp_path, "s", "file-secret")))
+    assert _secret(CertiNextSettings()) == "kr-secret"
+
+
+def test_explicit_secret_file_outranks_keyring(fake_keyring: _FakeStore, tmp_path: Path) -> None:
+    """An explicit client_secret_file ranks with explicit arguments, above the keyring."""
+    fake_keyring[("certinext", "CERTINEXT_CLIENT_SECRET")] = "kr-secret"
+    settings = CertiNextSettings(client_secret_file=_secret_file(tmp_path, "s", "file-secret"))
+    assert _secret(settings) == "file-secret"
+
+
+def test_explicit_secret_file_outranks_env_secret_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """An explicit path beats the environment's path."""
+    monkeypatch.setenv("CERTINEXT_CLIENT_SECRET_FILE", str(_secret_file(tmp_path, "env", "env-file")))
+    settings = CertiNextSettings(client_secret_file=_secret_file(tmp_path, "cli", "cli-file"))
+    assert _secret(settings) == "cli-file"
+
+
+def test_explicit_secret_and_secret_file_rejected(tmp_path: Path) -> None:
+    """Both explicit secret arguments at once is ambiguous and refused."""
+    with pytest.raises(ValueError, match="not both"):
+        CertiNextSettings(client_secret=SecretStr("x"), client_secret_file=_secret_file(tmp_path, "s", "y"))
+
+
+def test_secret_file_field_names_the_file_read(
+    fake_keyring: _FakeStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``client_secret_file`` is set only when the secret was read from that file."""
+    path = _secret_file(tmp_path, "s", "file-secret")
+    monkeypatch.setenv("CERTINEXT_CLIENT_SECRET_FILE", str(path))
+    assert CertiNextSettings().client_secret_file == path
+
+    fake_keyring[("certinext", "CERTINEXT_CLIENT_SECRET")] = "kr-secret"
+    settings = CertiNextSettings()
+    assert _secret(settings) == "kr-secret"
+    assert settings.client_secret_file is None
+
+
+def test_superseded_env_secret_file_is_never_opened(
+    fake_keyring: _FakeStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A stale CERTINEXT_CLIENT_SECRET_FILE cannot break a run a higher source satisfies."""
+    monkeypatch.setenv("CERTINEXT_CLIENT_SECRET_FILE", str(tmp_path / "absent"))
+    fake_keyring[("certinext", "CERTINEXT_CLIENT_SECRET")] = "kr-secret"
+    assert _secret(CertiNextSettings()) == "kr-secret"
+    assert _secret(CertiNextSettings(client_secret=SecretStr("cli"))) == "cli"
+
+
+def test_broken_env_secret_file_fails_closed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A secret file that would be used but is broken raises; it never falls through to env."""
+    monkeypatch.setenv("CERTINEXT_CLIENT_SECRET_FILE", str(tmp_path / "absent"))
+    monkeypatch.setenv("CERTINEXT_CLIENT_SECRET", "env-secret")
+    with pytest.raises(CertiNextSecretFileError, match="file not found"):
+        CertiNextSettings()
+
+
+def test_blank_env_secret_file_is_unset(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An empty CERTINEXT_CLIENT_SECRET_FILE counts as absent."""
+    monkeypatch.setenv("CERTINEXT_CLIENT_SECRET_FILE", "  ")
+    monkeypatch.setenv("CERTINEXT_CLIENT_SECRET", "env-secret")
+    assert _secret(CertiNextSettings()) == "env-secret"
+
+
+def test_explicit_client_id_still_reads_env_secret_file(
+    fake_keyring: _FakeStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With the keyring skipped (explicit client ID), the env secret file applies."""
+    fake_keyring[("certinext", "CERTINEXT_CLIENT_SECRET")] = "kr-secret"
+    monkeypatch.setenv("CERTINEXT_CLIENT_SECRET_FILE", str(_secret_file(tmp_path, "s", "file-secret")))
+    assert _secret(CertiNextSettings(client_id="other-account")) == "file-secret"
+
+
+def test_keyring_queried_once(fake_keyring: _FakeStore, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """The env-file source's "did the keyring win" check reuses the keyring lookup."""
+    calls: list[tuple[str, str]] = []
+
+    def counting_get(service: str, key: str) -> str | None:
+        """Record each keyring lookup and answer from the fake store."""
+        calls.append((service, key))
+        return fake_keyring.get((service, key))
+
+    monkeypatch.setattr("certinext.settings.keyring_get", counting_get)
+    monkeypatch.setenv("CERTINEXT_CLIENT_SECRET_FILE", str(_secret_file(tmp_path, "s", "file-secret")))
+    CertiNextSettings()
+    assert len(calls) == 2  # client ID + secret, once each

@@ -27,7 +27,12 @@ import structlog
 from typer import Abort
 
 from certinext.cli_support import log_caught_exception
-from certinext.exceptions import TRANSIENT_STATUS_CODES, CertiNextAPIError, CertiNextAuthError
+from certinext.exceptions import (
+    TRANSIENT_STATUS_CODES,
+    CertiNextAPIError,
+    CertiNextAuthError,
+    CertiNextSecretFileError,
+)
 
 try:
     # typer >= 0.21 vendors click as typer._click and no longer depends on
@@ -133,8 +138,10 @@ def main(args: list[str] | None = None) -> int:
 
     A command that lets a CertiNext outage escape (see
     :func:`_vendor_failure`) exits 1 with one log line instead of a
-    traceback; 1 is what the uncaught exception exited with anyway. Any other
-    exception still propagates with its traceback, since it is a bug.
+    traceback; 1 is what the uncaught exception exited with anyway. An
+    unusable client-secret file (ADR 0024) is a configuration error and
+    exits 1 the same way. Any other exception still propagates with its
+    traceback, since it is a bug.
 
     Args:
         args: CLI arguments; None reads ``sys.argv[1:]`` (the console-script
@@ -159,6 +166,9 @@ def main(args: list[str] | None = None) -> int:
             raise
         event, summary = failure
         log_caught_exception(log, event, exc, error=summary)
+        return 1
+    except CertiNextSecretFileError as exc:
+        log.error("Client secret file is unusable", error=str(exc))
         return 1
     return result if isinstance(result, int) else 0
 
