@@ -82,27 +82,20 @@ unit-test:
       junit: report.xml
     expire_in: 1 week
 
-# Early warning for the next Python release (ADR 0027). The rc tag tracks its
-# alphas, betas and release candidates, so expect red until dependencies with
-# compiled code (pydantic-core, cryptography) ship wheels for it. Never blocks
-# a merge; promote it into the unit-test matrix once it is final.
-unit-test-next:
-  stage: unit
-  needs: [lint, typecheck]
-  rules:
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - if: $CI_COMMIT_BRANCH
+# Early compatibility signal for the next Python release, not a supported-
+# version gate (ADR 0027). Same shape as tdx-tools: extends unit-test so the
+# script, rules and artifacts cannot drift, and uses the official Linux
+# prerelease image (its rc tag tracks alphas, betas and release candidates),
+# independent of uv's own Python download catalog. Expect red until compiled
+# dependencies (pydantic-core, cryptography) ship wheels for it. Promote it into
+# the unit-test matrix once it is final.
+unit-test-preview:
+  extends: unit-test
   image: python:3.16-rc-slim
+  parallel: null
+  variables:
+    PYTHON_VERSION: "3.16"
   allow_failure: true
-  script:
-    - pip install uv
-    - uv sync --locked --extra dev --python 3.16
-    - uv run pytest tests/ -v -m "not integration and not probe" --junitxml=report.xml
-  artifacts:
-    when: always
-    reports:
-      junit: report.xml
-    expire_in: 1 week
 
 integration-test:
   stage: integration

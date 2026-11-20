@@ -71,8 +71,9 @@ the README note.
 ### Adding new versions
 
 - The next Python release is tested early in an optional job: GitLab's
-  `unit-test-next` on the `python:<next>-rc-slim` tag with
-  `allow_failure: true`, and GitHub's matrix entry with
+  `unit-test-preview`, which `extends: unit-test` (so the two cannot
+  drift) on the `python:<next>-rc-slim` tag with `allow_failure: true`,
+  the same shape tdx-tools uses; and GitHub's matrix entry with
   `experimental: true` (`continue-on-error`). It is expected to fail until
   dependencies with compiled code (pydantic-core, cryptography) ship wheels
   for it, and never blocks a merge.
