@@ -40,5 +40,6 @@ Numbering is sequential and never reused.
 | [0024](0024-client-secret-file-source.md) | Read the client secret from a file (`CERTINEXT_CLIENT_SECRET_FILE`), ranked below the keyring; fail closed | accepted |
 | [0025](0025-opt-in-retry-policy-for-reads.md) | Opt-in `RetryPolicy` on the session: reads only, 429 + 502/503/504, honour `Retry-After`, no sleep after the last try | accepted |
 | [0026](0026-cli-dependencies-in-an-extra.md) | Move typer, rich and tomlkit into a `cli` extra; the library imports none of them | accepted |
+| [0027](0027-python-version-support-policy.md) | Deprecate Python 3.10 with a `FutureWarning`; remove it only on a named trigger; test the next release in an optional CI job | accepted |
 
 See also: [docs/wishlist/](../wishlist/) for deferred ideas not yet committed to.

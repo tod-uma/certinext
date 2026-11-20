@@ -46,10 +46,15 @@ Python library and CLI scripts for managing your [CertiNext](https://us.certinex
 
 ## Requirements
 
-- Python 3.10+ (installed automatically when using uv — see [Installation](#installation))
+- Python 3.10+ (installed automatically when using uv — see [Installation](#installation)).
+  Tested on 3.10 through 3.15. **Python 3.10 is deprecated:** it still works and is
+  still tested, but importing certinext on it emits a `FutureWarning`, and support
+  will be removed in a future release
+  ([ADR 0027](docs/adr/0027-python-version-support-policy.md)). Use 3.11 or newer for
+  new deployments.
 - A CertiNext account with OAuth API credentials (account number + client secret)
 
-**Runtime dependencies** (`httpx`, `pydantic`, `pydantic-settings`, `tomlkit`, `typer`, `rich`, `structlog`) are installed automatically. `structlog` provides structured logging for the CLI tools and library internals — in cron or redirected contexts output is `key=value` (logfmt) by default (JSON is available via `--log-format json`); in a terminal it uses a human-readable format. If you use certinext purely as a library and have a strong reason to exclude `structlog`, open an issue and we'll consider making it optional.
+**Runtime dependencies** (`httpx`, `pydantic`, `pydantic-settings`, `structlog`) are installed automatically. The command-line tools also need `typer`, `rich` and `tomlkit`, which come with the `cli` extra (`certinext[cli]`; [ADR 0026](docs/adr/0026-cli-dependencies-in-an-extra.md)). `structlog` provides structured logging for the CLI tools and library internals — in cron or redirected contexts output is `key=value` (logfmt) by default (JSON is available via `--log-format json`); in a terminal it uses a human-readable format. If you use certinext purely as a library and have a strong reason to exclude `structlog`, open an issue and we'll consider making it optional.
 
 ## AI-agent quickstart
 

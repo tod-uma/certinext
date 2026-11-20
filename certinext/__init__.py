@@ -56,6 +56,8 @@ Errors:
 """
 
 import os
+import sys
+import warnings
 
 from ._secret_file import read_secret_file
 from .accounts import (
@@ -108,6 +110,18 @@ from .ssl_certificates import (
     SslOrder,
     SslOrderStatus,
 )
+
+# Python 3.10 is deprecated (ADR 0027): still supported and tested, but it will
+# be dropped when one of the ADR's triggers fires. FutureWarning, not
+# DeprecationWarning, because the latter is hidden by default outside __main__,
+# and the people who need to see this run scheduled jobs, not test suites.
+if sys.version_info < (3, 11):  # pragma: no cover - exercised by the 3.10 CI job
+    warnings.warn(
+        "certinext support for Python 3.10 is deprecated and will be removed in a future "
+        "release; upgrade to Python 3.11 or newer.",
+        FutureWarning,
+        stacklevel=2,
+    )
 
 BASE_URL: str = "https://us-api.certinext.io"
 """Base URL for the CertiNext US production environment."""

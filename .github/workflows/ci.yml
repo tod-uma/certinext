@@ -44,10 +44,17 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
+    # The next Python release is tested early but never fails the run (ADR 0027).
+    continue-on-error: ${{ matrix.experimental }}
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+        # 3.10 is deprecated but still supported; see ADR 0027 for when it goes.
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14", "3.15"]
+        experimental: [false]
+        include:
+          - python-version: "3.16"
+            experimental: true
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6

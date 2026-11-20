@@ -70,10 +70,33 @@ unit-test:
   image: python:${PYTHON_VERSION}-slim
   parallel:
     matrix:
-      - PYTHON_VERSION: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+      # 3.10 is deprecated but still supported; see ADR 0027 for when it goes.
+      - PYTHON_VERSION: ["3.10", "3.11", "3.12", "3.13", "3.14", "3.15"]
   script:
     - pip install uv
     - uv sync --locked --extra dev --python "$PYTHON_VERSION"
+    - uv run pytest tests/ -v -m "not integration and not probe" --junitxml=report.xml
+  artifacts:
+    when: always
+    reports:
+      junit: report.xml
+    expire_in: 1 week
+
+# Early warning for the next Python release (ADR 0027). The rc tag tracks its
+# alphas, betas and release candidates, so expect red until dependencies with
+# compiled code (pydantic-core, cryptography) ship wheels for it. Never blocks
+# a merge; promote it into the unit-test matrix once it is final.
+unit-test-next:
+  stage: unit
+  needs: [lint, typecheck]
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH
+  image: python:3.16-rc-slim
+  allow_failure: true
+  script:
+    - pip install uv
+    - uv sync --locked --extra dev --python 3.16
     - uv run pytest tests/ -v -m "not integration and not probe" --junitxml=report.xml
   artifacts:
     when: always
