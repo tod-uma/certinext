@@ -61,6 +61,7 @@ Example::
         print(row.facts.common_name, row.facts.ca)
 """
 
+import dataclasses
 import datetime as dt
 import threading
 import time
@@ -78,12 +79,13 @@ from certinext._chain import split_pem_certificates
 from certinext._inspection_cache import InspectionCache
 from certinext.exceptions import CertiNextAPIError, CertiNextRateLimitError
 from certinext.models.domains import EMSIGN, UNKNOWN_CA
+from certinext.retry import RetryPolicy
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from cryptography.x509 import Certificate, Name
 
     from certinext.models.orders import OrderRecord
-    from certinext.models.ssl_certificates import CertificateDownload, SslOrder
+    from certinext.models.ssl_certificates import CertificateDownload
     from certinext.session import CertiNextSession
 
 log = structlog.get_logger(__name__)
@@ -115,13 +117,6 @@ DEFAULT_KEY_TYPES: tuple[KeyType, ...] = ECC_G3_KEY_TYPES
 #: Deprecated alias of :data:`ECC_G3_CHAIN_CAS`; no longer a default. Removed in 2.0.
 DEFAULT_CHAIN_CAS: tuple[str, ...] = ECC_G3_CHAIN_CAS
 
-# Wait used when a 429 carries no Retry-After header.
-_DEFAULT_RETRY_AFTER = 5.0
-
-# Tries per certificate when rate limited. More than one retry because
-# parallel workers make a second 429 likelier, and each lost row means a
-# rerun of the whole report.
-_RATE_LIMIT_ATTEMPTS = 3
 
 # Friendly names for the curves CertiNext issues on; anything else shows the
 # curve's own name.
@@ -1190,6 +1185,20 @@ class _Backoff:
                 if not self._pausing:
                     self._clear.set()
 
+    def pause_then_wait(self, seconds: float) -> None:
+        """Pause every worker, then wait out any pause that overlapped this one.
+
+        The :class:`~certinext.retry.RetryPolicy` sleep hook for inspection
+        (ADR 0025): the retrying worker holds the others for ``seconds``,
+        and before retrying it also waits for any other worker's pause.
+
+        Args:
+            seconds: How long to wait (the response's Retry-After, or the
+                policy's delay).
+        """
+        self.pause(seconds)
+        self.wait()
+
 
 def _apply_ordered_by(facts: CertificateFacts, who: Any) -> None:
     """Record who placed the order on ``facts``.
@@ -1276,28 +1285,20 @@ def _inspect_into(
     """
     if cache is not None and _inspect_from_cache(facts, cache):
         return
-    order: "SslOrder | None" = None
-    download: "CertificateDownload | None" = None
-    for attempt in range(1, _RATE_LIMIT_ATTEMPTS + 1):
-        backoff.wait()
-        try:
-            order = sess.ssl.get(facts.order_number)
-            download = order.download_certificate()
-            break
-        except CertiNextRateLimitError as exc:
-            if attempt == _RATE_LIMIT_ATTEMPTS:
-                facts.error = f"rate limited: {exc}"
-                return
-            delay = exc.retry_after or _DEFAULT_RETRY_AFTER
-            log.warning("Rate limited; retrying", order=facts.order_number, wait_seconds=delay)
-            backoff.pause(delay)
-        except (CertiNextAPIError, httpx.HTTPError) as exc:
-            facts.error = str(exc) or type(exc).__name__
-            return
-        except ValueError as exc:  # includes pydantic.ValidationError on a malformed payload
-            facts.error = f"unexpected response: {(str(exc).splitlines() or [type(exc).__name__])[0]}"
-            return
-    if order is None or download is None:  # pragma: no cover - the loop breaks or returns
+    # Retries happen inside the client under the policy build_report set,
+    # whose sleep pauses every worker (ADR 0025).
+    backoff.wait()
+    try:
+        order = sess.ssl.get(facts.order_number)
+        download = order.download_certificate()
+    except CertiNextRateLimitError as exc:
+        facts.error = f"rate limited: {exc}"
+        return
+    except (CertiNextAPIError, httpx.HTTPError) as exc:
+        facts.error = str(exc) or type(exc).__name__
+        return
+    except ValueError as exc:  # includes pydantic.ValidationError on a malformed payload
+        facts.error = f"unexpected response: {(str(exc).splitlines() or [type(exc).__name__])[0]}"
         return
 
     detail = order.as_dict()
@@ -1506,16 +1507,20 @@ def build_report(
             pruned = cache.prune()
             if pruned:
                 log.info("Pruned inspection cache", removed=pruned, dir=str(cache.directory))
-        _inspect_all(sess, facts, workers=workers, backoff=backoff, cache=cache, on_progress=on_progress)
-        # Uninspected out-of-scope certs would only add CN-only "possibly" matches to inspected rows.
-        matched_against = _possible_coverers(facts, others)
-        if matched_against:
-            log.info("Inspecting out-of-scope possible replacements", count=len(matched_against))
-            if on_total:
-                on_total(len(facts) + len(matched_against))
-            _inspect_all(
-                sess, matched_against, workers=workers, backoff=backoff, cache=cache, on_progress=on_progress,
-            )
+        # Set once, before any worker starts (ADR 0025). The caller's own
+        # policy keeps its numbers, but its sleep must pause every worker.
+        policy = dataclasses.replace(sess.retry or RetryPolicy(), sleep=backoff.pause_then_wait)
+        with sess.retrying(policy):
+            _inspect_all(sess, facts, workers=workers, backoff=backoff, cache=cache, on_progress=on_progress)
+            # Uninspected out-of-scope certs would only add CN-only "possibly" matches to inspected rows.
+            matched_against = _possible_coverers(facts, others)
+            if matched_against:
+                log.info("Inspecting out-of-scope possible replacements", count=len(matched_against))
+                if on_total:
+                    on_total(len(facts) + len(matched_against))
+                _inspect_all(
+                    sess, matched_against, workers=workers, backoff=backoff, cache=cache, on_progress=on_progress,
+                )
 
     stats: CacheStats | None = None
     if inspect and cache is not None:

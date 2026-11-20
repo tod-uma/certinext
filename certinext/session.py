@@ -12,12 +12,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from collections.abc import Iterator
+from contextlib import contextmanager
+
 from .accounts import AccountAccessor
 from .catalog import CatalogAccessor
 from .client import CertiNextClient, TimeoutSpec
 from .domains import DomainAccessor
 from .ledger import LedgerAccessor
 from .orders import OrderAccessor
+from .retry import RetryPolicy
 from .ssl_certificates import SslAccessor
 
 
@@ -53,6 +57,7 @@ class CertiNextSession:
         sandbox: bool = False,
         timeout: TimeoutSpec | None = None,
         create_timeout: TimeoutSpec | None = None,
+        retry: RetryPolicy | None = None,
     ) -> None:
         """
         Args:
@@ -71,6 +76,8 @@ class CertiNextSession:
                 seconds). See :class:`~certinext.client.CertiNextClient`.
             create_timeout: Timeout for certificate creation only. See
                 :class:`~certinext.client.CertiNextClient`.
+            retry: Retry policy for reads, or None (the default) for none.
+                See :class:`~certinext.retry.RetryPolicy`.
         """
         from . import BASE_URL, SANDBOX_BASE_URL, SANDBOX_TOKEN_URL, TOKEN_URL
         self.sandbox = sandbox
@@ -78,7 +85,7 @@ class CertiNextSession:
         resolved_token = token_url or (SANDBOX_TOKEN_URL if sandbox else TOKEN_URL)
         self._client = CertiNextClient(
             resolved_base, resolved_token, client_id, client_secret, scope,
-            timeout=timeout, create_timeout=create_timeout,
+            timeout=timeout, create_timeout=create_timeout, retry=retry,
         )
         self.accounts = AccountAccessor(self._client)
         self.catalog = CatalogAccessor(self._client)
@@ -86,3 +93,41 @@ class CertiNextSession:
         self.ledger = LedgerAccessor(self._client)
         self.orders = OrderAccessor(self._client)
         self.ssl = SslAccessor(self._client)
+
+    @property
+    def retry(self) -> RetryPolicy | None:
+        """The retry policy for reads, or None when reads are not retried (ADR 0025)."""
+        return self._client.retry
+
+    @retry.setter
+    def retry(self, policy: RetryPolicy | None) -> None:
+        """Replace the retry policy for reads.
+
+        Applies to every accessor, and to models already returned, since
+        they share this session's client.
+
+        Args:
+            policy: The new policy, or None to stop retrying.
+        """
+        self._client.retry = policy
+
+    @contextmanager
+    def retrying(self, policy: RetryPolicy | None) -> Iterator["CertiNextSession"]:
+        """Use ``policy`` for reads inside a ``with`` block, then restore the previous one.
+
+        Set it from the thread that starts any workers, before they start:
+        the policy lives on the session, so every thread using the session
+        sees it.
+
+        Args:
+            policy: The policy for the block, or None for no retries.
+
+        Yields:
+            This session.
+        """
+        previous = self._client.retry
+        self._client.retry = policy
+        try:
+            yield self
+        finally:
+            self._client.retry = previous

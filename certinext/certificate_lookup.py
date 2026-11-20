@@ -19,36 +19,36 @@ replacement-report cache; mutable order details are fetched for every match.
 """
 
 from dataclasses import dataclass, field
-from time import sleep
-from typing import Any, Callable, Literal, TypeVar
+from typing import Any, Literal
 
 import httpx
 
 from certinext._chain import split_pem_certificates
 from certinext._inspection_cache import InspectionCache
-from certinext.exceptions import CertiNextAPIError, CertiNextRateLimitError
+from certinext.exceptions import CertiNextAPIError
 from certinext.models.orders import OrderRecord
 from certinext.models.ssl_certificates import CertificateDownload
 from certinext.replacement import inspect_download
+from certinext.retry import RetryPolicy
 from certinext.session import CertiNextSession
 
 LookupField = Literal["auto", "san", "cn", "order", "serial", "request", "requestor"]
 
-_RATE_LIMIT_ATTEMPTS = 3
-_DEFAULT_RETRY_AFTER = 5.0
-_T = TypeVar("_T")
 
+def _scan_policy(sess: CertiNextSession) -> RetryPolicy:
+    """Return the retry policy a scan runs under (ADR 0025).
 
-def _retry_rate_limit(call: Callable[[], _T]) -> _T:
-    """Retry one sequential API read after the vendor's rate-limit delay."""
-    for attempt in range(1, _RATE_LIMIT_ATTEMPTS + 1):
-        try:
-            return call()
-        except CertiNextRateLimitError as exc:
-            sleep(exc.retry_after if exc.retry_after is not None else _DEFAULT_RETRY_AFTER)
-            if attempt == _RATE_LIMIT_ATTEMPTS:
-                raise
-    raise AssertionError("unreachable retry state")
+    A scan reads one order after another, so a single 429 or gateway blip
+    would otherwise cost a row. The caller's own policy wins; without one
+    the scan uses the defaults.
+
+    Args:
+        sess: The session the scan reads through.
+
+    Returns:
+        The session's policy, or a default :class:`RetryPolicy`.
+    """
+    return sess.retry or RetryPolicy()
 
 
 def normalize_serial(value: str) -> str:
@@ -136,7 +136,24 @@ def enrich_sans(
     No-serial rows are not cached. Rows without a certificate expiry or serial
     have unknown SANs (typically pending orders); no certificate is fabricated.
     Only downloads accepted by replacement-report's parser with a chain are
-    written, keeping the shared cache contract intact (ADR 0022).
+    written, keeping the shared cache contract intact (ADR 0022). Reads are
+    retried under :func:`_scan_policy`.
+    """
+    with sess.retrying(_scan_policy(sess)):
+        _enrich_sans(sess, entries, cache)
+
+
+def _enrich_sans(
+    sess: CertiNextSession,
+    entries: list[CertificateEntry],
+    cache: InspectionCache | None,
+) -> None:
+    """Do the work of :func:`enrich_sans` under the retry policy it set.
+
+    Args:
+        sess: The session to read through.
+        entries: Rows to fill in (mutated).
+        cache: Optional shared download cache.
     """
     for entry in entries:
         record = entry.record
@@ -158,9 +175,9 @@ def enrich_sans(
                     pass  # An invalid cache entry is a miss; try live.
         order_number = record.order_number
         try:
-            order = _retry_rate_limit(lambda: sess.ssl.get(order_number))
+            order = sess.ssl.get(order_number)
             entry.details = order.as_dict()
-            download = _retry_rate_limit(order.download_certificate)
+            download = order.download_certificate()
             entry.sans = _parse(download, record)
         except (CertiNextAPIError, httpx.HTTPError, ValueError) as exc:
             entry.error = f"SAN inspection failed ({type(exc).__name__})"
@@ -218,7 +235,7 @@ def _read_details(sess: CertiNextSession, entry: CertificateEntry) -> None:
         if not entry.record.order_number:
             raise ValueError("orders report omitted the order number")
         order_number = entry.record.order_number
-        entry.details = _retry_rate_limit(lambda: sess.ssl.get(order_number)).as_dict()
+        entry.details = sess.ssl.get(order_number).as_dict()
     except (CertiNextAPIError, httpx.HTTPError, ValueError) as exc:
         entry.error = f"detail lookup failed ({type(exc).__name__})"
 
@@ -250,13 +267,32 @@ def lookup_certificates(
     schemas. Missing delegation data does not establish that no delegate exists.
     Explicit requestor search reads each row's current detail response once,
     matching a full name or email. It never downloads certificates and is not
-    included in auto. Missing requestor fields limit completeness.
+    included in auto. Missing requestor fields limit completeness. Reads,
+    including the orders report, are retried under :func:`_scan_policy`.
     """
     query = query.strip()
     if not query:
         raise ValueError("a non-empty certificate identifier is required")
     if field not in ("auto", "san", "cn", "order", "serial", "request", "requestor"):
         raise ValueError(f"unsupported lookup field: {field}")
+    with sess.retrying(_scan_policy(sess)):
+        return _lookup(sess, query, field, cache)
+
+
+def _lookup(
+    sess: CertiNextSession, query: str, field: LookupField, cache: InspectionCache | None
+) -> LookupResult:
+    """Do the work of :func:`lookup_certificates` under the retry policy it set.
+
+    Args:
+        sess: The session to read through.
+        query: The stripped, non-empty identifier.
+        field: The validated field to match.
+        cache: Optional shared download cache.
+
+    Returns:
+        The lookup result.
+    """
     entries = [CertificateEntry(r) for r in sess.orders.get_list()]
     if field in ("auto", "san"):
         enrich_sans(sess, entries, cache)

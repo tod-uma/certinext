@@ -38,5 +38,6 @@ Numbering is sequential and never reused.
 | [0022](0022-share-certificate-download-cache-for-lookup.md) | Share certificate downloads for SAN listing and exact lookup; read details live | accepted |
 | [0023](0023-ignore-cache-options-without-downloads.md) | Ignore cache options with a warning when no certificates are downloaded | accepted |
 | [0024](0024-client-secret-file-source.md) | Read the client secret from a file (`CERTINEXT_CLIENT_SECRET_FILE`), ranked below the keyring; fail closed | accepted |
+| [0025](0025-opt-in-retry-policy-for-reads.md) | Opt-in `RetryPolicy` on the session: reads only, 429 + 502/503/504, honour `Retry-After`, no sleep after the last try | accepted |
 
 See also: [docs/wishlist/](../wishlist/) for deferred ideas not yet committed to.

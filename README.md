@@ -1141,9 +1141,9 @@ leave a partial file.
 
 `--inspect` makes two requests per certificate. Done one at a time, that took
 about 55 minutes for ~574 certificates in prod, so downloads run four at a time
-by default. If the API answers 429, every worker pauses for the `Retry-After`
-delay, and each certificate gets three tries before it is recorded as an
-inspection error. Use `--workers 1` for the old sequential behaviour.
+by default. If the API answers 429 (or 502/503/504), every worker pauses for
+the `Retry-After` delay, and each request gets three tries before the
+certificate is recorded as an inspection error. Use `--workers 1` for the old sequential behaviour.
 
 #### Reusing downloads between runs
 
@@ -1730,6 +1730,8 @@ sess = certinext.session(
     token_url="",       # override; defaults to match base_url
     timeout=None,       # httpx.Timeout or seconds; default 10s connect / 60s read
     create_timeout=None,  # certificate creation only; default 10s connect / 180s read
+    client_secret_file=None,  # path to a file holding the secret, instead of client_secret
+    retry=None,         # certinext.RetryPolicy() retries reads on 429/502/503/504
 )
 ```
 
@@ -2659,8 +2661,31 @@ with an error raises `CertiNextAuthError`: a `RuntimeError` (what it was before
 error should not quietly carry on without a token. An unreachable token
 endpoint raises the `httpx` transport error, as before.
 
-The token request is the one request the library retries: twice, after 2 s
-and 5 s, on a transport error or a 502/503/504. API calls are never retried.
+The token request is always retried: twice, after 2 s and 5 s, on a
+transport error or a 502/503/504. API calls are not retried unless you opt in.
+
+#### Retrying reads
+
+A `RetryPolicy` on the session retries **reads only** (`GET`s) that fail with
+429, 502, 503 or 504. Writes are never retried, because creating a certificate
+twice is worse than failing once.
+
+```python
+from certinext import RetryPolicy
+
+sess = certinext.session(client_id="...", client_secret="...", retry=RetryPolicy())
+sess.retry = RetryPolicy(attempts=5, max_delay=60)   # change it later
+with sess.retrying(None):                            # or for one block only
+    ...
+```
+
+Each retry waits for the response's `Retry-After`, or 5 s then 10 s when there
+is none. A `Retry-After` above `max_delay` (120 s by default) raises
+immediately instead of retrying early. After the last attempt the error is
+raised without another wait. `lookup-certificate`, `list-certificates --sans`
+and `replacement-report --inspect` always run under a policy: yours if the
+session has one, otherwise the defaults. See
+[ADR 0025](docs/adr/0025-opt-in-retry-policy-for-reads.md).
 After a failed fetch, `get_token()` re-raises that failure for 10 seconds
 instead of trying again, so parallel workers stop together.
 
@@ -2794,7 +2819,9 @@ certinext/
     _chain.py                      # certificate-chain re-sorting (leaf-first signing order; GitLab #4)
     _inspection_cache.py           # opt-in on-disk cache of replacement-report --inspect downloads
     settings.py                    # pydantic-settings models: IssuanceDefaults, ConnectionSettings,
-                                  #   CertiNextSettings (init → keyring → env precedence)
+                                  #   CertiNextSettings (init → keyring → secret file → env precedence)
+    _secret_file.py                # read_secret_file(): permission-checked client-secret file (ADR 0024)
+    retry.py                       # RetryPolicy: opt-in retry for reads (ADR 0025)
     accounts.py                    # AccountInfo, Group, Organization, AccountAccessor
     auth.py                        # OAuth 2.0 client credentials token management
     catalog.py                     # Product, ProductCategory, CustomField, CatalogAccessor

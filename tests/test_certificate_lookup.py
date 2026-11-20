@@ -23,7 +23,7 @@ import io
 import ipaddress
 import json
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import MagicMock, Mock
 
 import pytest
 import typer
@@ -39,6 +39,7 @@ from certinext.cli._shared import _output_stream
 from certinext.exceptions import CertiNextRateLimitError
 from certinext.models.orders import OrderRecord
 from certinext.models.ssl_certificates import CertificateDownload, SslOrder
+from certinext.retry import RetryPolicy
 from certinext.session import CertiNextSession
 
 
@@ -92,6 +93,8 @@ def _record(order: str = "ORDER-1", serial: str = "AB") -> OrderRecord:
 def _session(*records: OrderRecord) -> Mock:
     """Provide an offline session whose detail accessor returns a real bound order."""
     sess = Mock(spec=CertiNextSession)
+    sess.retry = None
+    sess.retrying = MagicMock()  # a context manager, unlike a plain Mock
     sess.orders = Mock()
     sess.ssl = Mock()
     sess.catalog = Mock()
@@ -195,30 +198,29 @@ def test_bad_chain_does_not_invalidate_leaf_sans(tmp_path: Path, monkeypatch: py
     assert entries[0].sans and entries[0].error is None and cache.writes == 0
 
 
-def test_san_scan_retries_rate_limited_detail(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A retry delay lets a sequential scan recover from a 429."""
+def test_san_scan_runs_under_default_retry_policy() -> None:
+    """Without a caller policy the scan retries under the defaults (ADR 0025)."""
     sess = _session()
-    order = sess.ssl.get.return_value
-    sess.ssl.get.side_effect = [CertiNextRateLimitError(429, {}, retry_after=0.25), order]
-    pauses = Mock()
-    monkeypatch.setattr("certinext.certificate_lookup.sleep", pauses)
-    entries = [CertificateEntry(_record())]
-    enrich_sans(sess, entries)
-    assert entries[0].sans and entries[0].error is None
-    pauses.assert_called_once_with(0.25)
+    enrich_sans(sess, [CertificateEntry(_record())])
+    sess.retrying.assert_called_once_with(RetryPolicy())
 
 
-def test_exhausted_rate_limit_delays_before_next_row(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The final 429 also observes retry-after before the scan advances."""
+def test_lookup_keeps_the_callers_retry_policy() -> None:
+    """A policy the caller set on the session is the one the lookup uses."""
+    sess = _session()
+    mine = RetryPolicy(attempts=7)
+    sess.retry = mine
+    lookup_certificates(sess, "ORDER-1", field="order")
+    sess.retrying.assert_called_once_with(mine)
+
+
+def test_exhausted_rate_limit_is_recorded_per_row() -> None:
+    """A 429 left after the client's retries fails only that row."""
     sess = _session(_record(), _record("ORDER-2"))
     sess.ssl.get.side_effect = CertiNextRateLimitError(429, {}, retry_after=0.25)
-    pauses = Mock()
-    monkeypatch.setattr("certinext.certificate_lookup.sleep", pauses)
     entries = [CertificateEntry(r) for r in sess.orders.get_list()]
     enrich_sans(sess, entries)
-    assert all(e.error for e in entries)
-    assert pauses.call_count == 6
-    pauses.assert_any_call(0.25)
+    assert all(e.error and "RateLimit" in e.error for e in entries)
 
 
 def test_cold_san_match_reuses_live_detail() -> None:
