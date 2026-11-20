@@ -86,10 +86,19 @@ def read_secret_file(path: str | os.PathLike[str]) -> str:
             raw = handle.read()
         except OSError as exc:
             raise CertiNextSecretFileError(shown, f"cannot read ({exc.strerror or type(exc).__name__})") from None
+    # A UnicodeDecodeError carries the whole input in ``.object``. Raising
+    # inside the ``except`` block would chain it as ``__context__`` (``from
+    # None`` only hides it from the printed traceback), so the error is raised
+    # after the block ends. ``raw`` is deleted first so the bytes are not left
+    # in this frame's locals, which error collectors such as Sentry record.
+    text: str | None
     try:
         text = raw.decode("utf-8")
     except UnicodeDecodeError:
-        raise CertiNextSecretFileError(shown, "not UTF-8 text") from None
+        text = None
+    del raw
+    if text is None:
+        raise CertiNextSecretFileError(shown, "not UTF-8 text")
     secret = text.rstrip("\r\n")
     if not secret.strip():
         raise CertiNextSecretFileError(shown, "file is empty")

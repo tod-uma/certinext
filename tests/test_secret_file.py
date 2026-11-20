@@ -88,6 +88,33 @@ def test_non_utf8_refused(tmp_path: Path) -> None:
     assert "\\xff" not in str(info.value)
 
 
+def test_non_utf8_error_does_not_retain_content(tmp_path: Path) -> None:
+    """The error keeps no reference to the raw bytes (external review R1, finding 1).
+
+    A UnicodeDecodeError holds its whole input, so it must not be chained as
+    ``__context__`` or ``__cause__``. The bytes must not survive in the
+    traceback's frame locals either: error collectors capture those.
+    """
+    content = b"s3cret-\xff-tail"
+    with pytest.raises(CertiNextSecretFileError) as info:
+        read_secret_file(_secret(tmp_path, content))
+    exc = info.value
+    assert exc.__context__ is None
+    assert exc.__cause__ is None
+    tb = exc.__traceback__
+    while tb is not None:
+        # This test's own frame holds ``content``. Compare code objects, not
+        # file paths: the path's spelling (drive-letter case) varies by shell.
+        if tb.tb_frame.f_code is test_non_utf8_error_does_not_retain_content.__code__:
+            tb = tb.tb_next
+            continue
+        for value in tb.tb_frame.f_locals.values():
+            assert value is not content
+            if isinstance(value, bytes):
+                assert b"s3cret" not in value
+        tb = tb.tb_next
+
+
 def test_directory_refused(tmp_path: Path) -> None:
     """A directory is not a secret file (Windows reports it as permission denied)."""
     with pytest.raises(CertiNextSecretFileError, match="not a regular file|permission denied"):
