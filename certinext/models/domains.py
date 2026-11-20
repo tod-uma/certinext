@@ -921,6 +921,11 @@ class Domain(CertiNextModel):
         capped at 50 server-side without an error; and an offset past the
         end returns an empty page rather than repeating the last one.
 
+        Paging stops on an empty page, or on a short page once
+        ``totalElements`` (when sent) is reached. A full page is never taken
+        as the end, even if ``totalElements`` says so, so an under-reported
+        total cannot silently truncate the history.
+
         An SSL.com-validated domain has exactly one row, whose
         :attr:`~DcvAttemptSummary.attempt_id` is
         :data:`~certinext.models.dcv_attempts.SSLCOM_LATEST`.
@@ -965,7 +970,14 @@ class Domain(CertiNextModel):
             previous = raw
             rows.extend(DcvAttemptSummary.model_validate(r) for r in raw if isinstance(r, dict))
             offset += len(raw)
-            if not raw or (total is not None and offset >= total) or (total is None and len(raw) < page_size):
+            # A full page always asks for the next one, so an under-reported
+            # ``totalElements`` cannot truncate the history; that costs an
+            # extra (empty) request only when the history is an exact
+            # multiple of ``page_size``. A short page ends the walk unless
+            # the total says rows are still missing (a server capping
+            # ``limit`` below ``page_size``); the empty page then ends it.
+            short = len(raw) < page_size
+            if not raw or (short and (total is None or offset >= total)):
                 return rows
 
     def get_dcv_attempt(self, attempt_id: str) -> DcvAttempt:

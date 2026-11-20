@@ -93,6 +93,27 @@ class TestDcvAttemptsPager:
         assert len(domain.dcv_attempts(page_size=2)) == 2
         assert mock_client.get.call_count == 2
 
+    def test_under_reported_total_does_not_truncate(self, domain: Domain, mock_client: MagicMock) -> None:
+        """A full page is never the end: rows past an under-reported totalElements are kept."""
+        mock_client.get.side_effect = [_page(["4", "3"], 2), _page(["2", "1"], 2), _page([], 2)]
+        rows = domain.dcv_attempts(page_size=2)
+        assert [r.attempt_id for r in rows] == ["4", "3", "2", "1"]
+        assert mock_client.get.call_count == 3
+
+    def test_short_page_before_total_continues(self, domain: Domain, mock_client: MagicMock) -> None:
+        """A short page short of totalElements (a lower server cap) does not end the walk."""
+        mock_client.get.side_effect = [_page(["3", "2"], 3), _page(["1"], 3)]
+        rows = domain.dcv_attempts(page_size=50)
+        assert [r.attempt_id for r in rows] == ["3", "2", "1"]
+        offsets = [c.kwargs["params"]["offset"] for c in mock_client.get.call_args_list]
+        assert offsets == [0, 2]
+
+    def test_full_last_page_costs_one_empty_request(self, domain: Domain, mock_client: MagicMock) -> None:
+        """A history that is an exact multiple of page_size ends on the following empty page."""
+        mock_client.get.side_effect = [_page(["2", "1"], 2), _page([], 2)]
+        assert len(domain.dcv_attempts(page_size=2)) == 2
+        assert mock_client.get.call_count == 2
+
     def test_bare_list_short_page_stops(self, domain: Domain, mock_client: MagicMock) -> None:
         """Without totalElements, a short page is the last one."""
         mock_client.get.return_value = [_row("1")]
