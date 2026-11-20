@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "certinext"
-version = "1.5.0a1"
+version = "1.5.0a2"
 description = "Python client library for the CertiNext certificate management API"
 readme = "README.md"
 license = "Apache-2.0"
@@ -30,9 +30,6 @@ dependencies = [
     "structlog>=23.2",
     "tomli>=2.0; python_version < '3.11'",
     "pydantic-settings>=2.3",
-    "tomlkit>=0.13",
-    "typer>=0.12",
-    "rich>=13",
 ]
 
 [project.scripts]
@@ -55,7 +52,17 @@ Repository = "https://github.com/tod-uma/certinext"
 "Issue Tracker" = "https://github.com/tod-uma/certinext/issues"
 
 [project.optional-dependencies]
+# The command-line tools (certinext and the certinext-* aliases). The library
+# itself needs none of these; see ADR 0026.
+cli = [
+    "typer>=0.12",
+    "rich>=13",
+    "tomlkit>=0.13",
+]
 dev = [
+    "typer>=0.12",
+    "rich>=13",
+    "tomlkit>=0.13",
     "mypy>=1.10",
     "pytest>=8.0",
     "pyright>=1.1",

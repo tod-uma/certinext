@@ -44,6 +44,7 @@ from certinext._inspection_cache import DEFAULT_MAX_AGE
 from certinext.cli import main as cli_main
 from certinext.exceptions import CertiNextAPIError, CertiNextRateLimitError
 from certinext.models.ssl_certificates import CertificateDownload
+from certinext.retry import RetryPolicy
 from certinext.session import CertiNextSession
 
 NOW = dt.datetime(2026, 10, 21, 12, 0, tzinfo=dt.timezone.utc)
@@ -557,7 +558,10 @@ def _routes() -> dict[str, Any]:
 
 
 def _session(monkeypatch: pytest.MonkeyPatch, routes: dict[str, Any]) -> tuple[CertiNextSession, _FakeApi]:
-    """Return a real session whose HTTP GET is the fake router.
+    """Return a real session whose single GET request is the fake router.
+
+    The fake replaces one request (``_get_json``), not :meth:`get`, so the
+    client's retry loop (ADR 0025) still runs over the canned errors.
 
     Args:
         monkeypatch: The pytest monkeypatch fixture.
@@ -568,7 +572,7 @@ def _session(monkeypatch: pytest.MonkeyPatch, routes: dict[str, Any]) -> tuple[C
     """
     sess = CertiNextSession(client_id="test", client_secret="secret")
     api = _FakeApi(routes)
-    monkeypatch.setattr(sess._client, "get", api.get)
+    monkeypatch.setattr(sess._client, "_get_json", api.get)
     return sess, api
 
 
@@ -648,6 +652,21 @@ def test_rate_limit_retries_twice_then_records_the_error(monkeypatch: pytest.Mon
     report = rp.build_report(sess, CRITERIA, inspect=True, now=NOW, sleep=lambda _s: None)
     assert report.rows[0].facts.error and report.rows[0].facts.error.startswith("rate limited")
     assert report.rows[1].facts.error is None
+
+
+def test_callers_retry_policy_keeps_its_numbers_and_is_restored(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The session's own policy sets the attempts; inspection only swaps in the shared pause (ADR 0025)."""
+    routes = _routes()
+    detail = routes[f"{_API}/ssl-certificates/ORDER-00001"]
+    routes[f"{_API}/ssl-certificates/ORDER-00001"] = [CertiNextRateLimitError(429, "slow", retry_after=7), detail]
+    sess, _ = _session(monkeypatch, routes)
+    mine = RetryPolicy(attempts=1)
+    sess.retry = mine
+    waits: list[float] = []
+    report = rp.build_report(sess, CRITERIA, inspect=True, now=NOW, sleep=waits.append)
+    assert waits == []
+    assert report.rows[0].facts.error and report.rows[0].facts.error.startswith("rate limited")
+    assert sess.retry is mine
 
 
 def test_parallel_inspection_matches_sequential(monkeypatch: pytest.MonkeyPatch) -> None:

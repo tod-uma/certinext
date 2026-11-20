@@ -18,16 +18,35 @@ One typer app with a subcommand per operation; the 0.3.x script names remain
 installed as aliases that pre-select their subcommand (see
 :mod:`certinext.cli._aliases`). Command modules are imported here for their
 registration side effect on :data:`certinext.cli._app.app`.
+
+The CLI's dependencies (typer, rich, tomlkit) come with the ``cli`` extra
+(ADR 0026); without them, importing this package raises an ImportError that
+says how to install it.
 """
 
 import sys
+
+try:
+    import rich  # noqa: F401 - presence check only
+    import tomlkit  # noqa: F401 - presence check only
+    import typer  # noqa: F401 - presence check only
+except ImportError as _missing:  # pragma: no cover - exercised in a subprocess test
+    raise ImportError(
+        f"The certinext command-line tools need the 'cli' extra ({_missing.name} is missing). "
+        "Install with: uv tool install 'certinext[cli]'  (or: pip install 'certinext[cli]')"
+    ) from _missing
 
 import httpx
 import structlog
 from typer import Abort
 
 from certinext.cli_support import log_caught_exception
-from certinext.exceptions import TRANSIENT_STATUS_CODES, CertiNextAPIError, CertiNextAuthError
+from certinext.exceptions import (
+    TRANSIENT_STATUS_CODES,
+    CertiNextAPIError,
+    CertiNextAuthError,
+    CertiNextSecretFileError,
+)
 
 try:
     # typer >= 0.21 vendors click as typer._click and no longer depends on
@@ -133,8 +152,10 @@ def main(args: list[str] | None = None) -> int:
 
     A command that lets a CertiNext outage escape (see
     :func:`_vendor_failure`) exits 1 with one log line instead of a
-    traceback; 1 is what the uncaught exception exited with anyway. Any other
-    exception still propagates with its traceback, since it is a bug.
+    traceback; 1 is what the uncaught exception exited with anyway. An
+    unusable client-secret file (ADR 0024) is a configuration error and
+    exits 1 the same way. Any other exception still propagates with its
+    traceback, since it is a bug.
 
     Args:
         args: CLI arguments; None reads ``sys.argv[1:]`` (the console-script
@@ -159,6 +180,9 @@ def main(args: list[str] | None = None) -> int:
             raise
         event, summary = failure
         log_caught_exception(log, event, exc, error=summary)
+        return 1
+    except CertiNextSecretFileError as exc:
+        log.error("Client secret file is unusable", error=str(exc))
         return 1
     return result if isinstance(result, int) else 0
 

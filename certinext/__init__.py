@@ -50,9 +50,14 @@ Errors:
     A failed OAuth token request raises :class:`CertiNextAuthError` (a
     :class:`RuntimeError`, not an API error) with ``.status_code`` and
     ``.transient`` (502/503/504). The token request alone is retried twice
-    on a transport error or a transient status; API calls are not retried.
+    on a transport error or a transient status. API calls are not retried
+    unless the session has a :class:`RetryPolicy`, and then only reads
+    (429 and 502/503/504 by default; ADR 0025).
 """
 
+import os
+
+from ._secret_file import read_secret_file
 from .accounts import (
     AccountAccessor,
     AccountInfo,
@@ -86,11 +91,13 @@ from .exceptions import (
     CertiNextNotFoundError,
     CertiNextOrderRecoveryError,
     CertiNextRateLimitError,
+    CertiNextSecretFileError,
     CertiNextTimeoutError,
 )
 from .ledger import LedgerAccessor, LedgerRecord
 from .models.dcv_attempts import SSLCOM_LATEST, DcvAttempt, DcvAttemptSummary, DcvDiagnostics
 from .orders import CertificateStatus, OrderAccessor, OrderRecord
+from .retry import DEFAULT_RETRY_STATUSES, RetryPolicy
 from .session import CertiNextSession
 from .ssl_certificates import (
     CertificateDownload,
@@ -138,6 +145,8 @@ def session(
     sandbox: bool = False,
     timeout: TimeoutSpec | None = None,
     create_timeout: TimeoutSpec | None = None,
+    client_secret_file: str | os.PathLike[str] | None = None,
+    retry: RetryPolicy | None = None,
 ) -> CertiNextSession:
     """Create and return a new `CertiNextSession`.
 
@@ -164,15 +173,33 @@ def session(
         create_timeout: Timeout for certificate creation only. Default: 10s
             connect, 180s read, because the vendor can take over a minute to
             answer while still creating the order.
+        client_secret_file: Path to a file holding the client secret, used
+            instead of ``client_secret`` (ADR 0024). On POSIX the file must
+            not be world-readable or world-writable; its trailing newline is
+            stripped. Read once, here.
+        retry: Retry policy for reads (GETs), or None (the default) to raise
+            on the first failure. ``retry=RetryPolicy()`` retries 429 and
+            502/503/504 up to three tries, honouring ``Retry-After``. Writes
+            are never retried. See :class:`RetryPolicy` (ADR 0025).
 
     Returns:
         A configured `CertiNextSession` ready to make API calls.
+
+    Raises:
+        ValueError: If both ``client_secret`` and ``client_secret_file`` are
+            given.
+        CertiNextSecretFileError: If ``client_secret_file`` is missing,
+            unreadable, unsafe or empty.
     """
+    if client_secret_file is not None and os.fspath(client_secret_file).strip():
+        if client_secret:
+            raise ValueError("pass client_secret or client_secret_file, not both")
+        client_secret = read_secret_file(client_secret_file)
     resolved_base = base_url or (SANDBOX_BASE_URL if sandbox else BASE_URL)
     resolved_token = token_url or (SANDBOX_TOKEN_URL if sandbox else TOKEN_URL)
     return CertiNextSession(
         resolved_base, resolved_token, client_id, client_secret, scope, sandbox,
-        timeout=timeout, create_timeout=create_timeout,
+        timeout=timeout, create_timeout=create_timeout, retry=retry,
     )
 
 
@@ -191,6 +218,7 @@ __all__ = [
     "CertiNextConflictError",
     "CertiNextNotFoundError",
     "CertiNextRateLimitError",
+    "CertiNextSecretFileError",
     "CertiNextTimeoutError",
     "CertiNextCreateTimeoutError",
     "CertiNextOrderRecoveryError",
@@ -198,6 +226,8 @@ __all__ = [
     "CertiNextClient",
     "TimeoutSpec",
     "CertiNextSession",
+    "RetryPolicy",
+    "DEFAULT_RETRY_STATUSES",
     # Accounts
     "AccountAccessor",
     "AccountInfo",

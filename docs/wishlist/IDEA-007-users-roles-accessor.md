@@ -2,7 +2,15 @@
 
 - **Status:** Proposed (coordinating issue: #22)
 - **Created:** 2026-07-22
-- **Updated:** 2026-07-22
+- **Updated:** 2026-11-20
+
+> **2026-11-20 update:** the vendor moved this module from `/api/v2/certinext/`
+> to `/api/v3/certinext/` in the 2026-10-21 spec refresh. The paths below were
+> corrected to v3 against the 2026-11-16 prod and sandbox snapshots. The current
+> API account got 403 on `GET /api/v3/certinext/orders` (see
+> [IDEA-014](IDEA-014-clm-certificate-report-access.md)); the `users` paths have
+> not been probed, but are expected to need the read-only API user requested in
+> #35.
 
 ## Context
 
@@ -10,7 +18,7 @@ Came up 2026-07-22 answering an ad hoc question — can the CertiNext API read
 users, groups, roles, and custom role permissions? Checking the
 `certinext-spec-snapshots` snapshots (`snapshots/prod.json` and
 `snapshots/sandbox.json`) confirmed the vendor exposes a full set of GET
-endpoints for this under `/api/v2/certinext/users/...`, but none of it is
+endpoints for this under `/api/v3/certinext/users/...`, but none of it is
 wrapped in the `certinext` library today — the only accessor that exists is
 `AccountAccessor` (`me`, `list_groups`, `list_organizations`) in
 [accounts.py](../../certinext/accounts.py).
@@ -20,15 +28,15 @@ wrapped in the `certinext` library today — the only accessor that exists is
 Add a `UsersAccessor` (mirroring `AccountAccessor`'s shape) exposing the
 read-only endpoints confirmed in the spec:
 
-- `list_users()` — `GET /api/v2/certinext/users` (and `/users/detailed`)
-- `list_roles()` / `get_role(id)` — `GET /api/v2/certinext/users/roles`,
-  `GET /api/v2/certinext/users/roles/{id}`
-- `get_role_permissions(id)` — `GET /api/v2/certinext/users/roles/{id}/permissions`
-- `list_role_users(id)` — `GET /api/v2/certinext/users/roles/{id}/users`
+- `list_users()` — `GET /api/v3/certinext/users` (and `/users/detailed`)
+- `list_roles()` / `get_role(id)` — `GET /api/v3/certinext/users/roles`,
+  `GET /api/v3/certinext/users/roles/{id}`
+- `get_role_permissions(id)` — `GET /api/v3/certinext/users/roles/{id}/permissions`
+- `list_role_users(id)` — `GET /api/v3/certinext/users/roles/{id}/users`
 - `list_group_members()` / `list_group_members(user_id)` —
-  `GET /api/v2/certinext/users/groups/members[/{userId}]`
+  `GET /api/v3/certinext/users/groups/members[/{userId}]`
 - `list_available_permissions()` —
-  `GET /api/v2/certinext/discovery/permissions/available`
+  `GET /api/v3/certinext/discovery/permissions/available`
 
 With corresponding pydantic models in a new `models/users.py` (`User`,
 `Role`, `Permission`, ...), following the existing lenient-model pattern from
@@ -89,8 +97,8 @@ get example payloads, then draft `models/users.py` + a GET-only
 ## References
 
 - `certinext-spec-snapshots` snapshots: `snapshots/prod.json`,
-  `snapshots/sandbox.json` (paths under `/api/v2/certinext/users/...` and
-  `/api/v2/certinext/discovery/permissions/...`) — internal spec capture, no
+  `snapshots/sandbox.json` (paths under `/api/v3/certinext/users/...` and
+  `/api/v3/certinext/discovery/permissions/...`) — internal spec capture, no
   public vendor API docs exist to link.
 - Related: [ADR 0005](../adr/0005-lenient-models-validated-against-live-payload-corpus.md)
   (lenient models validated against corpus); existing

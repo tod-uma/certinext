@@ -30,6 +30,10 @@ Three pieces live here:
   the environment (pydantic-settings' default puts env above everything
   but init args), which is why :meth:`~CertiNextSettings.settings_customise_sources`
   splices :class:`KeyringSettingsSource` in between the init and env sources.
+  The client secret can also come from a file (ADR 0024): an explicit
+  ``client_secret_file`` argument ranks with the other explicit arguments,
+  and ``CERTINEXT_CLIENT_SECRET_FILE`` ranks below the keyring but above
+  ``CERTINEXT_CLIENT_SECRET`` (:class:`SecretFileSettingsSource`).
 
 Interactive prompting (the final fallback of the credential order) is not a
 settings source; it stays in :mod:`certinext._cli` where TTY handling lives.
@@ -40,6 +44,8 @@ models one field at a time.
 """
 
 import os
+from collections.abc import Callable
+from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, StrictBool, StrictStr, field_validator
@@ -52,6 +58,10 @@ from pydantic_settings import (
 )
 
 from certinext._keyring import keyring_get, keyring_service
+from certinext._secret_file import read_secret_file
+
+#: Environment variable naming a file that holds the client secret (ADR 0024).
+SECRET_FILE_ENV_VAR = "CERTINEXT_CLIENT_SECRET_FILE"
 
 
 class IssuanceDefaults(BaseModel):
@@ -139,6 +149,7 @@ class KeyringSettingsSource(PydanticBaseSettingsSource):
         """
         super().__init__(settings_cls)
         self._init_kwargs = init_kwargs
+        self._values: dict[str, Any] | None = None
 
     def get_field_value(self, field: FieldInfo, field_name: str) -> tuple[Any, str, bool]:
         """Unused per-field hook required by the source ABC (``__call__`` does the work).
@@ -157,11 +168,24 @@ class KeyringSettingsSource(PydanticBaseSettingsSource):
 
         The profile mirrors the init -> env precedence of the settings class
         itself: an explicit ``profile`` kwarg wins, then ``CERTINEXT_PROFILE``.
+        The lookup runs once per source; later calls (the lower-ranked
+        :class:`SecretFileSettingsSource` asks whether the keyring already
+        supplied a secret) return the same dict.
 
         Returns:
             A dict with ``client_id`` and/or ``client_secret`` when stored,
             empty when nothing is stored, keyring is unavailable, or an
             explicit client ID disables the lookup.
+        """
+        if self._values is None:
+            self._values = self._lookup()
+        return self._values
+
+    def _lookup(self) -> dict[str, Any]:
+        """Query the keyring for the active profile's credentials.
+
+        Returns:
+            The values described in :meth:`__call__`.
         """
         if self._init_kwargs.get("client_id"):
             return {}
@@ -177,6 +201,111 @@ class KeyringSettingsSource(PydanticBaseSettingsSource):
         return values
 
 
+class SecretFileSettingsSource(PydanticBaseSettingsSource):
+    """Settings source reading ``client_secret`` from a file (ADR 0024).
+
+    Used twice in :class:`CertiNextSettings`: once for an explicit
+    ``client_secret_file`` argument (ranked with the other explicit
+    arguments, above the keyring) and once for
+    ``CERTINEXT_CLIENT_SECRET_FILE`` (below the keyring, above
+    ``CERTINEXT_CLIENT_SECRET``).
+
+    The file is read only when this source would actually supply the secret:
+    a higher-ranked source that already resolved it (``superseded``) means
+    the file is never opened, so a stale variable cannot break a run that
+    does not use it. A file that is read and turns out unusable raises
+    :exc:`~certinext.exceptions.CertiNextSecretFileError` instead of falling
+    through to a lower source.
+    """
+
+    def __init__(
+        self,
+        settings_cls: type[BaseSettings],
+        path: str | os.PathLike[str] | None,
+        superseded: Callable[[], bool] = lambda: False,
+    ) -> None:
+        """Capture the configured path and the "higher source won" check.
+
+        Args:
+            settings_cls: The settings class being populated.
+            path: The secret file's path; None or a blank string means none
+                is configured.
+            superseded: Returns True when a higher-ranked source already
+                supplied the secret, so the file must not be read.
+        """
+        super().__init__(settings_cls)
+        self._path = path
+        self._superseded = superseded
+
+    def get_field_value(self, field: FieldInfo, field_name: str) -> tuple[Any, str, bool]:
+        """Unused per-field hook required by the source ABC (``__call__`` does the work).
+
+        Args:
+            field: The field being populated.
+            field_name: The field's name.
+
+        Returns:
+            A "no value" triple.
+        """
+        return None, field_name, False
+
+    def __call__(self) -> dict[str, Any]:
+        """Return the secret read from the configured file.
+
+        Returns:
+            ``{"client_secret": <secret>, "client_secret_file": <path>}``,
+            or an empty dict when no path is configured or a higher-ranked
+            source already supplied the secret.
+
+        Raises:
+            CertiNextSecretFileError: If the configured file is unusable.
+        """
+        if self._path is None or not os.fspath(self._path).strip():
+            return {}
+        if self._superseded():
+            return {}
+        return {"client_secret": read_secret_file(self._path), "client_secret_file": Path(self._path)}
+
+
+class _WithoutSecretFilePath(PydanticBaseSettingsSource):
+    """Wrap a source so it never sets ``client_secret_file`` itself.
+
+    The env source would otherwise copy ``CERTINEXT_CLIENT_SECRET_FILE`` into
+    the field even when the keyring supplied the secret, and the field would
+    then name a file that was never read. Only
+    :class:`SecretFileSettingsSource` sets it, and only when it read the file.
+    """
+
+    def __init__(self, inner: PydanticBaseSettingsSource) -> None:
+        """Wrap ``inner``.
+
+        Args:
+            inner: The source to filter (the env source).
+        """
+        super().__init__(inner.settings_cls)
+        self._inner = inner
+
+    def get_field_value(self, field: FieldInfo, field_name: str) -> tuple[Any, str, bool]:
+        """Unused per-field hook required by the source ABC (``__call__`` does the work).
+
+        Args:
+            field: The field being populated.
+            field_name: The field's name.
+
+        Returns:
+            A "no value" triple.
+        """
+        return None, field_name, False
+
+    def __call__(self) -> dict[str, Any]:
+        """Return the wrapped source's values minus ``client_secret_file``.
+
+        Returns:
+            The inner source's dict without the ``client_secret_file`` key.
+        """
+        return {key: value for key, value in self._inner().items() if key != "client_secret_file"}
+
+
 class CertiNextSettings(BaseSettings):
     """Resolved API credentials and profile selection.
 
@@ -187,10 +316,23 @@ class CertiNextSettings(BaseSettings):
     nothing resolves is the caller's job (see
     :func:`certinext._cli.build_session`).
 
+    The client secret has two more sources (ADR 0024), giving this full order:
+
+    1. ``client_secret=`` or ``client_secret_file=`` argument (passing both
+       raises :exc:`ValueError`);
+    2. OS keyring;
+    3. the file named by ``CERTINEXT_CLIENT_SECRET_FILE``;
+    4. ``CERTINEXT_CLIENT_SECRET``.
+
+    After resolution, ``client_secret_file`` names the file the secret was
+    actually read from, or is None when the secret came from anywhere else
+    (it is never set just because ``CERTINEXT_CLIENT_SECRET_FILE`` is).
+
     Usage::
 
         settings = CertiNextSettings(profile="sandbox")   # CLI values as kwargs
         settings.client_id                                # keyring beats env
+        CertiNextSettings(client_secret_file="/etc/certinext/app.secret")
 
     Empty strings from the environment count as unset, matching the
     ``os.environ.get(...) or ...`` idiom this class replaces.
@@ -201,8 +343,9 @@ class CertiNextSettings(BaseSettings):
     profile: str | None = None
     client_id: str | None = None
     client_secret: SecretStr | None = None
+    client_secret_file: Path | None = None
 
-    @field_validator("profile", "client_id", "client_secret", mode="before")
+    @field_validator("profile", "client_id", "client_secret", "client_secret_file", mode="before")
     @classmethod
     def _empty_string_is_unset(cls, value: Any) -> Any:
         """Treat an empty or whitespace-only string as an absent value.
@@ -228,15 +371,63 @@ class CertiNextSettings(BaseSettings):
     ) -> tuple[PydanticBaseSettingsSource, ...]:
         """Order the sources as init -> keyring -> env (keyring outranks env).
 
+        Within that, the secret-file sources (ADR 0024) sit beside the
+        explicit arguments (``client_secret_file=``) and between the keyring
+        and the environment (``CERTINEXT_CLIENT_SECRET_FILE``).
+
         Args:
             settings_cls: The settings class being populated.
             init_settings: Source for explicit constructor arguments.
             env_settings: Source for environment variables.
             dotenv_settings: Unused (no dotenv support; dropped).
-            file_secret_settings: Unused (no file secrets; dropped).
+            file_secret_settings: Unused and dropped: pydantic's
+                directory-of-files ``secrets_dir`` is replaced by the
+                single-file :class:`SecretFileSettingsSource`.
 
         Returns:
             The source tuple in certinext precedence order.
+
+        Raises:
+            ValueError: If both ``client_secret`` and ``client_secret_file``
+                were passed explicitly.
         """
         init_kwargs = init_settings.init_kwargs if isinstance(init_settings, InitSettingsSource) else {}
-        return (init_settings, KeyringSettingsSource(settings_cls, init_kwargs), env_settings)
+        explicit_secret = _is_set(init_kwargs.get("client_secret"))
+        explicit_file = init_kwargs.get("client_secret_file")
+        if explicit_secret and _is_set(explicit_file):
+            raise ValueError("pass client_secret or client_secret_file, not both")
+        keyring_source = KeyringSettingsSource(settings_cls, init_kwargs)
+
+        def _higher_source_has_secret() -> bool:
+            """Report whether an explicit argument or the keyring already supplied the secret."""
+            return explicit_secret or _is_set(explicit_file) or "client_secret" in keyring_source()
+
+        return (
+            init_settings,
+            SecretFileSettingsSource(settings_cls, explicit_file),
+            keyring_source,
+            SecretFileSettingsSource(
+                settings_cls, os.environ.get(SECRET_FILE_ENV_VAR), superseded=_higher_source_has_secret
+            ),
+            _WithoutSecretFilePath(env_settings),
+        )
+
+
+def _is_set(value: Any) -> bool:
+    """Report whether an explicit credential argument counts as given.
+
+    None, empty and whitespace-only strings (or :class:`~pydantic.SecretStr`
+    wrapping one) are "not given", matching
+    :meth:`CertiNextSettings._empty_string_is_unset`.
+
+    Args:
+        value: The raw constructor argument.
+
+    Returns:
+        True when the value carries something.
+    """
+    if isinstance(value, SecretStr):
+        value = value.get_secret_value()
+    if value is None:
+        return False
+    return bool(os.fspath(value).strip()) if isinstance(value, (str, os.PathLike)) else True

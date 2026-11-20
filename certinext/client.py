@@ -13,9 +13,10 @@
 # limitations under the License.
 
 from collections.abc import Callable
-from typing import Any, cast
+from typing import Any, TypeVar, cast
 
 import httpx
+import structlog
 
 from .auth import OAuth2ClientCredentials
 from .exceptions import (
@@ -24,6 +25,7 @@ from .exceptions import (
     CertiNextNotFoundError,
     CertiNextRateLimitError,
 )
+from .retry import RetryPolicy, retry_after_seconds
 
 #: Timeouts for API requests. The old ``requests`` implementation had no
 #: timeout at all, so any finite value is stricter. The read timeout is
@@ -35,6 +37,10 @@ _TIMEOUT = httpx.Timeout(10.0, read=60.0)
 #: issuing) the order — observed in the sandbox on 2026-11-06 — so it gets a
 #: longer limit than every other call. Override with ``create_timeout=``.
 _CREATE_TIMEOUT = httpx.Timeout(10.0, read=180.0)
+
+_T = TypeVar("_T")
+
+log = structlog.get_logger(__name__)
 
 TimeoutSpec = httpx.Timeout | float
 """A timeout setting: an :class:`httpx.Timeout`, or seconds applied to every phase."""
@@ -100,6 +106,7 @@ class CertiNextClient:
     # MagicMock(spec=CertiNextClient) in callers' tests exposes them.
     timeout: httpx.Timeout = _TIMEOUT
     create_timeout: httpx.Timeout = _CREATE_TIMEOUT
+    retry: RetryPolicy | None = None
 
     def __init__(
         self,
@@ -110,6 +117,7 @@ class CertiNextClient:
         scope: str = "",
         timeout: TimeoutSpec | None = None,
         create_timeout: TimeoutSpec | None = None,
+        retry: RetryPolicy | None = None,
     ) -> None:
         """
         Args:
@@ -122,11 +130,15 @@ class CertiNextClient:
                 :class:`httpx.Timeout` or seconds. Default: 10s connect, 60s read.
             create_timeout: Timeout for certificate creation only. Default:
                 10s connect, 180s read (the vendor can be slow to answer).
+            retry: Retry policy for :meth:`get` and :meth:`get_bytes`, or
+                None (the default) to raise on the first failure. Writes are
+                never retried. See :class:`~certinext.retry.RetryPolicy`.
         """
         self.base_url = base_url.rstrip("/")
         self._auth = OAuth2ClientCredentials(token_url, client_id, client_secret, scope)
         self.timeout = _as_timeout(timeout, _TIMEOUT)
         self.create_timeout = _as_timeout(create_timeout, _CREATE_TIMEOUT)
+        self.retry = retry
         # follow_redirects matches the requests.Session default this client
         # was originally built on; httpx does not follow redirects by default.
         self._session = httpx.Client(timeout=self.timeout, follow_redirects=True)
@@ -171,14 +183,7 @@ class CertiNextClient:
         if status == 409:
             raise CertiNextConflictError(status, body, response=resp)
         if status == 429:
-            retry_after: float | None = None
-            raw = resp.headers.get("Retry-After")
-            if raw is not None:
-                try:
-                    retry_after = float(raw)
-                except (ValueError, TypeError):
-                    pass
-            raise CertiNextRateLimitError(status, body, retry_after=retry_after, response=resp)
+            raise CertiNextRateLimitError(status, body, retry_after=retry_after_seconds(resp), response=resp)
         raise CertiNextAPIError(status, body, response=resp)
 
     def _execute(self, make_request: Callable[[], httpx.Response]) -> httpx.Response:
@@ -188,8 +193,9 @@ class CertiNextClient:
         expires mid-poll), the cached token is invalidated and the request is
         retried once. If the retry also returns 401, the error propagates normally.
 
-        No other retry or backoff happens here — callers and
-        :class:`~certinext.orders.OrderWorkflow` own retries deliberately.
+        No other retry or backoff happens here. Reads opt into
+        :attr:`retry` (see :meth:`_retrying`); writes leave retries to
+        callers and :class:`~certinext.orders.OrderWorkflow` deliberately.
 
         Args:
             make_request: Zero-argument callable that performs the HTTP request
@@ -206,8 +212,44 @@ class CertiNextClient:
             resp = make_request()
         return resp
 
+    def _retrying(self, call: Callable[[], _T]) -> _T:
+        """Run one read, retrying it as :attr:`retry` allows (ADR 0025).
+
+        Retries happen on the typed error, so the wait honours a 429's
+        ``retry_after`` and a 5xx's ``Retry-After`` header alike. With no
+        policy the first error propagates unchanged. Nothing sleeps after the
+        final attempt.
+
+        Args:
+            call: Zero-argument callable performing a single read.
+
+        Returns:
+            Whatever ``call`` returns on its first successful attempt.
+
+        Raises:
+            CertiNextAPIError: The last attempt's error, when it is not
+                retryable or the attempts are used up.
+        """
+        attempt = 1
+        while True:
+            try:
+                return call()
+            except CertiNextAPIError as exc:
+                policy = self.retry
+                wait = policy.wait_before_retry(exc, attempt) if policy is not None else None
+                if policy is None or wait is None:
+                    raise
+                log.warning(
+                    "CertiNext read failed; retrying",
+                    status=exc.status_code, attempt=attempt, attempts=policy.attempts, wait_seconds=wait,
+                )
+                policy.sleep(wait)
+                attempt += 1
+
     def get(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any] | list[Any]:
         """Send a GET request and return the parsed JSON response.
+
+        Retried as :attr:`retry` allows; see :meth:`_retrying`.
 
         Args:
             path: API path relative to ``base_url`` (e.g. ``/api/certinext/v2/domains``).
@@ -219,6 +261,21 @@ class CertiNextClient:
         Raises:
             CertiNextAPIError: On a non-2xx response. Provides ``.status_code`` and ``.body``.
         """
+        return self._retrying(lambda: self._get_json(path, params))
+
+    def _get_json(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any] | list[Any]:
+        """Send one GET request, without retrying, and return the parsed JSON.
+
+        Args:
+            path: API path relative to ``base_url``.
+            params: Optional query-string parameters.
+
+        Returns:
+            Parsed JSON response as a dict or list.
+
+        Raises:
+            CertiNextAPIError: On a non-2xx response.
+        """
         resp = self._execute(
             lambda: self._session.get(f"{self.base_url}{path}", headers=self._headers(), params=params)
         )
@@ -229,7 +286,8 @@ class CertiNextClient:
         """Send a GET request with a custom Accept header and return raw response bytes.
 
         Used for endpoints that return binary or non-JSON content (e.g. DER
-        certificates or PEM text).
+        certificates or PEM text). Retried as :attr:`retry` allows; see
+        :meth:`_retrying`.
 
         Args:
             path: API path relative to ``base_url``.
@@ -247,9 +305,13 @@ class CertiNextClient:
             headers = self._headers()
             headers["Accept"] = accept
             return self._session.get(f"{self.base_url}{path}", headers=headers, params=params)
-        resp = self._execute(_req)
-        self._raise_api_error(resp)
-        return resp.content
+
+        def _once() -> bytes:
+            """Send the request once and return the body, raising on an error status."""
+            resp = self._execute(_req)
+            self._raise_api_error(resp)
+            return resp.content
+        return self._retrying(_once)
 
     def post(
         self,

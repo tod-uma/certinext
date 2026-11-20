@@ -57,8 +57,8 @@ The short version, for an agent wiring up certinext without reading the
 whole README:
 
 ```bash
-uv tool install "certinext[csr,keyring]"   # CLI
-uv add certinext                            # or, as a library dependency
+uv tool install "certinext[cli,csr,keyring]"   # CLI
+uv add certinext                                # or, as a library dependency
 ```
 
 ```python
@@ -96,12 +96,14 @@ To install the `certinext` CLI (issuing certificates, listing
 domains, etc.):
 
 ```bash
-uv tool install "certinext[csr,keyring]"
+uv tool install "certinext[cli,csr,keyring]"
 ```
 
 That's the whole install — the command now works from any terminal. (If a
 command isn't found, run `uv tool update-shell` and open a new terminal.)
-The two extras are recommended for CLI use: `csr` enables CSR parsing for
+The `cli` extra is required for the commands: since 1.5 the library alone
+does not pull in typer, rich or tomlkit ([ADR 0026](docs/adr/0026-cli-dependencies-in-an-extra.md)).
+The other two are recommended: `csr` enables CSR parsing for
 `certinext issue-cert`, and `keyring` lets the commands store and read
 credentials in the OS keychain.
 
@@ -144,13 +146,14 @@ uv add certinext
 
 Add extras only if your code uses them: `certinext[csr]` (CSR parsing),
 `certinext[keyring]` (OS keychain credential lookup), `certinext[dns]`
-(DNS lookups).
+(DNS lookups), `certinext[cli]` (building on `certinext.cli_options` or the
+typer app, or saving stored defaults).
 
 **Pre-releases** — to get the latest alpha/beta/rc ahead of the next stable
 release, add `--prerelease=allow`:
 
 ```bash
-uv tool install --prerelease=allow "certinext[csr,keyring]"   # CLI tools
+uv tool install --prerelease=allow "certinext[cli,csr,keyring]"   # CLI tools
 uv add certinext --prerelease=allow                           # library
 ```
 
@@ -158,7 +161,7 @@ uv add certinext --prerelease=allow                           # library
 the UMS GitLab package registry:
 
 ```bash
-uv tool install certinext \
+uv tool install "certinext[cli]" \
   --extra-index-url https://gitlab.its.maine.edu/api/v4/groups/2236/-/packages/pypi/simple
 ```
 
@@ -186,14 +189,14 @@ installed).
 `uv tool`):
 
 ```bash
-pipx install "certinext[csr,keyring]"
+pipx install "certinext[cli,csr,keyring]"
 ```
 
 Or with plain pip (installs into the active Python environment, not
 isolated):
 
 ```bash
-pip install "certinext[csr,keyring]"
+pip install "certinext[cli,csr,keyring]"
 ```
 
 **Library in your project**:
@@ -202,7 +205,7 @@ pip install "certinext[csr,keyring]"
 pip install certinext
 ```
 
-**Optional extras** — add any of `csr`, `keyring`, or `dns` after the fact,
+**Optional extras** — add any of `cli`, `csr`, `keyring`, or `dns` after the fact,
 e.g. the `keyring` extra needed by `certinext setup keyring`:
 
 ```bash
@@ -213,7 +216,7 @@ pip install "certinext[keyring]"
 release, add `--pre`/`--pip-args=--pre`:
 
 ```bash
-pipx install --pip-args=--pre "certinext[csr,keyring]"
+pipx install --pip-args=--pre "certinext[cli,csr,keyring]"
 pip install --pre certinext
 ```
 
@@ -298,8 +301,10 @@ All scripts resolve credentials in this priority order:
 
 1. Explicit CLI argument (`--account-number`, `--client-secret`)
 2. OS keychain (active profile; see above)
-3. Environment variables (`CERTINEXT_CLIENT_ID`, `CERTINEXT_CLIENT_SECRET`)
-4. Interactive prompt (falls back to `getpass` for secrets)
+3. For the secret only: the file named by `CERTINEXT_CLIENT_SECRET_FILE`
+   (see [Secret file](#secret-file) below)
+4. Environment variables (`CERTINEXT_CLIENT_ID`, `CERTINEXT_CLIENT_SECRET`)
+5. Interactive prompt (falls back to `getpass` for secrets)
 
 </details>
 
@@ -315,6 +320,25 @@ reports that no usable OS keyring backend was found. Options:
 - **Skip the keyring.** All scripts fall back to the `CERTINEXT_CLIENT_ID` and
   `CERTINEXT_CLIENT_SECRET` environment variables (see the resolution order
   above).
+
+- <a id="secret-file"></a>**Secret file (recommended for services).** Put the
+  secret in a file only the service account can read and point
+  `CERTINEXT_CLIENT_SECRET_FILE` at it. Unlike an environment variable, the
+  secret then isn't visible in `/proc/<pid>/environ`.
+
+  ```bash
+  install -m 0400 -o certinext /dev/null /etc/certinext/client.secret
+  # write the secret into it (a trailing newline is fine), then:
+  CERTINEXT_CLIENT_ID=ACCT CERTINEXT_CLIENT_SECRET_FILE=/etc/certinext/client.secret certinext pending-dcv
+  ```
+
+  With systemd, `LoadCredential=client.secret:/etc/certinext/client.secret`
+  plus `Environment=CERTINEXT_CLIENT_SECRET_FILE=%d/client.secret` works too.
+  The file must be a regular file with no world read or write bit (0400 or
+  0440). A missing, unsafe or empty file is an error; it never falls back to
+  `CERTINEXT_CLIENT_SECRET`. A keychain entry for the profile still wins.
+  Library callers pass `certinext.session(client_secret_file=...)` instead.
+  See [ADR 0024](docs/adr/0024-client-secret-file-source.md).
 
 - **WSL: bridge to the Windows Credential Manager** with
   [keyring-pybridge](https://pypi.org/project/keyring-pybridge/), which
@@ -562,7 +586,7 @@ The complete copy-paste path from nothing to an issued certificate
 from):
 
 ```bash
-uv tool install "certinext[csr,keyring]"
+uv tool install "certinext[cli,csr,keyring]"
 certinext setup keyring      # store API credentials in the OS keychain (once)
 certinext setup defaults     # store requestor/cert defaults (once, optional)
 certinext issue-cert example.com.csr --cert-out cert.pem --fullchain-out fullchain.pem
@@ -1120,9 +1144,9 @@ leave a partial file.
 
 `--inspect` makes two requests per certificate. Done one at a time, that took
 about 55 minutes for ~574 certificates in prod, so downloads run four at a time
-by default. If the API answers 429, every worker pauses for the `Retry-After`
-delay, and each certificate gets three tries before it is recorded as an
-inspection error. Use `--workers 1` for the old sequential behaviour.
+by default. If the API answers 429 (or 502/503/504), every worker pauses for
+the `Retry-After` delay, and each request gets three tries before the
+certificate is recorded as an inspection error. Use `--workers 1` for the old sequential behaviour.
 
 #### Reusing downloads between runs
 
@@ -1709,6 +1733,8 @@ sess = certinext.session(
     token_url="",       # override; defaults to match base_url
     timeout=None,       # httpx.Timeout or seconds; default 10s connect / 60s read
     create_timeout=None,  # certificate creation only; default 10s connect / 180s read
+    client_secret_file=None,  # path to a file holding the secret, instead of client_secret
+    retry=None,         # certinext.RetryPolicy() retries reads on 429/502/503/504
 )
 ```
 
@@ -1733,8 +1759,11 @@ without copying any of it:
 - **`certinext.cli_support`** — framework-agnostic: `resolve_connection()`,
   `build_session()`, `setup_logging()`, `prompt_stderr()`,
   `require_credential()`, `fatal_api_error()`, `log_caught_exception()`,
-  `format_truncated_traceback()`. Depends on no argument-parsing library.
-- **`certinext.cli_options`** — typer-specific: `Annotated` option aliases
+  `format_truncated_traceback()`. Depends on no argument-parsing library
+  and works without the `cli` extra (saving stored defaults is the
+  exception: that write needs `tomlkit`).
+- **`certinext.cli_options`** — typer-specific, so it needs
+  `certinext[cli]`: `Annotated` option aliases
   (`ProfileOption`, `SandboxOption`, `BaseUrlOption`, `TokenUrlOption`,
   `AccountNumberOption`, `ClientSecretOption`, `ScopeOption`, `JsonOption`,
   `VerboseOption`, `LogFormatOption`, `LogModeOption`, `DebugLogPathOption`)
@@ -2638,8 +2667,31 @@ with an error raises `CertiNextAuthError`: a `RuntimeError` (what it was before
 error should not quietly carry on without a token. An unreachable token
 endpoint raises the `httpx` transport error, as before.
 
-The token request is the one request the library retries: twice, after 2 s
-and 5 s, on a transport error or a 502/503/504. API calls are never retried.
+The token request is always retried: twice, after 2 s and 5 s, on a
+transport error or a 502/503/504. API calls are not retried unless you opt in.
+
+#### Retrying reads
+
+A `RetryPolicy` on the session retries **reads only** (`GET`s) that fail with
+429, 502, 503 or 504. Writes are never retried, because creating a certificate
+twice is worse than failing once.
+
+```python
+from certinext import RetryPolicy
+
+sess = certinext.session(client_id="...", client_secret="...", retry=RetryPolicy())
+sess.retry = RetryPolicy(attempts=5, max_delay=60)   # change it later
+with sess.retrying(None):                            # or for one block only
+    ...
+```
+
+Each retry waits for the response's `Retry-After`, or 5 s then 10 s when there
+is none. A `Retry-After` above `max_delay` (120 s by default) raises
+immediately instead of retrying early. After the last attempt the error is
+raised without another wait. `lookup-certificate`, `list-certificates --sans`
+and `replacement-report --inspect` always run under a policy: yours if the
+session has one, otherwise the defaults. See
+[ADR 0025](docs/adr/0025-opt-in-retry-policy-for-reads.md).
 After a failed fetch, `get_token()` re-raises that failure for 10 seconds
 instead of trying again, so parallel workers stop together.
 
@@ -2773,7 +2825,9 @@ certinext/
     _chain.py                      # certificate-chain re-sorting (leaf-first signing order; GitLab #4)
     _inspection_cache.py           # opt-in on-disk cache of replacement-report --inspect downloads
     settings.py                    # pydantic-settings models: IssuanceDefaults, ConnectionSettings,
-                                  #   CertiNextSettings (init → keyring → env precedence)
+                                  #   CertiNextSettings (init → keyring → secret file → env precedence)
+    _secret_file.py                # read_secret_file(): permission-checked client-secret file (ADR 0024)
+    retry.py                       # RetryPolicy: opt-in retry for reads (ADR 0025)
     accounts.py                    # AccountInfo, Group, Organization, AccountAccessor
     auth.py                        # OAuth 2.0 client credentials token management
     catalog.py                     # Product, ProductCategory, CustomField, CatalogAccessor

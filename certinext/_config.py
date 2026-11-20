@@ -69,13 +69,13 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-import tomlkit
-import tomlkit.exceptions
 from pydantic import BaseModel, ValidationError
 
 from certinext.settings import ConnectionSettings, IssuanceDefaults, family_keys
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
+    import tomlkit
+
     from certinext.replacement import ReplacementCriteria
 
 if sys.version_info >= (3, 11):
@@ -453,7 +453,7 @@ def profile_from_argv(argv: list[str]) -> str | None:
     return os.environ.get("CERTINEXT_PROFILE") or None
 
 
-def _parse_for_update(path: Path) -> tomlkit.TOMLDocument:
+def _parse_for_update(path: Path) -> "tomlkit.TOMLDocument":
     """Read the config file as a comment-preserving tomlkit document.
 
     A missing file yields a fresh document with a short header comment; an
@@ -463,12 +463,16 @@ def _parse_for_update(path: Path) -> tomlkit.TOMLDocument:
         path: Config file to read.
 
     Returns:
-        The tomlkit document to update and write back.
+        The tomlkit document to update and write back. tomlkit is imported
+        here, not at module level: it comes with the ``cli`` extra, and only
+        writes need it (reads use tomllib; ADR 0006).
 
     Raises:
         ConfigError: If the file exists but cannot be read or parsed (an
             unparseable file is never blindly overwritten).
     """
+    import tomlkit  # noqa: PLC0415 - optional [cli] dependency
+    import tomlkit.exceptions  # noqa: PLC0415
     try:
         raw = path.read_bytes()
     except FileNotFoundError:
@@ -516,6 +520,7 @@ def save_defaults(
             overwritten blindly), if a key is not a recognised default, or
             if the file cannot be written.
     """
+    import tomlkit  # noqa: PLC0415 - optional [cli] dependency
     path = path or config_path()
     doc = _parse_for_update(path)
 
