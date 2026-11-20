@@ -73,8 +73,11 @@ def read_secret_file(path: str | os.PathLike[str]) -> str:
         raise CertiNextSecretFileError(shown, "not a regular file") from None
     except OSError as exc:
         raise CertiNextSecretFileError(shown, f"cannot open ({exc.strerror or type(exc).__name__})") from None
-    with os.fdopen(fd, "rb") as handle:
-        info = os.fstat(handle.fileno())
+    # Check the raw descriptor before wrapping it: on Linux os.open() succeeds
+    # on a directory and only os.fdopen() fails, with a bare IsADirectoryError.
+    # Until fdopen owns the descriptor, close it ourselves on any failure.
+    try:
+        info = os.fstat(fd)
         if not stat.S_ISREG(info.st_mode):
             raise CertiNextSecretFileError(shown, "not a regular file")
         if sys.platform != "win32" and info.st_mode & _WORLD_BITS:
@@ -82,6 +85,10 @@ def read_secret_file(path: str | os.PathLike[str]) -> str:
             raise CertiNextSecretFileError(
                 shown, f"mode {mode:04o} is accessible to other users; chmod o-rwx (0400 or 0440 recommended)"
             )
+    except BaseException:
+        os.close(fd)
+        raise
+    with os.fdopen(fd, "rb") as handle:
         try:
             raw = handle.read()
         except OSError as exc:
