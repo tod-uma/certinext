@@ -77,6 +77,13 @@ class Outcome:
 # SKIPPED/EMPTY/PASS are not failures (EMPTY only fails under --strict).
 _FAILING = frozenset({Outcome.DENIED, Outcome.NOT_FOUND, Outcome.SERVER_BUG, Outcome.NETWORK})
 
+# Certificate display states (orders report ``certificateStatus``, SSL order
+# ``certificateState``) meaning the certificate is signed and downloadable.
+# ``status == "issued"`` is NOT that: it flips when the CA approves the order,
+# while the certificate is still unsigned and its download 422s EMS-1165
+# ("Approved by System"; GitLab #32). Compared case-insensitively.
+_DOWNLOADABLE_STATES = frozenset({"certificate generated", "certificate downloaded"})
+
 # Fixed display order for the one-line summary.
 _SUMMARY_ORDER = (
     Outcome.PASS,
@@ -88,6 +95,19 @@ _SUMMARY_ORDER = (
     Outcome.NETWORK,
     Outcome.SKIPPED,
 )
+
+
+def _is_downloadable(state: Any) -> bool:
+    """Return whether a certificate display state means the cert can be downloaded.
+
+    Args:
+        state: A ``certificate_status`` / ``certificate_state`` value; anything
+            that is not a string (``None``, a missing attribute) is ``False``.
+
+    Returns:
+        ``True`` for the states in :data:`_DOWNLOADABLE_STATES`.
+    """
+    return isinstance(state, str) and state.strip().casefold() in _DOWNLOADABLE_STATES
 
 
 def _count(payload: Any) -> int | None:
@@ -397,11 +417,19 @@ def _feed_context(ctx: dict[str, Any], probe: Probe, payload: Any) -> None:
         if payload[0].attempt_id:
             ctx["attempt_id"] = payload[0].attempt_id
     elif name == "orders.get_page":
-        if payload[0].order_number:
-            ctx["order_id"] = payload[0].order_number
+        # Newest first, and the newest order is often mid-flight (#32): prefer
+        # the newest one whose certificate is already signed, so ssl.get feeds
+        # the download probe. With none on the page, ssl.get still probes the
+        # newest order and the download probe is SKIPPED.
+        target = next(
+            (o for o in payload if _is_downloadable(getattr(o, "certificate_status", None))),
+            payload[0],
+        )
+        if target.order_number:
+            ctx["order_id"] = target.order_number
     elif name == "ssl.get":
-        # Only an issued order can have its certificate downloaded.
-        if getattr(payload, "status", None) == "issued":
+        # Only a signed certificate can be downloaded; see _DOWNLOADABLE_STATES.
+        if _is_downloadable(getattr(payload, "certificate_state", None)):
             ctx["issued_ssl_order"] = payload
 
 
