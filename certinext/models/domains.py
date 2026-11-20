@@ -371,10 +371,17 @@ class DcvVerifyResult(CertiNextModel):
         if {"overall_status", "agreed", "perspectives_queried"} & data.keys():
             return data
         consensus: dict[str, Any] = (data.get("diagnostics") or {}).get("consensus") or {}
+        # ADR 0005: a null, empty, or non-numeric count degrades to 0. A bare
+        # int() would raise TypeError on null, which pydantic does not even
+        # wrap in a ValidationError.
+        try:
+            perspectives = int(consensus.get("totalPerspectivesQueried") or 0)
+        except (TypeError, ValueError):
+            perspectives = 0
         return {
             "overall_status": str(data.get("overallStatus") or data.get("status") or "unknown"),
             "agreed": bool(consensus.get("agreed", False)),
-            "perspectives_queried": int(consensus.get("totalPerspectivesQueried", 0)),
+            "perspectives_queried": perspectives,
         }
 
     @property

@@ -867,3 +867,26 @@ class TestDomainAccessorDeactivate:
         mock_client.post.return_value = dict(SAMPLE_DOMAIN_DATA)
         result = accessor.deactivate("dom-abc-123")
         assert isinstance(result, Domain)
+
+
+class TestDcvVerifyResultLenientCount:
+    """DcvVerifyResult degrades a malformed perspective count to 0 (ADR 0005)."""
+
+    @pytest.mark.parametrize("value", [None, "", "n/a", [], {}])
+    def test_malformed_count_is_zero(self, value: Any) -> None:
+        """A null, empty, or non-numeric totalPerspectivesQueried parses as 0, not an error."""
+        from certinext.models.domains import DcvVerifyResult
+
+        result = DcvVerifyResult.model_validate(
+            {"overallStatus": "PENDING", "diagnostics": {"consensus": {"totalPerspectivesQueried": value}}}
+        )
+        assert result.perspectives_queried == 0
+        assert result.overall_status == "PENDING"
+
+    @pytest.mark.parametrize(("value", "expected"), [(5, 5), ("5", 5)])
+    def test_numeric_count_kept(self, value: Any, expected: int) -> None:
+        """An int or numeric-string count is kept."""
+        from certinext.models.domains import DcvVerifyResult
+
+        result = DcvVerifyResult.model_validate({"diagnostics": {"consensus": {"totalPerspectivesQueried": value}}})
+        assert result.perspectives_queried == expected
