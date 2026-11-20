@@ -19,6 +19,7 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import httpx
+import pytest
 from pydantic import BaseModel, ValidationError
 
 from certinext.exceptions import (
@@ -31,6 +32,7 @@ from certinext.healthcheck import (
     Outcome,
     Probe,
     ProbeResult,
+    _is_downloadable,
     classify,
     exit_code,
     render_summary,
@@ -276,6 +278,7 @@ def _ok_session() -> MagicMock:
 
     order = MagicMock()
     order.order_number = "ORD-1"
+    order.certificate_status = "Certificate Downloaded"
     sess.orders.get_page.return_value = [order]
 
     sess.accounts.get_organization.return_value = MagicMock()
@@ -284,8 +287,84 @@ def _ok_session() -> MagicMock:
 
     ssl_order = MagicMock()
     ssl_order.status = "issued"
+    ssl_order.certificate_state = "Certificate Downloaded"
     sess.ssl.get.return_value = ssl_order
     return sess
+
+
+def _order_row(number: str, certificate_status: str | None) -> MagicMock:
+    """Return a fake orders-report row.
+
+    Args:
+        number: The order number.
+        certificate_status: The row's certificate display state.
+
+    Returns:
+        A MagicMock shaped like an ``OrderRecord``.
+    """
+    row = MagicMock()
+    row.order_number = number
+    row.certificate_status = certificate_status
+    return row
+
+
+class TestDownloadProbeTarget:
+    """The download probe targets a signed certificate, not the newest order (#32)."""
+
+    def test_skips_mid_flight_newest_order(self) -> None:
+        """A newest order still 'Approved by System' is passed over for a signed one."""
+        sess = _ok_session()
+        sess.orders.get_page.return_value = [
+            _order_row("ORD-NEW", "Approved by System"),
+            _order_row("ORD-OLD", "Certificate Generated"),
+        ]
+        outcomes = _by_name(run(sess))
+        sess.ssl.get.assert_called_once_with("ORD-OLD")
+        assert outcomes["ssl.download_certificate"] == Outcome.PASS
+
+    def test_no_downloadable_order_is_skipped(self) -> None:
+        """With nothing signed on the page, ssl.get probes the newest and download is SKIPPED."""
+        sess = _ok_session()
+        sess.orders.get_page.return_value = [
+            _order_row("ORD-NEW", "Pending for Approver"),
+            _order_row("ORD-OLD", None),
+        ]
+        ssl_order = MagicMock()
+        ssl_order.status = "issued"
+        ssl_order.certificate_state = "Pending for Approver"
+        sess.ssl.get.return_value = ssl_order
+        results = run(sess)
+        outcomes = _by_name(results)
+        sess.ssl.get.assert_called_once_with("ORD-NEW")
+        assert outcomes["ssl.get"] == Outcome.PASS
+        assert outcomes["ssl.download_certificate"] == Outcome.SKIPPED
+        assert exit_code(results) == 0
+
+    def test_issued_status_alone_is_not_downloadable(self) -> None:
+        """status == 'issued' with an unsigned certificate does not feed the download probe."""
+        sess = _ok_session()
+        ssl_order = MagicMock()
+        ssl_order.status = "issued"
+        ssl_order.certificate_state = "Approved by System"
+        sess.ssl.get.return_value = ssl_order
+        outcomes = _by_name(run(sess))
+        assert outcomes["ssl.download_certificate"] == Outcome.SKIPPED
+        ssl_order.download_certificate.assert_not_called()
+
+    @pytest.mark.parametrize(
+        ("state", "expected"),
+        [
+            ("Certificate Generated", True),
+            ("certificate downloaded ", True),
+            ("Approved by System", False),
+            ("issued", False),
+            (None, False),
+            (MagicMock(), False),
+        ],
+    )
+    def test_is_downloadable(self, state: object, expected: bool) -> None:
+        """Only the signed-certificate display states count, case-insensitively."""
+        assert _is_downloadable(state) is expected
 
 
 def _by_name(results: list[ProbeResult]) -> dict[str, str]:
