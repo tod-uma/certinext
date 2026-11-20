@@ -454,13 +454,15 @@ class TestDomainAPIMethods:
     def test_last_dcv_attempt_calls_get(self, domain: Domain, mock_client: MagicMock) -> None:
         """last_dcv_attempt() calls GET /domains/{id}/dcv/attempts/last."""
         mock_client.get.return_value = {"attemptedAt": "2026-05-04T21:27:14Z"}
-        domain.last_dcv_attempt()
+        with pytest.warns(DeprecationWarning):
+            domain.last_dcv_attempt()
         mock_client.get.assert_called_once_with(f"/api/certinext/v2/domains/{domain.id}/dcv/attempts/last")
 
     def test_dcv_attempt_history_calls_get(self, domain: Domain, mock_client: MagicMock) -> None:
         """dcv_attempt_history() calls GET /domains/{id}/dcv/attempts."""
         mock_client.get.return_value = []
-        domain.dcv_attempt_history()
+        with pytest.warns(DeprecationWarning):
+            domain.dcv_attempt_history()
         mock_client.get.assert_called_once_with(f"/api/certinext/v2/domains/{domain.id}/dcv/attempts")
 
 
@@ -865,3 +867,26 @@ class TestDomainAccessorDeactivate:
         mock_client.post.return_value = dict(SAMPLE_DOMAIN_DATA)
         result = accessor.deactivate("dom-abc-123")
         assert isinstance(result, Domain)
+
+
+class TestDcvVerifyResultLenientCount:
+    """DcvVerifyResult degrades a malformed perspective count to 0 (ADR 0005)."""
+
+    @pytest.mark.parametrize("value", [None, "", "n/a", [], {}])
+    def test_malformed_count_is_zero(self, value: Any) -> None:
+        """A null, empty, or non-numeric totalPerspectivesQueried parses as 0, not an error."""
+        from certinext.models.domains import DcvVerifyResult
+
+        result = DcvVerifyResult.model_validate(
+            {"overallStatus": "PENDING", "diagnostics": {"consensus": {"totalPerspectivesQueried": value}}}
+        )
+        assert result.perspectives_queried == 0
+        assert result.overall_status == "PENDING"
+
+    @pytest.mark.parametrize(("value", "expected"), [(5, 5), ("5", 5)])
+    def test_numeric_count_kept(self, value: Any, expected: int) -> None:
+        """An int or numeric-string count is kept."""
+        from certinext.models.domains import DcvVerifyResult
+
+        result = DcvVerifyResult.model_validate({"diagnostics": {"consensus": {"totalPerspectivesQueried": value}}})
+        assert result.perspectives_queried == expected

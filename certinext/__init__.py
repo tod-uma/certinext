@@ -53,7 +53,15 @@ Errors:
     on a transport error or a transient status; API calls are not retried.
 """
 
-from .accounts import AccountAccessor, AccountInfo, CaLevelValidation, Group, Organization, OrgCaValidation
+from .accounts import (
+    AccountAccessor,
+    AccountInfo,
+    BusinessCategory,
+    CaLevelValidation,
+    Group,
+    Organization,
+    OrgCaValidation,
+)
 from .catalog import CatalogAccessor, CustomField, Product, ProductCategory
 from .client import CertiNextClient, TimeoutSpec
 from .csr import CsrInfo
@@ -81,6 +89,7 @@ from .exceptions import (
     CertiNextTimeoutError,
 )
 from .ledger import LedgerAccessor, LedgerRecord
+from .models.dcv_attempts import SSLCOM_LATEST, DcvAttempt, DcvAttemptSummary, DcvDiagnostics
 from .orders import CertificateStatus, OrderAccessor, OrderRecord
 from .session import CertiNextSession
 from .ssl_certificates import (
@@ -192,6 +201,7 @@ __all__ = [
     # Accounts
     "AccountAccessor",
     "AccountInfo",
+    "BusinessCategory",
     "CaLevelValidation",
     "Group",
     "Organization",
@@ -213,6 +223,10 @@ __all__ = [
     "DcvStatus",
     "DomainStatus",
     "VALID_DCV_METHODS",
+    "DcvAttempt",
+    "DcvAttemptSummary",
+    "DcvDiagnostics",
+    "SSLCOM_LATEST",
     # Ledger
     "LedgerAccessor",
     "LedgerRecord",

@@ -36,7 +36,8 @@ import pytest
 from certinext.models import CertiNextModel
 from certinext.models.accounts import AccountInfo, Group, Organization
 from certinext.models.catalog import ProductCategory
-from certinext.models.domains import DcvInfo, DcvVerifyResult, Domain
+from certinext.models.dcv_attempts import DcvAttempt, DcvAttemptSummary
+from certinext.models.domains import DcvInfo, Domain
 from certinext.models.ledger import LedgerRecord
 from certinext.models.orders import OrderRecord
 from certinext.models.ssl_certificates import CertificateDownload, SslOrder
@@ -103,8 +104,12 @@ REGISTRY: dict[str, tuple[type[CertiNextModel], Callable[[Any], list[dict[str, A
     "domains-list.json": (Domain, _wrapped("content")),
     "domains-list-default.json": (Domain, _wrapped("content")),
     "domains-detail.json": (Domain, _single),
-    "domains-dcv-attempts.json": (DcvVerifyResult, _wrapped("content")),
-    "domains-dcv-attempts-last.json": (DcvVerifyResult, _single),
+    "domains-dcv-attempts.json": (DcvAttemptSummary, _wrapped("content")),
+    "domains-dcv-attempts-detail.json": (DcvAttempt, _single),
+    "domains-dcv-attempts-last.json": (DcvAttempt, _single),
+    "domains-dcv-attempts-sslcom.json": (DcvAttemptSummary, _wrapped("content")),
+    "domains-dcv-attempts-sslcom-detail.json": (DcvAttempt, _single),
+    "domains-dcv-attempts-last-sslcom.json": (DcvAttempt, _single),
     "ssl-certificates-detail.json": (SslOrder, _single),
     "ssl-certificates-certificate.json": (CertificateDownload, _single),
 }

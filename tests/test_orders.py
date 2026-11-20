@@ -351,6 +351,38 @@ class TestOrderAccessorGetList:
         assert "from" not in kwargs["params"]
         assert "to" not in kwargs["params"]
 
+    def test_group_number_forwarded_on_every_page(self, accessor: OrderAccessor, mock_client: MagicMock) -> None:
+        """get_list() passes group_number as groupNumber on each page request."""
+        mock_client.get.side_effect = [
+            {"content": [SAMPLE_ORDER] * 2, "totalPages": 2},
+            {"content": [SAMPLE_ORDER_EXPIRED], "totalPages": 2},
+        ]
+        accessor.get_list(page_size=2, group_number="1234567890")
+        assert mock_client.get.call_count == 2
+        for call in mock_client.get.call_args_list:
+            assert call.kwargs["params"]["groupNumber"] == "1234567890"
+
+    def test_no_group_number_when_none(self, accessor: OrderAccessor, mock_client: MagicMock) -> None:
+        """get_list() omits groupNumber when group_number is None."""
+        mock_client.get.return_value = [SAMPLE_ORDER]
+        accessor.get_list()
+        _, kwargs = mock_client.get.call_args
+        assert "groupNumber" not in kwargs["params"]
+
+    def test_get_page_group_number_forwarded(self, accessor: OrderAccessor, mock_client: MagicMock) -> None:
+        """get_page() passes group_number as groupNumber."""
+        mock_client.get.return_value = []
+        accessor.get_page(group_number="1234567890")
+        _, kwargs = mock_client.get.call_args
+        assert kwargs["params"]["groupNumber"] == "1234567890"
+
+    def test_find_by_domain_forwards_group_number(self, accessor: OrderAccessor, mock_client: MagicMock) -> None:
+        """find_by_domain() narrows the server-side fetch with group_number."""
+        mock_client.get.return_value = [SAMPLE_ORDER]
+        accessor.find_by_domain("example.com", group_number="1234567890")
+        _, kwargs = mock_client.get.call_args
+        assert kwargs["params"]["groupNumber"] == "1234567890"
+
     def test_exact_full_page_fetches_next(self, accessor: OrderAccessor, mock_client: MagicMock) -> None:
         """get_list() fetches the next page when the current page is exactly page_size."""
         full_page = [SAMPLE_ORDER] * 2

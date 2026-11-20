@@ -1,7 +1,11 @@
                                                                                                     
  Usage: certinext domains last-dcv-attempt [OPTIONS] ID                                             
                                                                                                     
- Get the last DCV attempt for a domain.                                                             
+ Get the most recent DCV attempt for a domain, with diagnostics.                                    
+                                                                                                    
+ Reads the newest history row and fetches it by id, so it also works                                
+ for emSign domains whose /dcv/attempts/last returns 404. Prints the                                
+ attempt as received, plus attemptId when the wire omits it.                                        
                                                                                                     
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
 │ *    ID      TEXT  Domain ID [required]                                                          │

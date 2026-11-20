@@ -16,7 +16,7 @@
 
 from unittest.mock import MagicMock
 
-from certinext.accounts import AccountAccessor, AccountInfo, Group, Organization
+from certinext.accounts import AccountAccessor, AccountInfo, BusinessCategory, Group, Organization
 from certinext.client import CertiNextClient
 
 _ME_URL = "/api/certinext/v2/auth/me"
@@ -352,6 +352,58 @@ class TestAccountAccessorListGroups:
         mock_session.get.return_value = _ok_response({"groups": []})
         accessor = AccountAccessor(client)
         assert accessor.list_groups() == []
+
+
+# ---------------------------------------------------------------------------
+# AccountAccessor.list_business_categories
+# ---------------------------------------------------------------------------
+
+# Production shape, 2026-11-19 (ids replaced with placeholders).
+_BUSINESS_CATEGORIES = {
+    "businessCategories": [
+        {"name": "Private Organization", "id": "cat-private-0000"},
+        {"name": "Government Entity", "id": "cat-gov-0000"},
+        {"name": "Business Entity", "id": "cat-business-0000"},
+    ]
+}
+
+
+class TestAccountAccessorListBusinessCategories:
+    """AccountAccessor.list_business_categories() returns BusinessCategory objects."""
+
+    def test_calls_business_categories_endpoint(self) -> None:
+        """list_business_categories() GETs /organizations/business-categories."""
+        client, mock_session = _make_client()
+        mock_session.get.return_value = _ok_response(_BUSINESS_CATEGORIES)
+        AccountAccessor(client).list_business_categories()
+        url = mock_session.get.call_args[0][0]
+        assert url.endswith("/api/certinext/v2/organizations/business-categories")
+
+    def test_unwraps_and_types_categories(self) -> None:
+        """The businessCategories wrapper is unwrapped into typed models."""
+        client, mock_session = _make_client()
+        mock_session.get.return_value = _ok_response(_BUSINESS_CATEGORIES)
+        cats = AccountAccessor(client).list_business_categories()
+        assert all(isinstance(c, BusinessCategory) for c in cats)
+        assert [(c.id, c.name) for c in cats] == [
+            ("cat-private-0000", "Private Organization"),
+            ("cat-gov-0000", "Government Entity"),
+            ("cat-business-0000", "Business Entity"),
+        ]
+
+    def test_handles_bare_list_and_unknown_keys(self) -> None:
+        """A bare list parses, and unknown wire keys are kept (ADR 0005)."""
+        client, mock_session = _make_client()
+        mock_session.get.return_value = _ok_response([{"id": "x", "name": "X", "newField": 1}])
+        cats = AccountAccessor(client).list_business_categories()
+        assert cats[0].id == "x"
+        assert cats[0].as_dict()["newField"] == 1
+
+    def test_empty_wrapper(self) -> None:
+        """An empty or missing businessCategories array yields []."""
+        client, mock_session = _make_client()
+        mock_session.get.return_value = _ok_response({})
+        assert AccountAccessor(client).list_business_categories() == []
 
 
 # ---------------------------------------------------------------------------

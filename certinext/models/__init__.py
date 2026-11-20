@@ -21,8 +21,9 @@ documented public API for 1.0.
 """
 
 from ._base import CertiNextModel, coerce_flag, lenient_enum
-from .accounts import AccountInfo, CaLevelValidation, Group, Organization, OrgCaValidation
+from .accounts import AccountInfo, BusinessCategory, CaLevelValidation, Group, Organization, OrgCaValidation
 from .catalog import CustomField, Product, ProductCategory
+from .dcv_attempts import SSLCOM_LATEST, DcvAttempt, DcvAttemptSummary, DcvDiagnostics
 from .domains import (
     VALID_DCV_METHODS,
     CaStatus,
@@ -51,6 +52,7 @@ __all__ = [
     "coerce_flag",
     "lenient_enum",
     "AccountInfo",
+    "BusinessCategory",
     "CaLevelValidation",
     "Group",
     "Organization",
@@ -58,6 +60,10 @@ __all__ = [
     "CustomField",
     "Product",
     "ProductCategory",
+    "SSLCOM_LATEST",
+    "DcvAttempt",
+    "DcvAttemptSummary",
+    "DcvDiagnostics",
     "LedgerRecord",
     "CertificateStatus",
     "OrderRecord",

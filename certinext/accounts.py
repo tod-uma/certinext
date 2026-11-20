@@ -29,6 +29,7 @@ from .exceptions import CertiNextAPIError  # noqa: F401 — referenced in Raises
 from .models.accounts import (
     _ORGS_BASE,
     AccountInfo,
+    BusinessCategory,
     CaLevelValidation,
     Group,
     Organization,
@@ -36,7 +37,15 @@ from .models.accounts import (
     _ca_key,
 )
 
-__all__ = ["AccountAccessor", "AccountInfo", "CaLevelValidation", "Group", "Organization", "OrgCaValidation"]
+__all__ = [
+    "AccountAccessor",
+    "AccountInfo",
+    "BusinessCategory",
+    "CaLevelValidation",
+    "Group",
+    "Organization",
+    "OrgCaValidation",
+]
 
 _ME_URL = "/api/certinext/v2/auth/me"
 _GROUPS_BASE = "/api/certinext/v2/groups"
@@ -95,6 +104,27 @@ class AccountAccessor:
             groups = result.get("groups", [])
             raw = groups if isinstance(groups, list) else []
         return [Group.model_validate(item) for item in raw if isinstance(item, dict)]
+
+    def list_business_categories(self) -> list[BusinessCategory]:
+        """Return the business categories an organization can carry for EV.
+
+        These are the values ``businessCategoryId`` accepts in
+        :meth:`submit_ca_validation`. A small, static vendor lookup table.
+
+        Returns:
+            List of :class:`BusinessCategory` objects.
+
+        Raises:
+            CertiNextAPIError: On a non-2xx API response. Provides ``.status_code`` and ``.body``.
+        """
+        result = self._client.get(f"{_ORGS_BASE}/business-categories")
+        raw: list[Any] = []
+        if isinstance(result, list):
+            raw = result
+        elif isinstance(result, dict):
+            cats = result.get("businessCategories", [])
+            raw = cats if isinstance(cats, list) else []
+        return [BusinessCategory.model_validate(item) for item in raw if isinstance(item, dict)]
 
     def list_organizations(
         self,

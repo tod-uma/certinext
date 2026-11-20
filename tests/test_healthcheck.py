@@ -267,6 +267,9 @@ def _ok_session() -> MagicMock:
 
     domain = MagicMock()
     domain.id = "DOM-1"
+    attempt_row = MagicMock()
+    attempt_row.attempt_id = "729645"
+    domain.dcv_attempts.return_value = [attempt_row]
     sess.domain.get_list.return_value = [domain]
 
     sess.ledger.get_page.return_value = [MagicMock()]
@@ -322,8 +325,8 @@ class TestRun:
         for dependent in (
             "domain.get",
             "domain.get_dcv",
-            "domain.last_dcv_attempt",
-            "domain.dcv_attempt_history",
+            "domain.dcv_attempts",
+            "domain.get_dcv_attempt",
         ):
             assert outcomes[dependent] == Outcome.SKIPPED
         # Unrelated endpoints are unaffected.
@@ -341,6 +344,26 @@ class TestRun:
         assert outcomes["domain.get_list"] == Outcome.EMPTY
         # No domain context, so domain Tier-2 probes are skipped.
         assert outcomes["domain.get_dcv"] == Outcome.SKIPPED
+
+    def test_dcv_attempt_probe_reads_newest_by_id(self) -> None:
+        """The attempt probe fetches the history's newest row by id, never /last."""
+        sess = _ok_session()
+        domain = sess.domain.get_list.return_value[0]
+        outcomes = _by_name(run(sess))
+        assert outcomes["domain.dcv_attempts"] == Outcome.PASS
+        assert outcomes["domain.get_dcv_attempt"] == Outcome.PASS
+        domain.get_dcv_attempt.assert_called_once_with("729645")
+        domain.last_dcv_attempt.assert_not_called()
+        domain.dcv_attempt_history.assert_not_called()
+
+    def test_empty_attempt_history_skips_attempt_probe(self) -> None:
+        """A domain with no DCV attempts passes the history probe and skips the by-id one."""
+        sess = _ok_session()
+        sess.domain.get_list.return_value[0].dcv_attempts.return_value = []
+        outcomes = _by_name(run(sess))
+        assert outcomes["domain.dcv_attempts"] == Outcome.PASS
+        assert outcomes["domain.get_dcv_attempt"] == Outcome.SKIPPED
+        assert exit_code(run(sess)) == 0
 
 
 class TestRenderers:

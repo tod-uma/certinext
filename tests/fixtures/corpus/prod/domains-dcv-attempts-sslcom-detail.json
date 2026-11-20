@@ -1,0 +1,42 @@
+{
+  "request": {
+    "method": "GET",
+    "params": null,
+    "path": "/api/certinext/v2/domains/u_w4Xqs41CJwlXvgqTm8veIdmnIpR5oye6ip0ESzy9Sv4Blw/dcv/attempts/sslcom-latest"
+  },
+  "response": {
+    "body": {
+      "attemptId": "sslcom-latest",
+      "diagnostics": {
+        "caExternalStatus": "active",
+        "caStatus": "VALIDATED",
+        "coversSubdomains": true,
+        "mpic": "corroborated 4/5",
+        "schemaVersion": 1,
+        "validTill": "2026-11-29T14:00:53Z",
+        "validatedBy": "SSLCOM"
+      },
+      "domainId": "id-fa5ff74c",
+      "status": "VERIFIED"
+    },
+    "headers": {
+      "access-control-allow-methods": "GET, POST",
+      "cache-control": "no-store, no-cache,no-store,private,must-revalidate,max-stale=0,post-check=0,pre-check=0",
+      "connection": "keep-alive",
+      "content-security-policy": "frame-ancestors 'self';manifest-src 'self';",
+      "content-type": "application/json",
+      "date": "Thu, 19 Nov 2026 20:55:13 GMT",
+      "expires": "Thu, 01 Jan 1970 00:00:00 GMT",
+      "pragma": "no-cache, no-cache",
+      "referrer-policy": "origin-when-cross-origin",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-api-version": "2.0.0",
+      "x-content-type-options": "nosniff",
+      "x-frame-options": "DENY",
+      "x-xss-protection": "0; mode=block"
+    },
+    "status": 200
+  }
+}

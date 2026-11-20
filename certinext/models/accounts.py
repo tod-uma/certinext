@@ -100,6 +100,38 @@ class Group(CertiNextModel):
         return f"Group(group_number={self.group_number!r}, group_name={self.group_name!r})"
 
 
+class BusinessCategory(CertiNextModel):
+    """A business category an organization can carry for SSL.com EV vetting.
+
+    Returned by :meth:`AccountAccessor.list_business_categories`. Pass
+    :attr:`id` as ``business_category_id`` to
+    :meth:`AccountAccessor.submit_ca_validation`, and use it to label the
+    :attr:`Organization.business_category_id` an organization already has.
+
+    The OpenAPI spec types the response as a bare ``object``; the shape here
+    is taken from production on 2026-11-19 (three categories: Private
+    Organization, Government Entity, Business Entity). The ids are opaque
+    vendor tokens, not small integers.
+
+    Example::
+
+        cats = {c.id: c.name for c in sess.accounts.list_business_categories()}
+    """
+
+    id: str | None = Field(
+        default=None,
+        description="Opaque category id; the value ``businessCategoryId`` accepts.",
+    )
+    name: str | None = Field(
+        default=None,
+        description='Display name (e.g. ``"Private Organization"``).',
+    )
+
+    def __repr__(self) -> str:
+        """Return a concise developer representation."""
+        return f"BusinessCategory(name={self.name!r})"
+
+
 class Organization(CertiNextModel):
     """A pre-vetted organization eligible for OV and EV certificates.
 
