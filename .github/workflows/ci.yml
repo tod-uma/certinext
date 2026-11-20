@@ -52,9 +52,11 @@ jobs:
         # 3.10 is deprecated but still supported; see ADR 0027 for when it goes.
         python-version: ["3.10", "3.11", "3.12", "3.13", "3.14", "3.15"]
         experimental: [false]
-        include:
-          - python-version: "3.16"
-            experimental: true
+        # No next-version entry until its rc1: before then it can only fail on
+        # missing wheels (ADR 0027). At 3.16.0rc1 (issue #43) re-add:
+        #   include:
+        #     - python-version: "3.16"
+        #       experimental: true
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6

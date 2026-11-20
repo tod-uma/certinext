@@ -77,6 +77,15 @@ the README note.
   `experimental: true` (`continue-on-error`). It is expected to fail until
   dependencies with compiled code (pydantic-core, cryptography) ship wheels
   for it, and never blocks a merge.
+- **Manual until the next version's rc1.** Before rc1 the job can only
+  fail on missing wheels, which says nothing about our code, and a job
+  that is always red teaches everyone to ignore it. So until then the
+  GitLab job is `when: manual` (run it by hand for a look) and the GitHub
+  entry is absent. From rc1 Python's C ABI is frozen and compiled
+  projects start shipping wheels, so the job runs automatically from
+  then on. A GitLab issue with a due date on the rc1 date is the
+  reminder: for 3.16 that is #43, due 2027-07-27
+  ([PEP 826](https://peps.python.org/pep-0826/)).
 - Once that version is final and the job passes, move it into the required
   matrix and add its classifier. 3.15 went this way in this change.
 

@@ -89,12 +89,23 @@ unit-test:
 # independent of uv's own Python download catalog. Expect red until compiled
 # dependencies (pydantic-core, cryptography) ship wheels for it. Promote it into
 # the unit-test matrix once it is final.
+#
+# Manual until the next version's rc1: before then it can only fail on missing
+# wheels, and a job that is always red teaches everyone to ignore it. Run it by
+# hand from the pipeline page if you want a look. Issue #43 (due 2027-07-27,
+# 3.16.0rc1) is the reminder to delete the `rules:` override below, so the job
+# inherits unit-test's rules and runs automatically.
 unit-test-preview:
   extends: unit-test
   image: python:3.16-rc-slim
   parallel: null
   variables:
     PYTHON_VERSION: "3.16"
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      when: manual
+    - if: $CI_COMMIT_BRANCH
+      when: manual
   allow_failure: true
 
 integration-test:
