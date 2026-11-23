@@ -34,7 +34,17 @@ Usage::
     uv run python scripts/probe_access.py --sandbox
     uv run python scripts/probe_access.py --profile readonly   # another credential, production
     uv run python scripts/probe_access.py --paging             # also walk paginated lists
+    uv run python scripts/probe_access.py --order-details 2    # v3 orders/{id} shape per order state
     uv run python scripts/probe_access.py --json > probe.json  # machine-readable
+
+``--order-details N`` walks the whole v3 order list, groups the rows by
+(``orderStatus``, ``certificateStatus``, ``originator``), and reads N
+details per group. It answers "does ``orders/{id}`` ever carry a field the
+list lacks, such as history?" (on 2026-11-23 it did not, in any of the 20
+production groups, although the spec's description says so). **Those three
+status fields are the one exception to "never values"**: they are vendor
+enums, printed in the probe labels so each shape can be tied to an order
+state.
 
 Every request is a GET. Credentials resolve like ``capture_corpus.py``:
 the OS keyring profile, then ``CERTINEXT_*`` / ``CERTINEXT_SANDBOX_*``
@@ -313,6 +323,50 @@ class Prober:
         result.note = f"{pages} pages; stopped: {stop}"
         self.results.append(result)
 
+    def order_details(self, per_group: int) -> None:
+        """Read v3 ``orders/{id}`` for ``per_group`` orders of every order state.
+
+        Walks every page of the v3 order list, groups rows by
+        (``orderStatus``, ``certificateStatus``, ``originator``), and probes
+        the detail path by ``orderId`` for the first ``per_group`` orders of
+        each group, largest group first. Each detail result records every
+        top-level key's shape (not only the nested ones :meth:`get` keeps),
+        and its note gives the group's size and any key the list row lacks.
+
+        Args:
+            per_group: Detail reads per group; values below 1 do nothing.
+        """
+        if per_group < 1:
+            return
+        rows: list[dict[str, Any]] = []
+        for page in range(1, 201):
+            try:
+                resp = _cc.raw_get(self.client, f"{V3}/orders", {"pageNumber": page, "pageSize": 100})
+            except (CertiNextAPIError, httpx.HTTPError) as exc:
+                self.results.append(Result(label="v3 order details", path=f"{V3}/orders",
+                                           note=f"list failed on page {page}: {_short(str(exc))}"))
+                return
+            batch = [r for r in find_rows(resp.json()) or [] if isinstance(r, dict)]
+            rows.extend(batch)
+            if len(batch) < 100:
+                break
+        groups: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
+        for row in rows:
+            key = (str(row.get("orderStatus")), str(row.get("certificateStatus")), str(row.get("originator")))
+            groups.setdefault(key, []).append(row)
+        template = f"{V3}/orders/{{id}}"
+        for (order_status, cert_status, originator), members in sorted(groups.items(), key=lambda kv: -len(kv[1])):
+            for row in [r for r in members if r.get("orderId")][:per_group]:
+                label = f"v3 order detail [{order_status} / {cert_status} / {originator}]"
+                body = self.get(label, template.format(id=row["orderId"]), shown_path=template)
+                result = self.results[-1]
+                if isinstance(body, dict):
+                    result.row_keys = [shape(k, v) for k, v in sorted(body.items())]
+                    extra = sorted(set(body) - set(row))
+                    result.note = f"group of {len(members)}; not in list row: {', '.join(extra) or 'none'}"
+                else:
+                    result.note = f"group of {len(members)}; {result.note}".rstrip("; ")
+
 
 def shape(key: str, value: Any, depth: int = 0) -> str:
     """Describe a JSON value's structure by key names only, never values.
@@ -345,13 +399,14 @@ def _short(text: str, limit: int = 120) -> str:
     return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
-def run(prober: Prober, *, audit_days: int, paging: bool) -> None:
+def run(prober: Prober, *, audit_days: int, paging: bool, order_details: int = 0) -> None:
     """Run the full probe set.
 
     Args:
         prober: The prober to record into.
         audit_days: Width of the audit-log window, in days, ending now.
         paging: Also walk paginated lists to count every row.
+        order_details: Detail reads per v3 order state; 0 skips them.
     """
     p = prober
     # v2 baseline: the paths the library already wraps.
@@ -417,6 +472,8 @@ def run(prober: Prober, *, audit_days: int, paging: bool) -> None:
                {k: v for k, v in window.items() if k not in ("pageNumber", "pageSize")},
                "pageNumber", "pageSize", 100)
 
+    prober.order_details(order_details)
+
 
 def render(results: list[Result], env: str, profile: str | None) -> str:
     """Render results as a Markdown report.
@@ -459,6 +516,10 @@ def main() -> None:
     parser.add_argument("--profile", default=None, help="keyring profile holding the credential to probe with")
     parser.add_argument("--audit-days", type=int, default=7, help="audit-log window in days (default: %(default)s)")
     parser.add_argument("--paging", action="store_true", help="also walk paginated lists to count every row")
+    parser.add_argument(
+        "--order-details", type=int, default=0, metavar="N",
+        help="read N v3 orders/{id} details per order state (default: %(default)s, off)",
+    )
     parser.add_argument("--json", action="store_true", help="print results as JSON instead of Markdown")
     args = parser.parse_args()
 
@@ -466,7 +527,7 @@ def main() -> None:
     client = _cc.build_client(args.sandbox, args.profile)
     print(f"Probing {env} (GET only)…", file=sys.stderr)
     prober = Prober(client)
-    run(prober, audit_days=args.audit_days, paging=args.paging)
+    run(prober, audit_days=args.audit_days, paging=args.paging, order_details=args.order_details)
     if args.json:
         print(json.dumps([asdict(r) for r in prober.results], indent=2))
     else:
