@@ -59,6 +59,20 @@ The mapping (see :data:`_KEY_RULES` and the ``_pseudo_*`` functions):
   kept: they are literals the models must parse, not account data.
 - **Response headers** — ``Set-Cookie`` and auth-related headers are
   dropped; everything else is kept verbatim.
+- **v3 opaque ids** (``orderId``, ``userId``, ``customRoleId``, …) —
+  ``id-<8 hex>``, in bodies, query parameters (``userIds``) and path
+  segments alike.
+- **Names inside free text** — every person, organization and credential
+  label pseudonymized under a key is remembered for the run (``_SEEN``) and
+  replaced wherever it appears in free text and role names. Audit
+  ``activity`` lines that name an object directly also go through
+  :data:`_ACTIVITY_RULES`, which catch deleted objects no list returns.
+- **API credential descriptions** — ``Cred-<6 hex>`` labels (they embed
+  people's and hosts' names); the same label is used in audit text.
+
+After writing, :func:`leak_check` searches each written file for every raw
+value replaced during the run and fails the capture on a hit, reporting the
+file, key path and expected pseudonym, never the raw value.
 
 The pseudonymization salt is a fixed string committed in this file: the goal
 is to avoid casually publishing the account's domain/org inventory, not
@@ -110,6 +124,8 @@ _DROP_HEADERS = {
 _DOMAIN_KEYS = {
     "domainname", "domain", "domains", "commonname", "cn", "dnshost", "host", "sans", "san",
     "subjectalternativenames", "parentdomain", "fqdn", "subject",
+    # v3 orders: the order's primary identifier, a domain name.
+    "identifier",
 }
 
 #: JSON keys whose string values are treated as email addresses.
@@ -120,12 +136,16 @@ _EMAIL_KEYS = {"email", "requestoremail", "contactemail", "adminemail", "techema
 _PERSON_KEYS = {
     "requestorname", "contactname", "createdby", "modifiedby", "firstname", "lastname",
     "signedplace", "signername",
+    # v3: order placer (a string in lists, ``{"user": ...}`` in order
+    # detail), audit-log actor, API credential owner.
+    "orderedby", "username", "user",
 }
 
 #: JSON keys whose string values are organization names. Bare ``name`` is
 #: intentionally absent — it is org-name only inside /organizations payloads,
 #: which pass ``org_name_keys=True`` (product names etc. stay readable).
-_ORG_NAME_KEYS = {"organizationname", "orgname", "companyname", "legalname", "groupname"}
+#: v3's ``group`` is the group *name* (v2's ``groupName``), so it maps the same.
+_ORG_NAME_KEYS = {"organizationname", "orgname", "companyname", "legalname", "groupname", "group"}
 
 #: JSON keys whose string values are phone numbers.
 _PHONE_KEYS = {"phone", "phonenumber", "mobilenumber", "telephonenumber", "fax", "faxnumber"}
@@ -136,6 +156,10 @@ _ID_KEYS = {
     "accountnumber", "certificateid", "parentid", "groupid",
     "organizationnumber", "groupnumber", "representativenumber",
     "requestnumber", "requestid", "attemptid",
+    # v3 ids are opaque alphanumeric tokens; ``userids`` is the
+    # users/groups/members query parameter.
+    "auditlogid", "userid", "userids", "customroleid", "credentialid",
+    "discoveryresultid", "externalordernumber", "employeeid",
 }
 
 #: Identifier values that are vendor literals, not account data. They pass
@@ -153,7 +177,54 @@ _SENTINEL_IDS = {"sslcom-latest"}
 _FREE_TEXT_KEYS = {
     "rawdata", "consensusvalue", "queryname", "recordvalue", "filecontent",
     "filename", "responseurlvalue", "consensusurl", "camessage", "errormessage",
+    # v3: audit-log activity text embeds person and group names as well as
+    # hostnames ("User information of <name> updated"); the discovery fields
+    # can carry scanner hostnames.
+    "activity", "virtualhost", "discoveredfrom", "botname",
+    # Custom role names: usually functional ("Administrator"), but a role
+    # made for one person can carry that person's name (sandbox, 2026-11-23).
+    "role", "rolename", "customrolename",
 }
+
+#: Raw value -> pseudonym for every person name, organization/group name,
+#: email and domain the sanitizer has pseudonymized during this run. Free
+#: text is scrubbed against the person and organization entries (a name
+#: inside an audit ``activity`` string has no key to identify it), and
+#: :func:`leak_check` searches the written files for every raw entry.
+#: Process-global on purpose: a later endpoint's free text must see the
+#: names an earlier endpoint introduced. Cleared by :func:`reset_seen`.
+_SEEN: dict[str, tuple[str, str]] = {}
+
+#: Shortest name that free text is scrubbed against, and shortest raw value
+#: the leak check searches for. Shorter terms ("IT", "ITS") match ordinary
+#: words and would mangle unrelated text or flood the check.
+_MIN_TERM = 4
+_MIN_LEAK_TERM = 5
+
+_term_cache: tuple[int, re.Pattern[str] | None] = (-1, None)
+
+#: Audit ``activity`` templates that name an object directly. Each pattern
+#: has three groups (prefix, the name, suffix); the name is pseudonymized by
+#: kind and remembered. They catch objects that no list returns any more
+#: (deleted credentials, removed users), which the remembered-names scrub
+#: alone would miss. Templates observed in prod and sandbox, 2026-11-23.
+_ACTIVITY_RULES: list[tuple[re.Pattern[str], str]] = [
+    # "API credential 'Team 30 Day (certbot host)' updated."; "ACME credential 'x' updated."
+    (re.compile(r"(\bcredentials? (?:for )?')([^']+)(')", re.IGNORECASE), "label"),
+    # "API credential ci-pipeline updated"; "ACME EAB credentials for lab-testing deleted"
+    (re.compile(r"(\bcredentials? (?:for )?)([^\s']+)( (?:updated|deleted|revoked|generated|created)\b)",
+                re.IGNORECASE), "label"),
+    # "New Group proxy-team created"
+    (re.compile(r"(\bNew Group )(.+?)( created\b)"), "org"),
+    # "Group access of user <name> set to TEAMX"
+    (re.compile(r"(\bGroup access of user )(.+?)( set to )"), "person"),
+    (re.compile(r"(\bGroup access of user .+? set to )(\S+)()$"), "org"),
+    # "User information of <name> updated"
+    (re.compile(r"(\bUser information of )(.+?)( updated\b)"), "person"),
+    # "Organization representative '<name> (<email>)' added in '<org>' Organization"
+    (re.compile(r"(\brepresentative ')([^'(]+?)( \(|')"), "person"),
+    (re.compile(r"(\badded in ')([^']+)(' Organization)"), "org"),
+]
 
 #: One pass over free text: an email, or else a hostname (two or more labels,
 #: alphabetic final label, optional trailing root dot). Emails are tried first
@@ -234,12 +305,97 @@ def _looks_like_email(value: str) -> bool:
     return bool(re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", value))
 
 
+def _pseudo_person(value: str) -> str:
+    """Pseudonymize a person name."""
+    return f"Name-{_hash(value, 6)}"
+
+
+def _pseudo_org(value: str) -> str:
+    """Pseudonymize an organization or group name."""
+    return f"Org-{_hash(value, 6)}"
+
+
+def _pseudo_label(value: str) -> str:
+    """Pseudonymize an API credential label (they embed people's and hosts' names)."""
+    return f"Cred-{_hash(value, 6)}"
+
+
+_PSEUDO_BY_KIND = {"person": _pseudo_person, "org": _pseudo_org, "label": _pseudo_label}
+
+
+def reset_seen() -> None:
+    """Forget every raw value remembered by :func:`_remember` (tests use this)."""
+    global _term_cache
+    _SEEN.clear()
+    _term_cache = (-1, None)
+
+
+def _remember(kind: str, raw: str, pseudo: str) -> None:
+    """Record a raw value and its pseudonym for free-text scrubbing and the leak check.
+
+    A person name with a trailing parenthetical (``First Last (Dept)``, the
+    vendor's display form) is also remembered without it, because audit text
+    sometimes uses the bare name.
+
+    Args:
+        kind: ``person``, ``org``, ``email`` or ``domain``.
+        raw: The original value.
+        pseudo: The pseudonym written in its place.
+    """
+    raw = raw.strip()
+    if not raw or raw == pseudo:
+        return
+    _SEEN.setdefault(raw, (kind, pseudo))
+    if kind == "person":
+        bare = re.sub(r"\s*\([^)]*\)\s*$", "", raw)
+        if bare and bare != raw:
+            _SEEN.setdefault(bare, (kind, _pseudo_person(bare)))
+
+
+def _known_term_pattern() -> re.Pattern[str] | None:
+    """Return a regex matching every remembered person/org name, longest first.
+
+    Rebuilt only when :data:`_SEEN` has grown since the last call.
+
+    Returns:
+        The compiled pattern, or ``None`` when no names are remembered.
+    """
+    global _term_cache
+    if _term_cache[0] == len(_SEEN):
+        return _term_cache[1]
+    terms = sorted(
+        (t for t, (kind, _) in _SEEN.items() if kind in _PSEUDO_BY_KIND and len(t) >= _MIN_TERM),
+        key=len, reverse=True,
+    )
+    pattern = re.compile(r"(?<!\w)(?:" + "|".join(map(re.escape, terms)) + r")(?!\w)", re.IGNORECASE) if terms else None
+    _term_cache = (len(_SEEN), pattern)
+    return pattern
+
+
+def _scrub_known_terms(value: str) -> str:
+    """Replace every remembered person/org name inside free text with its pseudonym.
+
+    Args:
+        value: The free-text string.
+
+    Returns:
+        The string with known names replaced.
+    """
+    pattern = _known_term_pattern()
+    if pattern is None:
+        return value
+    lowered = {t.lower(): p for t, (_, p) in _SEEN.items()}
+    return pattern.sub(lambda m: lowered.get(m.group(0).lower(), m.group(0)), value)
+
+
 def _scrub_text(value: str) -> str:
     """Pseudonymize every email and hostname embedded in free text.
 
-    Used for :data:`_FREE_TEXT_KEYS`. A hostname keeps its trailing root dot
-    (``example.edu.`` in a DNS answer stays fully qualified), and the text
-    around each match — record types, TTLs, IP addresses — is unchanged.
+    Used for :data:`_FREE_TEXT_KEYS`. Person and organization names already
+    seen under a key (see :data:`_SEEN`) are replaced first. A hostname keeps
+    its trailing root dot (``example.edu.`` in a DNS answer stays fully
+    qualified), and the text around each match — record types, TTLs, IP
+    addresses — is unchanged.
 
     Args:
         value: The free-text string.
@@ -255,20 +411,63 @@ def _scrub_text(value: str) -> str:
         dot = "." if host.endswith(".") else ""
         return _pseudo_domain(host.rstrip(".")) + dot
 
-    return _EMBEDDED_NAME.sub(repl, value)
+    return _EMBEDDED_NAME.sub(repl, _scrub_known_terms(value))
 
 
-def sanitize(node: Any, *, org_name_keys: bool = False) -> Any:
+def _scrub_activity(value: str) -> str:
+    """Pseudonymize an audit-log ``activity`` string.
+
+    Applies :data:`_ACTIVITY_RULES` first (names in known templates, even of
+    deleted objects), then the general free-text scrub.
+
+    Args:
+        value: The activity text.
+
+    Returns:
+        The scrubbed text.
+    """
+    for pattern, kind in _ACTIVITY_RULES:
+        def repl(m: re.Match[str], kind: str = kind) -> str:
+            """Replace the middle group with its pseudonym, keeping the prefix and suffix."""
+            name = m.group(2)
+            if re.fullmatch(r"(?:Name|Org|Cred)-[0-9a-f]{6}", name):
+                return m.group(0)
+            return m.group(1) + _keep(kind, name, _PSEUDO_BY_KIND[kind](name)) + m.group(3)
+
+        value = pattern.sub(repl, value)
+    return _scrub_text(value)
+
+
+def _keep(kind: str, value: str, pseudo: str) -> str:
+    """Remember ``value`` -> ``pseudo`` (see :func:`_remember`) and return ``pseudo``."""
+    _remember(kind, value, pseudo)
+    return pseudo
+
+
+def sanitize(
+    node: Any, *, org_name_keys: bool = False, label_keys: frozenset[str] = frozenset()
+) -> Any:
     """Recursively pseudonymize a JSON structure per the documented mapping.
+
+    Every person, organization, label, email and domain value it replaces is
+    remembered (:data:`_SEEN`), so later free text can be scrubbed of the
+    same names and :func:`leak_check` can verify the written output.
 
     Args:
         node: Parsed JSON value (dict, list, or scalar).
         org_name_keys: When True, bare ``name`` keys are treated as
             organization names (used for /organizations payloads).
+        label_keys: Lower-case keys whose values are credential labels for
+            this payload only (``description`` on API credentials; applying it
+            everywhere would also replace product descriptions).
 
     Returns:
         A sanitized deep copy; the input is not modified.
     """
+    def again(child: Any) -> Any:
+        """Recurse with the same options."""
+        return sanitize(child, org_name_keys=org_name_keys, label_keys=label_keys)
+
     if isinstance(node, dict):
         # A dict with an email/phone sibling is a contact record: its bare
         # ``name`` is a person name (e.g. requestor.name, signer blocks).
@@ -279,18 +478,22 @@ def sanitize(node: Any, *, org_name_keys: bool = False) -> Any:
         for key, value in node.items():
             lk = key.lower()
             if isinstance(value, str) and value:
-                if lk in _FREE_TEXT_KEYS:
+                if lk in label_keys:
+                    out[key] = _keep("label", value, _pseudo_label(value))
+                elif lk == "activity":
+                    out[key] = _scrub_activity(value)
+                elif lk in _FREE_TEXT_KEYS:
                     out[key] = _scrub_text(value)
                 elif lk in _EMAIL_KEYS or _looks_like_email(value):
-                    out[key] = _pseudo_email(value)
+                    out[key] = _keep("email", value, _pseudo_email(value))
                 elif lk in _DOMAIN_KEYS:
-                    out[key] = _pseudo_domain(value)
+                    out[key] = _keep("domain", value, _pseudo_domain(value))
                 elif lk in _PERSON_KEYS or (contact_record and lk == "name"):
-                    out[key] = f"Name-{_hash(value, 6)}"
+                    out[key] = _keep("person", value, _pseudo_person(value))
                 elif lk in _PHONE_KEYS:
                     out[key] = _pseudo_phone(value)
                 elif lk in _ORG_NAME_KEYS or (org_name_keys and lk == "name"):
-                    out[key] = f"Org-{_hash(value, 6)}"
+                    out[key] = _keep("org", value, _pseudo_org(value))
                 elif lk in _ID_KEYS:
                     out[key] = _pseudo_id(value)
                 else:
@@ -299,29 +502,111 @@ def sanitize(node: Any, *, org_name_keys: bool = False) -> Any:
                 out[key] = _pseudo_id(value)
             elif isinstance(value, list) and lk in _DOMAIN_KEYS:
                 out[key] = [
-                    _pseudo_domain(v) if isinstance(v, str) else sanitize(v, org_name_keys=org_name_keys)
-                    for v in value
+                    _keep("domain", v, _pseudo_domain(v)) if isinstance(v, str) else again(v) for v in value
                 ]
             elif isinstance(value, list) and lk in _EMAIL_KEYS:
                 out[key] = [
-                    _pseudo_email(v) if isinstance(v, str) else sanitize(v, org_name_keys=org_name_keys)
-                    for v in value
+                    _keep("email", v, _pseudo_email(v)) if isinstance(v, str) else again(v) for v in value
                 ]
             else:
-                out[key] = sanitize(value, org_name_keys=org_name_keys)
+                out[key] = again(value)
         return out
     if isinstance(node, list):
-        return [sanitize(item, org_name_keys=org_name_keys) for item in node]
+        return [again(item) for item in node]
     return node
 
 
 def sanitize_path(path: str) -> str:
-    """Pseudonymize numeric/opaque ids embedded in a request path."""
-    return re.sub(
-        r"(?<=/)(\d{2,})(?=/|$)",
-        lambda m: str(_pseudo_id(int(m.group(1)))),
-        path,
-    )
+    """Pseudonymize ids embedded in a request path.
+
+    A segment is an id when it is all digits (two or more: v2 order, domain
+    and attempt numbers) or an opaque token containing a digit (v3 order,
+    role and user ids such as ``-a1B2c3``). Version segments (``v2``,
+    ``v3``) and the ``sslcom-latest`` sentinel are kept.
+    """
+    def repl(m: re.Match[str]) -> str:
+        """Return the pseudonym for one path segment, or the segment unchanged."""
+        seg = m.group(1)
+        if re.fullmatch(r"v\d+", seg) or seg in _SENTINEL_IDS:
+            return seg
+        if seg.isdigit():
+            return str(_pseudo_id(int(seg))) if len(seg) >= 2 else seg
+        return str(_pseudo_id(seg))
+
+    return re.sub(r"(?<=/)([A-Za-z0-9_-]*\d[A-Za-z0-9_-]*)(?=/|$)", repl, path)
+
+
+def leak_check(paths: list[Path]) -> list[str]:
+    """Search written corpus files for any raw value the sanitizer replaced.
+
+    The sanitizer is key-driven, so a name that only ever appears in free
+    text under a key it doesn't know (an organization representative who is
+    not a user, say) can slip through. Every raw person, organization, email
+    and domain value seen during the run is searched for, case-insensitively,
+    in each file.
+
+    Args:
+        paths: Corpus files written by this run.
+
+    Returns:
+        One line per hit, naming the file, the kind of value, the pseudonym
+        it should have been replaced with, and up to three JSON key paths
+        where it occurs. The raw value is never included, so the report is
+        safe to print.
+    """
+    terms = [(raw.lower(), kind, pseudo) for raw, (kind, pseudo) in _SEEN.items() if len(raw) >= _MIN_LEAK_TERM]
+    hits: list[str] = []
+    for path in paths:
+        text = path.read_text(encoding="utf-8")
+        lowered = text.lower()
+        for raw, kind, pseudo in terms:
+            pattern = re.compile(r"(?<!\w)" + re.escape(raw) + r"(?!\w)")
+            if pattern.search(lowered):
+                where = _key_paths(text, pattern)
+                hits.append(
+                    f"{path.name}: raw {kind} value found (should be {pseudo})"
+                    + (f" at {', '.join(where)}" if where else "")
+                )
+    return hits
+
+
+def _key_paths(text: str, pattern: re.Pattern[str], limit: int = 3) -> list[str]:
+    """Return up to ``limit`` JSON key paths whose string value matches ``pattern``.
+
+    List indexes are collapsed to ``[]`` so the paths name fields, not rows.
+
+    Args:
+        text: The file's JSON text.
+        pattern: A lower-case pattern, matched against lower-cased values.
+        limit: Maximum number of distinct paths to return.
+
+    Returns:
+        Distinct key paths such as ``response.body.users[].role``; empty if
+        the text isn't JSON.
+    """
+    try:
+        root = json.loads(text)
+    except ValueError:
+        return []
+    found: list[str] = []
+
+    def walk(node: Any, where: str) -> None:
+        """Collect matching paths depth-first."""
+        if len(found) >= limit:
+            return
+        if isinstance(node, dict):
+            for key, value in node.items():
+                if pattern.search(str(key).lower()) and f"{where}{{key}}" not in found:
+                    found.append(f"{where}{{key}}")
+                walk(value, f"{where}.{key}" if where else str(key))
+        elif isinstance(node, list):
+            for item in node:
+                walk(item, f"{where}[]")
+        elif isinstance(node, str) and pattern.search(node.lower()) and where not in found:
+            found.append(where)
+
+    walk(root, "")
+    return found
 
 
 def raw_get(client: CertiNextClient, path: str, params: dict[str, Any] | None = None) -> httpx.Response:
@@ -339,18 +624,23 @@ def raw_get(client: CertiNextClient, path: str, params: dict[str, Any] | None = 
     return resp
 
 
-def build_client(sandbox: bool) -> CertiNextClient:
+def build_client(sandbox: bool, profile: str | None = None) -> CertiNextClient:
     """Resolve credentials (keyring, then env vars) and return a low-level client.
 
     Args:
         sandbox: Target the sandbox environment instead of production.
+        profile: Keyring profile to read the credential from. Defaults to
+            ``sandbox`` for the sandbox and the default profile for
+            production; pass one to probe with a different credential
+            (e.g. a dedicated read-only user) against the same environment.
 
     Raises:
         SystemExit: When no credentials can be resolved.
     """
     import os
 
-    profile = "sandbox" if sandbox else None
+    if profile is None:
+        profile = "sandbox" if sandbox else None
     svc = keyring_service("certinext", profile)
     env_prefix = "CERTINEXT_SANDBOX_" if sandbox else "CERTINEXT_"
     client_id = keyring_get(svc, "CERTINEXT_CLIENT_ID") or os.environ.get(env_prefix + "CLIENT_ID")
@@ -424,6 +714,7 @@ def capture(client: CertiNextClient, out_dir: Path, raw_dir: Path | None, only: 
         raw_dir.mkdir(parents=True, exist_ok=True)
 
     captured: dict[str, Any] = {}
+    written: list[Path] = []
     failures = 0
 
     def one(
@@ -433,12 +724,18 @@ def capture(client: CertiNextClient, out_dir: Path, raw_dir: Path | None, only: 
         *,
         org_names: bool = False,
         optional_404: bool = False,
+        label_keys: frozenset[str] = frozenset(),
     ) -> Any:
         """Capture one endpoint; record failures without aborting the run.
 
         ``optional_404`` turns a 404 into a note instead of a failure, for
         reads the vendor is known to refuse for some records; the existing
-        fixture for that slug is left as it was.
+        fixture for that slug is left as it was. ``label_keys`` is
+        passed to :func:`sanitize`.
+
+        Every fetched body is sanitized once before the ``only`` filter, even
+        when it isn't written, so the names it contains are remembered and
+        scrubbed from later free text.
         """
         nonlocal failures
         try:
@@ -455,6 +752,7 @@ def capture(client: CertiNextClient, out_dir: Path, raw_dir: Path | None, only: 
         except ValueError:
             body = resp.text
         captured[slug] = body
+        sanitize(body, org_name_keys=org_names, label_keys=label_keys)  # remember names
         if only is not None and not slug.startswith(only):
             return body
         headers = {k: v for k, v in resp.headers.items() if k.lower() not in _DROP_HEADERS}
@@ -463,12 +761,12 @@ def capture(client: CertiNextClient, out_dir: Path, raw_dir: Path | None, only: 
             "response": {
                 "status": resp.status_code,
                 "headers": headers,
-                "body": sanitize(body, org_name_keys=org_names),
+                "body": sanitize(body, org_name_keys=org_names, label_keys=label_keys),
             },
         }
-        (out_dir / f"{slug}.json").write_text(
-            json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-        )
+        target = out_dir / f"{slug}.json"
+        target.write_text(json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        written.append(target)
         if raw_dir:
             raw_record = {
                 "request": {"method": "GET", "path": path, "params": params},
@@ -561,7 +859,42 @@ def capture(client: CertiNextClient, out_dir: Path, raw_dir: Path | None, only: 
         if cert_ids:
             print("  note  no downloadable certificate among first 20 orders", file=sys.stderr)
 
-    return failures
+    # --- Tier 3: v3 reads (users first: audit text names them) --------------
+    v3 = "/api/v3/certinext"
+    users_body = one("v3-users", f"{v3}/users", {"pageNumber": 1, "recordLimit": 100})
+    one("v3-users-detailed", f"{v3}/users/detailed")
+    user_ids = sorted(
+        str(u["userId"]) for u in _first_list(users_body) if isinstance(u, dict) and u.get("userId")
+    )
+    if user_ids:
+        # groupId takes a v3 group id that no list exposes; userIds works.
+        one("v3-users-groups-members", f"{v3}/users/groups/members", {"userIds": user_ids[0]})
+    roles_body = one("v3-users-roles", f"{v3}/users/roles", {"pageNumber": 1, "recordLimit": 100})
+    role_ids = sorted(
+        str(r["customRoleId"]) for r in _first_list(roles_body) if isinstance(r, dict) and r.get("customRoleId")
+    )
+    if role_ids:
+        one("v3-users-roles-permissions", f"{v3}/users/roles/{role_ids[0]}/permissions")
+
+    v3_orders = one("v3-orders", f"{v3}/orders", {"pageNumber": 1, "pageSize": 100})
+    # orders/{id} takes orderId; orderNumber returns 404 "No such order".
+    order_ids = sorted(
+        str(o["orderId"]) for o in _first_list(v3_orders) if isinstance(o, dict) and o.get("orderId")
+    )
+    if order_ids:
+        one("v3-orders-detail", f"{v3}/orders/{order_ids[0]}")
+
+    # API credentials before audit logs: their labels appear in audit text.
+    one("v3-apis", f"{v3}/apis", {"pageNumber": 1, "pageSize": 100}, label_keys=frozenset({"description"}))
+    one("v3-audit-logs", f"{v3}/audit-logs", {"pageNumber": 1, "pageSize": 100})
+    one("v3-audit-logs-modules", f"{v3}/audit-logs/modules")
+    one("v3-reports-certificates", f"{v3}/reports/certificates")
+    one("v3-discovery-certificates", f"{v3}/discovery/certificates", {"pageNumber": 1, "pageSize": 100})
+
+    hits = leak_check(written)
+    for hit in hits:
+        print(f"  LEAK  {hit}", file=sys.stderr)
+    return failures + len(hits)
 
 
 def main() -> None:
@@ -580,16 +913,20 @@ def main() -> None:
         "--only", metavar="PREFIX", default=None,
         help="write only files whose slug starts with PREFIX (e.g. domains-dcv-attempts); all endpoints are still read",
     )
+    parser.add_argument(
+        "--profile", default=None,
+        help="keyring profile holding the credential (default: the environment's usual profile)",
+    )
     args = parser.parse_args()
 
     env = "sandbox" if args.sandbox else "prod"
-    client = build_client(args.sandbox)
+    client = build_client(args.sandbox, args.profile)
     out_dir = Path(args.out_root) / env
     raw_dir = Path(args.keep_raw) / env if args.keep_raw else None
     print(f"Capturing {env} corpus to {out_dir} (read-only GETs)", file=sys.stderr)
     failures = capture(client, out_dir, raw_dir, args.only)
     if failures:
-        print(f"{failures} endpoint(s) failed — corpus incomplete", file=sys.stderr)
+        print(f"{failures} endpoint failure(s) or leak(s) — do not commit; see FAIL/LEAK lines", file=sys.stderr)
         raise SystemExit(1)
     print("Done. Review the diff before committing (sanitization gate).", file=sys.stderr)
 
