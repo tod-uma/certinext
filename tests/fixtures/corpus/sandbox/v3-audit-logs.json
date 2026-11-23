@@ -1,0 +1,838 @@
+{
+  "request": {
+    "method": "GET",
+    "params": {
+      "pageNumber": 1,
+      "pageSize": 100
+    },
+    "path": "/api/v3/certinext/audit-logs"
+  },
+  "response": {
+    "body": {
+      "auditLogs": [
+        {
+          "activity": "API credential 'Cred-aa62ec' updated.",
+          "auditLogId": "id-906c9e48",
+          "module": "ACME APIs",
+          "status": "Success",
+          "timestamp": "12 Nov 2026 (12:48)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "ACME EAB credentials for Cred-b154f4 deleted",
+          "auditLogId": "id-578367e0",
+          "module": "ACME APIs",
+          "status": "Success",
+          "timestamp": "12 Nov 2026 (12:47)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "ACME EAB credentials for Cred-61e027 deleted",
+          "auditLogId": "id-df4e19a2",
+          "module": "ACME APIs",
+          "status": "Success",
+          "timestamp": "12 Nov 2026 (12:47)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "API credential 'Cred-775bf5' updated.",
+          "auditLogId": "id-938f338e",
+          "module": "ACME APIs",
+          "status": "Success",
+          "timestamp": "12 Nov 2026 (12:47)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "API credential 'Cred-7a5c66' updated.",
+          "auditLogId": "id-13c1d9bc",
+          "module": "ACME APIs",
+          "status": "Success",
+          "timestamp": "12 Nov 2026 (12:47)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "API credential 'Cred-9950b9' updated.",
+          "auditLogId": "id-55b9dc41",
+          "module": "ACME APIs",
+          "status": "Success",
+          "timestamp": "12 Nov 2026 (12:46)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "API credential 'Cred-481177' updated.",
+          "auditLogId": "id-b426205e",
+          "module": "ACME APIs",
+          "status": "Success",
+          "timestamp": "12 Nov 2026 (12:46)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "API credential 'Cred-02bb2d' updated.",
+          "auditLogId": "id-d616fd49",
+          "module": "ACME APIs",
+          "status": "Success",
+          "timestamp": "12 Nov 2026 (12:46)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "API credential 'Cred-44a03c' updated.",
+          "auditLogId": "id-5dc163db",
+          "module": "ACME APIs",
+          "status": "Success",
+          "timestamp": "12 Nov 2026 (12:45)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "API credential 'Cred-367d66' updated.",
+          "auditLogId": "id-cc544ad4",
+          "module": "ACME APIs",
+          "status": "Success",
+          "timestamp": "12 Nov 2026 (12:45)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "API credential 'Cred-b3d41d' updated.",
+          "auditLogId": "id-42970048",
+          "module": "ACME APIs",
+          "status": "Success",
+          "timestamp": "12 Nov 2026 (12:45)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "ACME APIs page viewed",
+          "auditLogId": "id-d9f45f3f",
+          "module": "ACME APIs",
+          "status": "Success",
+          "timestamp": "12 Nov 2026 (12:45)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "Logged in via Password",
+          "auditLogId": "id-5dc83103",
+          "module": "Other Common Activities",
+          "status": "Success",
+          "timestamp": "12 Nov 2026 (12:44)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "Logged in via Password",
+          "auditLogId": "id-f4b59ca2",
+          "module": "Other Common Activities",
+          "status": "Success",
+          "timestamp": "10 Nov 2026 (17:04)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "Viewed Domain Details Grid",
+          "auditLogId": "id-395741a6",
+          "module": "Domains",
+          "status": "Success",
+          "timestamp": "10 Nov 2026 (16:13)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "Manage Orders page viewed",
+          "auditLogId": "id-ff445241",
+          "module": "Orders",
+          "status": "Success",
+          "timestamp": "10 Nov 2026 (16:13)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "Domain viewed",
+          "auditLogId": "id-b88403b1",
+          "module": "Domains",
+          "status": "Success",
+          "timestamp": "10 Nov 2026 (16:06)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "Viewed Domain Details Grid",
+          "auditLogId": "id-92044395",
+          "module": "Domains",
+          "status": "Success",
+          "timestamp": "10 Nov 2026 (16:06)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "Manage Orders page viewed",
+          "auditLogId": "id-6e520cfe",
+          "module": "Orders",
+          "status": "Success",
+          "timestamp": "10 Nov 2026 (16:06)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "Viewed Domain Details Grid",
+          "auditLogId": "id-62817eaf",
+          "module": "Domains",
+          "status": "Success",
+          "timestamp": "10 Nov 2026 (16:06)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "Manage Orders page viewed",
+          "auditLogId": "id-e114bde6",
+          "module": "Orders",
+          "status": "Success",
+          "timestamp": "10 Nov 2026 (16:06)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "Domain viewed",
+          "auditLogId": "id-81061a19",
+          "module": "Domains",
+          "status": "Success",
+          "timestamp": "10 Nov 2026 (16:06)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "Viewed Domain Details Grid",
+          "auditLogId": "id-8b62d827",
+          "module": "Domains",
+          "status": "Success",
+          "timestamp": "10 Nov 2026 (16:03)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "Manage Orders page viewed",
+          "auditLogId": "id-1d9945ba",
+          "module": "Orders",
+          "status": "Success",
+          "timestamp": "10 Nov 2026 (16:03)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "Viewed Domain Details Grid",
+          "auditLogId": "id-3cae113c",
+          "module": "Domains",
+          "status": "Success",
+          "timestamp": "10 Nov 2026 (16:01)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "Manage Orders page viewed",
+          "auditLogId": "id-4361ab42",
+          "module": "Orders",
+          "status": "Success",
+          "timestamp": "10 Nov 2026 (16:01)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "Viewed Domain Details Grid",
+          "auditLogId": "id-4b21dd18",
+          "module": "Domains",
+          "status": "Success",
+          "timestamp": "10 Nov 2026 (16:01)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "Viewed Domain Details Grid",
+          "auditLogId": "id-6fb72eb7",
+          "module": "Domains",
+          "status": "Success",
+          "timestamp": "10 Nov 2026 (16:00)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "Viewed Domain Details Grid",
+          "auditLogId": "id-2070b90f",
+          "module": "Domains",
+          "status": "Success",
+          "timestamp": "10 Nov 2026 (15:58)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "Manage Orders page viewed",
+          "auditLogId": "id-6feb53bd",
+          "module": "Orders",
+          "status": "Success",
+          "timestamp": "10 Nov 2026 (15:58)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "Logged in via Password",
+          "auditLogId": "id-09d3a58d",
+          "module": "Other Common Activities",
+          "status": "Success",
+          "timestamp": "10 Nov 2026 (15:57)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "New domain x3a572ee.edu created",
+          "auditLogId": "id-c9bec611",
+          "module": "Domains",
+          "status": "Success",
+          "timestamp": "10 Nov 2026 (15:48)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "New domain xa0f1d02.edu created",
+          "auditLogId": "id-e55bdc46",
+          "module": "Domains",
+          "status": "Success",
+          "timestamp": "10 Nov 2026 (15:48)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "New domain xddb211e.edu created",
+          "auditLogId": "id-3a42df22",
+          "module": "Domains",
+          "status": "Success",
+          "timestamp": "10 Nov 2026 (15:48)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "New domain xc29ff5b.edu created",
+          "auditLogId": "id-91928775",
+          "module": "Domains",
+          "status": "Success",
+          "timestamp": "10 Nov 2026 (15:47)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "New domain x0fd0010.edu created",
+          "auditLogId": "id-f11d1c34",
+          "module": "Domains",
+          "status": "Success",
+          "timestamp": "10 Nov 2026 (15:47)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "New domain x9d8b25e.org created",
+          "auditLogId": "id-83e4279f",
+          "module": "Domains",
+          "status": "Success",
+          "timestamp": "10 Nov 2026 (15:47)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "New domain xdea3402.org created",
+          "auditLogId": "id-b6575a83",
+          "module": "Domains",
+          "status": "Success",
+          "timestamp": "10 Nov 2026 (15:47)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "New domain xe3aef83.org created",
+          "auditLogId": "id-722e6469",
+          "module": "Domains",
+          "status": "Success",
+          "timestamp": "10 Nov 2026 (15:47)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "New domain xd60d789.net created",
+          "auditLogId": "id-fe0932d7",
+          "module": "Domains",
+          "status": "Success",
+          "timestamp": "10 Nov 2026 (15:47)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "New domain x6738722.org created",
+          "auditLogId": "id-c33e72d8",
+          "module": "Domains",
+          "status": "Success",
+          "timestamp": "10 Nov 2026 (15:47)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "New domain x1b37c72.org created",
+          "auditLogId": "id-e93a5b94",
+          "module": "Domains",
+          "status": "Success",
+          "timestamp": "10 Nov 2026 (15:47)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "New domain x4bec134.edu created",
+          "auditLogId": "id-c02c2710",
+          "module": "Domains",
+          "status": "Success",
+          "timestamp": "10 Nov 2026 (15:47)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "New domain x998f7b7.org created",
+          "auditLogId": "id-7315effc",
+          "module": "Domains",
+          "status": "Success",
+          "timestamp": "10 Nov 2026 (15:47)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "New domain x5fef735.org created",
+          "auditLogId": "id-7f74164f",
+          "module": "Domains",
+          "status": "Success",
+          "timestamp": "10 Nov 2026 (15:47)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "New domain x112c80a.edu created",
+          "auditLogId": "id-f51846dd",
+          "module": "Domains",
+          "status": "Success",
+          "timestamp": "10 Nov 2026 (15:47)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "New domain x67b71a5.org created",
+          "auditLogId": "id-25cf36de",
+          "module": "Domains",
+          "status": "Success",
+          "timestamp": "10 Nov 2026 (15:46)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "New domain x104a7e7.org created",
+          "auditLogId": "id-bf66f6d2",
+          "module": "Domains",
+          "status": "Success",
+          "timestamp": "10 Nov 2026 (15:46)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "New domain x0837fb3.edu created",
+          "auditLogId": "id-2a1fb6db",
+          "module": "Domains",
+          "status": "Success",
+          "timestamp": "10 Nov 2026 (15:45)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "New domain x3236999.net created",
+          "auditLogId": "id-23ff201f",
+          "module": "Domains",
+          "status": "Success",
+          "timestamp": "10 Nov 2026 (13:53)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "View Order page viewed",
+          "auditLogId": "id-7b922ec0",
+          "module": "Orders",
+          "status": "Success",
+          "timestamp": "09 Nov 2026 (20:15)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "Manage Orders page viewed",
+          "auditLogId": "id-3bc2f695",
+          "module": "Orders",
+          "status": "Success",
+          "timestamp": "09 Nov 2026 (20:14)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "API credential Cred-6bdd0d updated",
+          "auditLogId": "id-994151fd",
+          "module": "REST APIs",
+          "status": "Success",
+          "timestamp": "09 Nov 2026 (19:58)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "ACME APIs page viewed",
+          "auditLogId": "id-659e0574",
+          "module": "ACME APIs",
+          "status": "Success",
+          "timestamp": "09 Nov 2026 (19:58)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "Logged in via Password",
+          "auditLogId": "id-123da73b",
+          "module": "Other Common Activities",
+          "status": "Success",
+          "timestamp": "09 Nov 2026 (19:58)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "View Order page viewed",
+          "auditLogId": "id-d81a5fb4",
+          "module": "Orders",
+          "status": "Success",
+          "timestamp": "09 Nov 2026 (17:59)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "Manage Orders page viewed",
+          "auditLogId": "id-60edcc54",
+          "module": "Orders",
+          "status": "Success",
+          "timestamp": "09 Nov 2026 (17:59)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "View Order page viewed",
+          "auditLogId": "id-030fa439",
+          "module": "Orders",
+          "status": "Success",
+          "timestamp": "09 Nov 2026 (17:57)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "Manage Orders page viewed",
+          "auditLogId": "id-9442eda6",
+          "module": "Orders",
+          "status": "Success",
+          "timestamp": "09 Nov 2026 (17:55)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "View Order page viewed",
+          "auditLogId": "id-92a05541",
+          "module": "Orders",
+          "status": "Success",
+          "timestamp": "09 Nov 2026 (17:55)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "Manage Orders page viewed",
+          "auditLogId": "id-96961d32",
+          "module": "Orders",
+          "status": "Success",
+          "timestamp": "09 Nov 2026 (17:55)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "Logged in via Password",
+          "auditLogId": "id-9b16851b",
+          "module": "Other Common Activities",
+          "status": "Success",
+          "timestamp": "09 Nov 2026 (17:55)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "Manage Orders page viewed",
+          "auditLogId": "id-d8c8ce43",
+          "module": "Orders",
+          "status": "Success",
+          "timestamp": "09 Nov 2026 (16:24)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "Logged in via Password",
+          "auditLogId": "id-f644ac17",
+          "module": "Other Common Activities",
+          "status": "Success",
+          "timestamp": "09 Nov 2026 (16:23)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "ACME APIs page viewed",
+          "auditLogId": "id-0278ae3d",
+          "module": "ACME APIs",
+          "status": "Success",
+          "timestamp": "09 Nov 2026 (15:35)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "View Order page viewed",
+          "auditLogId": "id-24a0b36a",
+          "module": "Orders",
+          "status": "Success",
+          "timestamp": "09 Nov 2026 (15:26)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "Viewed Domain Details Grid",
+          "auditLogId": "id-ce63128a",
+          "module": "Domains",
+          "status": "Success",
+          "timestamp": "09 Nov 2026 (15:21)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "Manage Orders page viewed",
+          "auditLogId": "id-8e2e2540",
+          "module": "Orders",
+          "status": "Success",
+          "timestamp": "09 Nov 2026 (15:21)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "Logged in via Password",
+          "auditLogId": "id-ba7e06f3",
+          "module": "Other Common Activities",
+          "status": "Success",
+          "timestamp": "09 Nov 2026 (15:20)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "ACME APIs page viewed",
+          "auditLogId": "id-f4e85441",
+          "module": "ACME APIs",
+          "status": "Success",
+          "timestamp": "09 Nov 2026 (14:44)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "Logged in via Password",
+          "auditLogId": "id-97a6792d",
+          "module": "Other Common Activities",
+          "status": "Success",
+          "timestamp": "09 Nov 2026 (14:44)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "View Order page viewed",
+          "auditLogId": "id-e7440f83",
+          "module": "Orders",
+          "status": "Success",
+          "timestamp": "09 Nov 2026 (13:29)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "ACME EAB credentials for Cred-61e027 revoked",
+          "auditLogId": "id-adb9a86d",
+          "module": "ACME APIs",
+          "status": "Success",
+          "timestamp": "09 Nov 2026 (13:28)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "Manage Orders page viewed",
+          "auditLogId": "id-9e8fbf7a",
+          "module": "Orders",
+          "status": "Success",
+          "timestamp": "09 Nov 2026 (13:26)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "API credential Cred-758641 updated",
+          "auditLogId": "id-402d6e85",
+          "module": "REST APIs",
+          "status": "Success",
+          "timestamp": "09 Nov 2026 (13:22)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "ACME APIs page viewed",
+          "auditLogId": "id-193c01e7",
+          "module": "ACME APIs",
+          "status": "Success",
+          "timestamp": "09 Nov 2026 (13:21)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "View User page viewed",
+          "auditLogId": "id-676ddb22",
+          "module": "Users",
+          "status": "Success",
+          "timestamp": "09 Nov 2026 (13:08)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "Users page viewed",
+          "auditLogId": "id-9de6b4e6",
+          "module": "Users",
+          "status": "Success",
+          "timestamp": "09 Nov 2026 (13:08)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "View Group page viewed",
+          "auditLogId": "id-a3b2ac65",
+          "module": "Groups",
+          "status": "Success",
+          "timestamp": "09 Nov 2026 (13:04)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "Groups page viewed",
+          "auditLogId": "id-503c7d69",
+          "module": "Groups",
+          "status": "Success",
+          "timestamp": "09 Nov 2026 (13:04)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "Groups page viewed",
+          "auditLogId": "id-05c6b823",
+          "module": "Groups",
+          "status": "Success",
+          "timestamp": "09 Nov 2026 (13:04)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "Manage Orders page viewed",
+          "auditLogId": "id-b307efd5",
+          "module": "Orders",
+          "status": "Success",
+          "timestamp": "09 Nov 2026 (13:03)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "ACME APIs page viewed",
+          "auditLogId": "id-7b77ab85",
+          "module": "ACME APIs",
+          "status": "Success",
+          "timestamp": "09 Nov 2026 (13:01)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "Logged in via Password",
+          "auditLogId": "id-84d88bcf",
+          "module": "Other Common Activities",
+          "status": "Success",
+          "timestamp": "09 Nov 2026 (13:01)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "View Order page viewed",
+          "auditLogId": "id-a834b8db",
+          "module": "Orders",
+          "status": "Success",
+          "timestamp": "06 Nov 2026 (21:47)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "New Certificate Request page viewed",
+          "auditLogId": "id-c881f427",
+          "module": "Orders",
+          "status": "Success",
+          "timestamp": "06 Nov 2026 (21:46)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "Manage Orders page viewed",
+          "auditLogId": "id-e6c56fe3",
+          "module": "Orders",
+          "status": "Success",
+          "timestamp": "06 Nov 2026 (21:46)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "Groups page viewed",
+          "auditLogId": "id-6dd518e3",
+          "module": "Groups",
+          "status": "Success",
+          "timestamp": "06 Nov 2026 (21:44)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "group updation",
+          "auditLogId": "id-e047f67d",
+          "module": "Groups",
+          "status": "Success",
+          "timestamp": "06 Nov 2026 (21:44)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "New Group Org-04e7ff created",
+          "auditLogId": "id-ecd4cfc3",
+          "module": "Groups",
+          "status": "Success",
+          "timestamp": "06 Nov 2026 (21:44)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "View Group page viewed",
+          "auditLogId": "id-b6223a01",
+          "module": "Groups",
+          "status": "Success",
+          "timestamp": "06 Nov 2026 (21:44)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "Groups page viewed",
+          "auditLogId": "id-46e91763",
+          "module": "Groups",
+          "status": "Success",
+          "timestamp": "06 Nov 2026 (21:44)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "group updation",
+          "auditLogId": "id-5945fd7b",
+          "module": "Groups",
+          "status": "Failed",
+          "timestamp": "06 Nov 2026 (21:44)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "View Group page viewed",
+          "auditLogId": "id-6c71875b",
+          "module": "Groups",
+          "status": "Success",
+          "timestamp": "06 Nov 2026 (21:43)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "Groups page viewed",
+          "auditLogId": "id-fe595f4f",
+          "module": "Groups",
+          "status": "Success",
+          "timestamp": "06 Nov 2026 (21:43)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "API credential Cred-6bdd0d updated",
+          "auditLogId": "id-7ebc8b89",
+          "module": "REST APIs",
+          "status": "Success",
+          "timestamp": "06 Nov 2026 (21:43)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "API credential Cred-758641 updated",
+          "auditLogId": "id-34275218",
+          "module": "REST APIs",
+          "status": "Success",
+          "timestamp": "06 Nov 2026 (21:43)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "ACME APIs page viewed",
+          "auditLogId": "id-b366a71c",
+          "module": "ACME APIs",
+          "status": "Success",
+          "timestamp": "06 Nov 2026 (21:41)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "Users page viewed",
+          "auditLogId": "id-42a7c42e",
+          "module": "Users",
+          "status": "Success",
+          "timestamp": "06 Nov 2026 (21:41)",
+          "userName": "Name-c5eddb"
+        },
+        {
+          "activity": "ACME APIs page viewed",
+          "auditLogId": "id-fe2c394b",
+          "module": "ACME APIs",
+          "status": "Success",
+          "timestamp": "06 Nov 2026 (21:41)",
+          "userName": "Name-c5eddb"
+        }
+      ],
+      "pageNumber": 1,
+      "pageSize": 100,
+      "totalResults": 630
+    },
+    "headers": {
+      "access-control-allow-methods": "GET, POST",
+      "cache-control": "no-cache,no-store,private,must-revalidate,max-stale=0,post-check=0,pre-check=0",
+      "connection": "keep-alive",
+      "content-security-policy": "frame-ancestors 'self';manifest-src 'self';",
+      "content-type": "application/json",
+      "date": "Mon, 23 Nov 2026 17:29:07 GMT",
+      "expires": "Thu, 01 Jan 1970 00:00:00 GMT",
+      "pragma": "no-cache",
+      "referrer-policy": "origin-when-cross-origin",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-content-type-options": "nosniff",
+      "x-frame-options": "DENY",
+      "x-time-zone": "Z",
+      "x-xss-protection": "0; mode=block"
+    },
+    "status": 200
+  }
+}

@@ -1,0 +1,227 @@
+{
+  "request": {
+    "method": "GET",
+    "params": null,
+    "path": "/api/v3/certinext/users/roles/id-df5e2f92/permissions"
+  },
+  "response": {
+    "body": {
+      "permissions": [
+        {
+          "module": "Dashboard",
+          "name": "See certificate statistics tile",
+          "permissionId": "6"
+        },
+        {
+          "module": "Dashboard",
+          "name": "See user statistics tile",
+          "permissionId": "7"
+        },
+        {
+          "module": "Dashboard",
+          "name": "See domains statistics tile",
+          "permissionId": "9"
+        },
+        {
+          "module": "Dashboard",
+          "name": "See organizations statistics tile",
+          "permissionId": "10"
+        },
+        {
+          "module": "Dashboard",
+          "name": "See bot statistics tile",
+          "permissionId": "188"
+        },
+        {
+          "module": "Dashboard",
+          "name": "See endpoint statistics tile",
+          "permissionId": "189"
+        },
+        {
+          "module": "Dashboard",
+          "name": "See key statistics tile",
+          "permissionId": "190"
+        },
+        {
+          "module": "Orders-Quick Actions",
+          "name": "Download own certificate",
+          "permissionId": "83"
+        },
+        {
+          "module": "Orders-Quick Actions",
+          "name": "Attach documents to own order",
+          "permissionId": "85"
+        },
+        {
+          "module": "Orders-Quick Actions",
+          "name": "Download interim DV certificate for own order",
+          "permissionId": "86"
+        },
+        {
+          "module": "Orders-Quick Actions",
+          "name": "Replace CSR on own order",
+          "permissionId": "88"
+        },
+        {
+          "module": "New Certificate Request",
+          "name": "Start a new certificate request",
+          "permissionId": "15"
+        },
+        {
+          "module": "Orders-Quick Actions",
+          "name": "Download own invoice",
+          "permissionId": "84"
+        },
+        {
+          "module": "Orders-Quick Actions",
+          "name": "Renew own order",
+          "permissionId": "87"
+        },
+        {
+          "module": "Orders-Quick Actions",
+          "name": "Recall own pending request",
+          "permissionId": "90"
+        },
+        {
+          "module": "Orders-Quick Actions",
+          "name": "Submit CSR for own order",
+          "permissionId": "92"
+        },
+        {
+          "module": "Orders-Quick Actions",
+          "name": "Cancel own order",
+          "permissionId": "93"
+        },
+        {
+          "module": "Orders-Quick Actions",
+          "name": "Add or remove SANs on own order",
+          "permissionId": "94"
+        },
+        {
+          "module": "Orders-Quick Actions",
+          "name": "Reissue own order",
+          "permissionId": "95"
+        },
+        {
+          "module": "Orders-Quick Actions",
+          "name": "Revoke own certificate",
+          "permissionId": "96"
+        },
+        {
+          "module": "Orders-Quick Actions",
+          "name": "Suspend own certificate",
+          "permissionId": "135"
+        },
+        {
+          "module": "Orders",
+          "name": "Edit own order",
+          "permissionId": "206"
+        },
+        {
+          "module": "Orders",
+          "name": "Approve own pending order (self-approval)",
+          "permissionId": "209"
+        },
+        {
+          "module": "Orders",
+          "name": "Export own orders to file",
+          "permissionId": "237"
+        },
+        {
+          "module": "Certificates",
+          "name": "View own certificates",
+          "permissionId": "250"
+        },
+        {
+          "module": "Organizations",
+          "name": "View own organizations",
+          "permissionId": "280"
+        },
+        {
+          "module": "Certificate Authorities",
+          "name": "Download all CA certificates as bundle",
+          "permissionId": "143"
+        },
+        {
+          "module": "Certificate Authorities",
+          "name": "Download CA certificate",
+          "permissionId": "144"
+        },
+        {
+          "module": "Certificate Authorities",
+          "name": "Download CRL for a CA",
+          "permissionId": "145"
+        },
+        {
+          "module": "Certificate Authorities",
+          "name": "Download CA certificate chain",
+          "permissionId": "178"
+        },
+        {
+          "module": "CertificateAuthorities",
+          "name": "View the Certificate Authorities list",
+          "permissionId": "310"
+        },
+        {
+          "module": "Discovery",
+          "name": "Manage CT log monitoring entries",
+          "permissionId": "148"
+        },
+        {
+          "module": "Discovery",
+          "name": "Add a domain to CT log monitoring",
+          "permissionId": "149"
+        },
+        {
+          "module": "Discovery",
+          "name": "View own discovered certificates",
+          "permissionId": "330"
+        },
+        {
+          "module": "APIs",
+          "name": "Create New API Credentials",
+          "permissionId": "185"
+        },
+        {
+          "module": "Integration",
+          "name": "View own REST API keys",
+          "permissionId": "420"
+        },
+        {
+          "module": "Integration",
+          "name": "Generate own REST API key",
+          "permissionId": "422"
+        },
+        {
+          "module": "Integration",
+          "name": "View own ACME EAB credentials",
+          "permissionId": "427"
+        },
+        {
+          "module": "Integration",
+          "name": "View API credential status history (audit trail)",
+          "permissionId": "636"
+        }
+      ]
+    },
+    "headers": {
+      "access-control-allow-methods": "GET, POST",
+      "cache-control": "no-cache,no-store,private,must-revalidate,max-stale=0,post-check=0,pre-check=0",
+      "connection": "keep-alive",
+      "content-security-policy": "frame-ancestors 'self';manifest-src 'self';",
+      "content-type": "application/json",
+      "date": "Mon, 23 Nov 2026 17:29:21 GMT",
+      "expires": "Thu, 01 Jan 1970 00:00:00 GMT",
+      "pragma": "no-cache",
+      "referrer-policy": "origin-when-cross-origin",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-content-type-options": "nosniff",
+      "x-frame-options": "DENY",
+      "x-time-zone": "Z",
+      "x-xss-protection": "0; mode=block"
+    },
+    "status": 200
+  }
+}
