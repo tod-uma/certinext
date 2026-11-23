@@ -16,6 +16,8 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 
 from .accounts import AccountAccessor
+from .api_credentials import ApiCredentialAccessor
+from .audit import AuditAccessor
 from .catalog import CatalogAccessor
 from .client import CertiNextClient, TimeoutSpec
 from .domains import DomainAccessor
@@ -23,6 +25,8 @@ from .ledger import LedgerAccessor
 from .orders import OrderAccessor
 from .retry import RetryPolicy
 from .ssl_certificates import SslAccessor
+from .users import UserAccessor
+from .v3_orders import V3OrderAccessor
 
 
 class CertiNextSession:
@@ -45,6 +49,11 @@ class CertiNextSession:
         ledger: Accessor for the Ledger Report API. See `LedgerAccessor`.
         orders: Accessor for the Orders Report API. See `OrderAccessor`.
         ssl: Accessor for the SSL/TLS Certificates API. See `SslAccessor`.
+        api_credentials: Accessor for the v3 API-credentials list. See `ApiCredentialAccessor`.
+        audit: Accessor for the v3 audit log. See `AuditAccessor`.
+        users: Accessor for v3 users, custom roles and group membership. See `UserAccessor`.
+        v3_orders: Accessor for the v3 orders list and detail, a different
+            order set from ``orders``. See `V3OrderAccessor`.
     """
 
     def __init__(
@@ -93,6 +102,10 @@ class CertiNextSession:
         self.ledger = LedgerAccessor(self._client)
         self.orders = OrderAccessor(self._client)
         self.ssl = SslAccessor(self._client)
+        self.api_credentials = ApiCredentialAccessor(self._client)
+        self.audit = AuditAccessor(self._client)
+        self.users = UserAccessor(self._client)
+        self.v3_orders = V3OrderAccessor(self._client)
 
     @property
     def retry(self) -> RetryPolicy | None:

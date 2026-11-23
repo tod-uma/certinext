@@ -37,6 +37,7 @@ Python library and CLI scripts for managing your [CertiNext](https://us.certinex
   - [Working with accounts](#working-with-accounts)
   - [Working with the catalog](#working-with-the-catalog)
   - [Working with the ledger](#working-with-the-ledger)
+  - [Working with v3 CLM data](#working-with-v3-clm-data)
   - [Working with SSL/TLS certificates](#working-with-ssltls-certificates)
   - [Error handling](#error-handling)
 - [Examples](#examples)
@@ -2452,6 +2453,54 @@ page = sess.ledger.get_page(page=1, size=50)
 `get_list()` paginates automatically. `LedgerRecord.to_row()` returns a flat
 `dict[str, str]` suitable for tabular display (the CLI renders it with `rich`).
 
+### Working with v3 CLM data
+
+Four read-only accessors cover the vendor's v3 paths (`/api/v3/certinext/`):
+the audit log, users and roles, API credentials, and v3 orders.
+
+```python
+from datetime import date, timedelta
+
+# Audit log, filtered by whole day; de-duplicate on audit_log_id
+for e in sess.audit.get_list(since=date.today() - timedelta(days=1)):
+    print(e.timestamp, e.module, e.status, e.user_name, e.activity)
+modules = sess.audit.list_modules()
+
+# Users, custom roles, permissions, group membership
+users = sess.users.get_list()
+details = sess.users.list_detailed()       # extra fields: designation, is_active, user_blocked, ...
+for role in sess.users.list_roles():
+    perms = sess.users.role_permissions(role.custom_role_id)
+members = sess.users.group_members(user_ids=[u.user_id for u in users[:5]])
+
+# API credentials (metadata only, never secrets)
+creds = sess.api_credentials.get_list()
+
+# v3 orders: list, and detail by order_id (not order_number, which 404s)
+orders = sess.v3_orders.get_list()
+detail = sess.v3_orders.get(orders[0].order_id)
+print(detail.certificate.serial_number, detail.issuer_ca.subordinate_ca)
+```
+
+> **Note:** v3 dates are display strings (`05 Feb 2027 (16:59)`) with no
+> offset marker. **They are UTC**, and the models parse them UTC-aware. In
+> November 2026 v3 order dates matched the v2 report's UTC dates to the minute
+> for every order present in both, in prod and sandbox, across a DST change, and
+> portal logins appeared in the audit log stamped with the UTC minute. The raw
+> strings stay available through `as_dict()`. (`discovery/certificates` renders
+> dates in some local zone; it has no accessor.)
+>
+> **Note:** `sess.v3_orders` and `sess.orders` (the v2 report) return
+> **different order sets**. v3 includes unsubmitted portal drafts
+> (`order_status == "Auto Save"`) and leaves out most v2 "Order Accepted"
+> orders, many of them ACME. Every issued certificate is in both. The v3 detail
+> has **no order history**, despite the vendor spec's description.
+>
+> **Note:** v3 lists are scoped to what the credential's user may see, so a
+> less-privileged credential returns fewer rows while still answering 200.
+> Only filters verified against the live API are exposed (audit
+> `since`/`until`, orders `exclude_ignored`).
+
 ### Working with SSL/TLS certificates
 
 `sess.ssl` covers the full certificate lifecycle. Product codes are resolved
@@ -2825,6 +2874,8 @@ certinext/
         __init__.py, _base.py      #   CertiNextModel base, lenient_enum, coerce_flag
         accounts.py, catalog.py, domains.py, ledger.py, orders.py,
         ssl_certificates.py        #   per-API-area model classes; legacy modules below re-export these
+        api_credentials.py, audit.py, users.py,
+        v3_orders.py               #   v3 CLM models (display-date parsing in _base.py)
     _config.py                     # stored issue-cert defaults (config.toml load/merge/save; writes via tomlkit)
     _keyring.py                    # shared keyring helpers (keyring_service, keyring_get, keyring_available)
     _chain.py                      # certificate-chain re-sorting (leaf-first signing order; GitLab #4)
@@ -2845,7 +2896,13 @@ certinext/
     ledger.py                      # LedgerRecord and LedgerAccessor
     orders.py                      # OrderRecord and OrderAccessor
     replacement.py                 # replacement criteria, classification, report for `certinext replacement-report`
-    session.py                     # CertiNextSession (accounts, catalog, domain, ledger, orders, ssl)
+    session.py                     # CertiNextSession (accounts, catalog, domain, ledger, orders, ssl,
+                                  #   api_credentials, audit, users, v3_orders)
+    _v3.py                         # v3 CLM envelope unwrapping and paging (totalResults, recordLimit)
+    api_credentials.py             # ApiCredentialAccessor (v3 /apis)
+    audit.py                       # AuditAccessor (v3 /audit-logs)
+    users.py                       # UserAccessor (v3 /users, roles, group members)
+    v3_orders.py                   # V3OrderAccessor (v3 /orders list and detail)
     ssl_certificates.py            # SslOrder, DcvChallenge, CertificateDownload, SslAccessor, OrderWorkflow
                                   #   SslAccessor.create() — DV/OV/EV dispatcher
                                   #   CertificateDownload.as_pem_chain() — leaf-first fullchain

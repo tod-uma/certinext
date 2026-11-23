@@ -69,6 +69,8 @@ from .accounts import (
     Organization,
     OrgCaValidation,
 )
+from .api_credentials import ApiCredential, ApiCredentialAccessor
+from .audit import AuditAccessor, AuditLogEntry
 from .catalog import CatalogAccessor, CustomField, Product, ProductCategory
 from .client import CertiNextClient, TimeoutSpec
 from .csr import CsrInfo
@@ -110,6 +112,8 @@ from .ssl_certificates import (
     SslOrder,
     SslOrderStatus,
 )
+from .users import CustomRole, GroupMember, RolePermission, User, UserAccessor, UserDetail
+from .v3_orders import V3CertificateInfo, V3IssuerCA, V3Order, V3OrderAccessor, V3OrderDetail, V3Requestor
 
 # Python 3.10 is deprecated (ADR 0027): still supported and tested, but it will
 # be dropped when one of the ADR's triggers fires. FutureWarning, not
@@ -286,4 +290,21 @@ __all__ = [
     "SslAccessor",
     "SslOrder",
     "SslOrderStatus",
+    # v3 CLM (read-only)
+    "ApiCredential",
+    "ApiCredentialAccessor",
+    "AuditAccessor",
+    "AuditLogEntry",
+    "CustomRole",
+    "GroupMember",
+    "RolePermission",
+    "User",
+    "UserAccessor",
+    "UserDetail",
+    "V3CertificateInfo",
+    "V3IssuerCA",
+    "V3Order",
+    "V3OrderAccessor",
+    "V3OrderDetail",
+    "V3Requestor",
 ]

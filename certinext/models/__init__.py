@@ -22,6 +22,8 @@ documented public API for 1.0.
 
 from ._base import CertiNextModel, coerce_flag, lenient_enum
 from .accounts import AccountInfo, BusinessCategory, CaLevelValidation, Group, Organization, OrgCaValidation
+from .api_credentials import ApiCredential
+from .audit import AuditLogEntry
 from .catalog import CustomField, Product, ProductCategory
 from .dcv_attempts import SSLCOM_LATEST, DcvAttempt, DcvAttemptSummary, DcvDiagnostics
 from .domains import (
@@ -46,6 +48,8 @@ from .ssl_certificates import (
     SslOrder,
     SslOrderStatus,
 )
+from .users import CustomRole, GroupMember, RolePermission, User, UserDetail
+from .v3_orders import V3CertificateInfo, V3IssuerCA, V3Order, V3OrderDetail, V3Requestor
 
 __all__ = [
     "CertiNextModel",
@@ -83,4 +87,16 @@ __all__ = [
     "RevocationReason",
     "SslOrder",
     "SslOrderStatus",
+    "ApiCredential",
+    "AuditLogEntry",
+    "CustomRole",
+    "GroupMember",
+    "RolePermission",
+    "User",
+    "UserDetail",
+    "V3CertificateInfo",
+    "V3IssuerCA",
+    "V3Order",
+    "V3OrderDetail",
+    "V3Requestor",
 ]

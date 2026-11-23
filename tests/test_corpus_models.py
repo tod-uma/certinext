@@ -28,6 +28,7 @@ neither registered nor excluded fails the coverage test loudly.
 
 import json
 from collections.abc import Callable
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -35,12 +36,16 @@ import pytest
 
 from certinext.models import CertiNextModel
 from certinext.models.accounts import AccountInfo, Group, Organization
+from certinext.models.api_credentials import ApiCredential
+from certinext.models.audit import AuditLogEntry
 from certinext.models.catalog import ProductCategory
 from certinext.models.dcv_attempts import DcvAttempt, DcvAttemptSummary
 from certinext.models.domains import DcvInfo, Domain
 from certinext.models.ledger import LedgerRecord
 from certinext.models.orders import OrderRecord
 from certinext.models.ssl_certificates import CertificateDownload, SslOrder
+from certinext.models.users import CustomRole, GroupMember, RolePermission, User, UserDetail
+from certinext.models.v3_orders import V3Order, V3OrderDetail
 
 _CORPUS_ROOT = Path(__file__).parent / "fixtures" / "corpus"
 _ENVS = ("prod", "sandbox")
@@ -112,7 +117,21 @@ REGISTRY: dict[str, tuple[type[CertiNextModel], Callable[[Any], list[dict[str, A
     "domains-dcv-attempts-last-sslcom.json": (DcvAttempt, _single),
     "ssl-certificates-detail.json": (SslOrder, _single),
     "ssl-certificates-certificate.json": (CertificateDownload, _single),
+    # v3 CLM (2026-11-23 capture)
+    "v3-apis.json": (ApiCredential, _wrapped("credentials")),
+    "v3-audit-logs.json": (AuditLogEntry, _wrapped("auditLogs")),
+    "v3-orders.json": (V3Order, _wrapped("orders")),
+    "v3-orders-detail.json": (V3OrderDetail, _single),
+    "v3-users.json": (User, _wrapped("users")),
+    "v3-users-detailed.json": (UserDetail, _wrapped("users")),
+    "v3-users-groups-members.json": (GroupMember, _wrapped("members")),
+    "v3-users-roles.json": (CustomRole, _wrapped("customRoles")),
+    "v3-users-roles-permissions.json": (RolePermission, _wrapped("permissions")),
 }
+
+# v3 files whose models declare every wire key: a key the model doesn't
+# declare is a missed field, not tolerated drift, until the next capture.
+V3_FULLY_MODELLED = frozenset(f for f in REGISTRY if f.startswith("v3-"))
 
 # Registered files whose captured payload legitimately has zero rows (the
 # non-empty assertion is waived; the account state, not the model, is why).
@@ -126,16 +145,9 @@ EMPTY_OK: dict[str, str] = {
 NOT_YET_COVERED: dict[str, str] = {
     "domains-dcv.json": "covered by test_corpus_dcv_info_from_wire (DcvInfo is a value object, not a row model)",
     "healthcheck-2026-07-02.json": "permanent: healthcheck report artifact, not an API payload",
-    # v3 captures (2026-11-23). Their models and accessors come next; each
-    # entry moves to REGISTRY as its model lands.
-    **{
-        f"v3-{slug}.json": "pending: v3 model not written yet"
-        for slug in (
-            "apis", "audit-logs", "audit-logs-modules", "discovery-certificates", "orders",
-            "orders-detail", "reports-certificates", "users", "users-detailed",
-            "users-groups-members", "users-roles", "users-roles-permissions",
-        )
-    },
+    "v3-audit-logs-modules.json": "covered by test_corpus_audit_modules (a list of strings, not a row model)",
+    "v3-reports-certificates.json": "permanent until #35: body is only {'status': 'success'}, no rows to model",
+    "v3-discovery-certificates.json": "pending: discovery is not read by any consumer yet; model when one needs it",
 }
 
 
@@ -159,6 +171,64 @@ def test_corpus_rows_parse(env: str, filename: str) -> None:
         instance = model_cls.model_validate(row)
         # ADR 0005 escape hatch: the exact wire dict stays reachable.
         assert instance.as_dict() is row
+
+
+def _extras(instance: CertiNextModel, prefix: str = "") -> list[str]:
+    """Return undeclared wire keys on ``instance`` and its nested models.
+
+    Args:
+        instance: A validated model.
+        prefix: Dotted path of ``instance`` within its parent.
+
+    Returns:
+        Dotted names of every key that landed in ``model_extra``.
+    """
+    found = [f"{prefix}{k}" for k in (instance.model_extra or {})]
+    for name in type(instance).model_fields:
+        value = getattr(instance, name)
+        if isinstance(value, CertiNextModel):
+            found.extend(_extras(value, f"{prefix}{name}."))
+    return found
+
+
+def _v3_cases() -> list[tuple[str, str]]:
+    """Return (env, filename) pairs for the fully modelled v3 files."""
+    return [(env, f) for env, f in _registered_cases() if f in V3_FULLY_MODELLED]
+
+
+@pytest.mark.parametrize(("env", "filename"), _v3_cases())
+def test_v3_models_declare_every_wire_key(env: str, filename: str) -> None:
+    """No captured v3 key falls through to ``model_extra``."""
+    model_cls, extract = REGISTRY[filename]
+    missed = sorted({k for row in extract(_load_body(env, filename)) for k in _extras(model_cls.model_validate(row))})
+    assert not missed, f"{env}/{filename}: undeclared keys {missed}"
+
+
+@pytest.mark.parametrize(("env", "filename"), _v3_cases())
+def test_v3_display_dates_parse(env: str, filename: str) -> None:
+    """Every non-empty v3 date string parses (none silently drops to ``None``)."""
+    model_cls, extract = REGISTRY[filename]
+
+    def _check(instance: CertiNextModel, raw: dict[str, Any]) -> None:
+        for name, field in type(instance).model_fields.items():
+            value = getattr(instance, name)
+            wire = raw.get(field.alias or name)
+            if isinstance(value, CertiNextModel) and isinstance(wire, dict):
+                _check(value, wire)
+            elif field.annotation == (datetime | None) and isinstance(wire, str) and wire:
+                assert isinstance(value, datetime), f"{env}/{filename}: {field.alias}={wire!r} did not parse"
+                assert value.tzinfo == timezone.utc, f"{env}/{filename}: {field.alias} tzinfo {value.tzinfo!r}"
+
+    for row in extract(_load_body(env, filename)):
+        _check(model_cls.model_validate(row), row)
+
+
+@pytest.mark.parametrize("env", _ENVS)
+def test_corpus_audit_modules(env: str) -> None:
+    """The audit module list is a non-empty list of strings."""
+    body = _load_body(env, "v3-audit-logs-modules.json")
+    assert isinstance(body, list) and body
+    assert all(isinstance(m, str) and m for m in body)
 
 
 @pytest.mark.parametrize("env", _ENVS)

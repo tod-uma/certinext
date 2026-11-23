@@ -14,7 +14,9 @@ run `certinext healthcheck` before relying on any endpoint.
 
 - [README](README.md): full CLI reference (one subcommand per section),
   Python library reference (`sess.domain`, `sess.orders`, `sess.accounts`,
-  `sess.catalog`, `sess.ledger`, `sess.ssl`), credentials/config/keyring
+  `sess.catalog`, `sess.ledger`, `sess.ssl`, and the read-only v3
+  `sess.audit`, `sess.users`, `sess.api_credentials`, `sess.v3_orders`),
+  credentials/config/keyring
   setup, error handling, and known vendor-API quirks (search for "Note:").
 - [AGENTS.md](AGENTS.md): operational facts for coding agents working in
   this repo — dev setup, test/lint/type-check commands, release process,
