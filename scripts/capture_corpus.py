@@ -765,7 +765,8 @@ def capture(client: CertiNextClient, out_dir: Path, raw_dir: Path | None, only: 
             },
         }
         target = out_dir / f"{slug}.json"
-        target.write_text(json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        # newline="\n": LF on every platform, matching the committed corpus (#44).
+        target.write_text(json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n")
         written.append(target)
         if raw_dir:
             raw_record = {
@@ -773,7 +774,7 @@ def capture(client: CertiNextClient, out_dir: Path, raw_dir: Path | None, only: 
                 "response": {"status": resp.status_code, "headers": headers, "body": body},
             }
             (raw_dir / f"{slug}.json").write_text(
-                json.dumps(raw_record, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+                json.dumps(raw_record, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n"
             )
         print(f"  ok    {slug}", file=sys.stderr)
         return body

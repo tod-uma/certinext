@@ -275,3 +275,36 @@ class TestLeakCheck:
         f = tmp_path / "x.json"
         f.write_text('{"note": "Robinson"}', encoding="utf-8")
         assert fresh.leak_check([f]) == []
+
+
+class _FakeResponse:
+    """Minimal stand-in for an ``httpx.Response`` returned by ``raw_get``."""
+
+    status_code = 200
+    headers: dict[str, str] = {}
+    text = "{}"
+
+    def json(self) -> dict[str, object]:
+        """Return an empty JSON object body.
+
+        Returns:
+            An empty dict.
+        """
+        return {}
+
+
+class TestCaptureLineEndings:
+    """Captured fixtures are written with LF line endings on every platform (#44)."""
+
+    def test_written_files_have_no_cr(
+        self, fresh: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Neither sanitized nor ``--keep-raw`` output contains a CR byte."""
+        monkeypatch.setattr(fresh, "raw_get", lambda client, path, params=None: _FakeResponse())
+        monkeypatch.setattr(fresh, "leak_check", lambda paths: [])
+        out_dir, raw_dir = tmp_path / "out", tmp_path / "raw"
+        fresh.capture(None, out_dir, raw_dir, only="auth-me")
+        written = [*out_dir.glob("*.json"), *raw_dir.glob("*.json")]
+        assert len(written) == 2
+        for path in written:
+            assert b"\r" not in path.read_bytes(), path.name

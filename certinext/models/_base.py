@@ -37,12 +37,16 @@ Implements the validation policy of ADR 0005 (lenient response models):
   convention out-of-band despite the field itself being ambiguous (e.g.
   ``OrderRecord.order_date``/``.certificate_expiry_date`` — GitLab issue
   #20 / vendor ticket #136598).
+- ``_V3DisplayDatetimeUTC`` parses the v3 CLM display format
+  ``DD Mon YYYY (HH:MM)`` as UTC (verified for v3 orders and the audit
+  log; see :func:`_v3_display_datetime_utc`).
 
 Models for each API area live in sibling modules (``models.catalog``,
 ``models.accounts``, ...) and are re-exported from the legacy module
 locations (``certinext.catalog``, ...) so import paths stay stable.
 """
 
+import re
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Annotated, Any, TypeVar
@@ -181,6 +185,22 @@ def coerce_flag(value: Any) -> bool:
     return bool(value)
 
 
+def _optional_flag(value: Any) -> bool | None:
+    """Coerce a vendor flag to ``bool``, keeping an absent value as ``None``.
+
+    Args:
+        value: The raw wire value.
+
+    Returns:
+        ``None`` for ``None``, otherwise :func:`coerce_flag` of the value.
+    """
+    return None if value is None else coerce_flag(value)
+
+
+_OptionalFlag = Annotated[bool | None, BeforeValidator(_optional_flag)]
+"""A ``"0"``/``"1"`` (or other truthy/falsy) flag that may be absent."""
+
+
 def _lenient_datetime(value: Any) -> datetime | None:
     """Parse a wire timestamp into a timezone-aware datetime, or ``None``.
 
@@ -229,3 +249,82 @@ def _lenient_datetime_utc(value: Any) -> datetime | None:
 
 
 _LenientDatetimeUTC = Annotated[datetime | None, BeforeValidator(_lenient_datetime_utc)]
+
+
+_MONTHS = {
+    name: number
+    for number, name in enumerate(
+        ("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"), start=1
+    )
+}
+_V3_DISPLAY_DATE = re.compile(r"^\s*(\d{1,2}) ([A-Za-z]{3}) (\d{4})(?: \((\d{1,2}):(\d{2})\))?\s*$")
+
+
+def _v3_display_datetime(value: Any) -> datetime | None:
+    """Parse a v3 CLM display date (``DD Mon YYYY (HH:MM)``) into a naive datetime.
+
+    The v3 paths (``/api/v3/certinext/...``) send display strings, not ISO
+    8601, with no offset marker. Models use :data:`_V3DisplayDatetimeUTC`,
+    which wraps this parser and attaches UTC.
+
+    The month is matched against a fixed English table rather than
+    ``strptime``'s ``%b``, which depends on the process locale. A date
+    without the ``(HH:MM)`` part parses as midnight. Absent, empty and
+    unparseable values yield ``None`` (ADR 0005); the raw string stays
+    reachable through ``as_dict()``.
+
+    Args:
+        value: The raw wire value.
+
+    Returns:
+        The parsed naive datetime, or ``None``.
+    """
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value
+    match = _V3_DISPLAY_DATE.match(str(value))
+    if match is None:
+        return None
+    day, month_name, year, hour, minute = match.groups()
+    month = _MONTHS.get(month_name.lower())
+    if month is None:
+        return None
+    try:
+        return datetime(int(year), month, int(day), int(hour or 0), int(minute or 0))
+    except ValueError:
+        return None
+
+
+def _v3_display_datetime_utc(value: Any) -> datetime | None:
+    """Parse a v3 CLM display date as UTC into a UTC-aware datetime.
+
+    Verified on 2026-11-23, prod and sandbox:
+
+    - v3 orders: ``requestedDate`` and ``expiresOn`` equalled v2
+      ``/reports/orders``' ``orderDate`` and ``certificateExpiryDate``
+      (vendor-confirmed UTC, #20) to the minute, for 1,533 prod and 151
+      sandbox orders across July to November, so across a DST change.
+    - Audit log: portal logins made at a noted time appeared with that UTC
+      minute as their ``timestamp``.
+    - ``users/profile`` has no timezone setting.
+
+    User, role and credential ``createdDate`` values had no reference to
+    check against; they are taken as UTC because two independent v3
+    endpoints are. ``discovery/certificates`` is the exception: its
+    ``expiresOn`` is in some local zone, and it is not modelled.
+
+    Args:
+        value: The raw wire value.
+
+    Returns:
+        The parsed datetime with ``tzinfo=UTC``, or ``None``.
+    """
+    parsed = _v3_display_datetime(value)
+    if parsed is not None and parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+_V3DisplayDatetimeUTC = Annotated[datetime | None, BeforeValidator(_v3_display_datetime_utc)]
+"""A v3 display date verified to be UTC, parsed UTC-aware; see :func:`_v3_display_datetime_utc`."""
