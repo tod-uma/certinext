@@ -126,6 +126,16 @@ EMPTY_OK: dict[str, str] = {
 NOT_YET_COVERED: dict[str, str] = {
     "domains-dcv.json": "covered by test_corpus_dcv_info_from_wire (DcvInfo is a value object, not a row model)",
     "healthcheck-2026-07-02.json": "permanent: healthcheck report artifact, not an API payload",
+    # v3 captures (2026-11-23). Their models and accessors come next; each
+    # entry moves to REGISTRY as its model lands.
+    **{
+        f"v3-{slug}.json": "pending: v3 model not written yet"
+        for slug in (
+            "apis", "audit-logs", "audit-logs-modules", "discovery-certificates", "orders",
+            "orders-detail", "reports-certificates", "users", "users-detailed",
+            "users-groups-members", "users-roles", "users-roles-permissions",
+        )
+    },
 }
 
 

@@ -1,0 +1,206 @@
+{
+  "request": {
+    "method": "GET",
+    "params": {
+      "pageNumber": 1,
+      "pageSize": 100
+    },
+    "path": "/api/v3/certinext/apis"
+  },
+  "response": {
+    "body": {
+      "credentials": [
+        {
+          "apiType": "ACME",
+          "caConnector": "EMSIGN",
+          "createdDate": "03 Sep 2026 (19:51)",
+          "credentialId": "id-3dab52ef",
+          "description": "Cred-b3d41d",
+          "group": "Org-5b1c19",
+          "products": "SSL.com OV SSL Wildcard UCC",
+          "status": "Active",
+          "tags": [],
+          "user": "Name-d53c61"
+        },
+        {
+          "apiType": "ACME",
+          "caConnector": "EMSIGN",
+          "createdDate": "03 Sep 2026 (19:20)",
+          "credentialId": "id-56f6e0d1",
+          "description": "Cred-367d66",
+          "group": "Org-5b1c19",
+          "products": "SSL.com OV SSL Wildcard UCC",
+          "status": "Active",
+          "tags": [],
+          "user": "Name-d53c61"
+        },
+        {
+          "apiType": "ACME",
+          "caConnector": "EMSIGN",
+          "createdDate": "02 Sep 2026 (19:52)",
+          "credentialId": "id-b9eac931",
+          "description": "Cred-44a03c",
+          "group": "Org-5b1c19",
+          "products": "SSL.com OV SSL Wildcard UCC",
+          "status": "Active",
+          "tags": [],
+          "user": "Name-d53c61"
+        },
+        {
+          "apiType": "REST",
+          "caConnector": null,
+          "createdDate": "14 Jul 2026 (18:45)",
+          "credentialId": "id-d9e4bb77",
+          "description": "Cred-f8b622",
+          "group": "Org-f8b622",
+          "products": null,
+          "status": "Active",
+          "tags": [],
+          "user": "Name-dcecf2"
+        },
+        {
+          "apiType": "ACME",
+          "caConnector": "EMSIGN",
+          "createdDate": "06 Jul 2026 (16:21)",
+          "credentialId": "id-8d885db2",
+          "description": "Cred-02bb2d",
+          "group": "Org-04e7ff",
+          "products": "SSL.com DV SSL UCC",
+          "status": "Active",
+          "tags": [],
+          "user": "Name-dcecf2"
+        },
+        {
+          "apiType": "REST",
+          "caConnector": "SSLCOM",
+          "createdDate": "24 Jun 2026 (12:02)",
+          "credentialId": "id-c61335ab",
+          "description": "Cred-758641",
+          "group": "Org-04e7ff",
+          "products": null,
+          "status": "Active",
+          "tags": [],
+          "user": "Name-c5eddb"
+        },
+        {
+          "apiType": "REST",
+          "caConnector": null,
+          "createdDate": "23 Jun 2026 (17:46)",
+          "credentialId": "id-d3af2610",
+          "description": "Cred-dbb466",
+          "group": "Org-04e7ff",
+          "products": null,
+          "status": "Active",
+          "tags": [],
+          "user": "Name-dcecf2"
+        },
+        {
+          "apiType": "REST",
+          "caConnector": null,
+          "createdDate": "16 Jun 2026 (15:00)",
+          "credentialId": "id-69d25702",
+          "description": "Cred-70481b",
+          "group": "Org-d47d75",
+          "products": null,
+          "status": "Active",
+          "tags": [],
+          "user": "Name-d53c61"
+        },
+        {
+          "apiType": "REST",
+          "caConnector": "SSLCOM",
+          "createdDate": "27 May 2026 (13:52)",
+          "credentialId": "id-15153b21",
+          "description": "Cred-6bdd0d",
+          "group": "Org-04e7ff",
+          "products": null,
+          "status": "Active",
+          "tags": [],
+          "user": "Name-c5eddb"
+        },
+        {
+          "apiType": "ACME",
+          "caConnector": "EMSIGN",
+          "createdDate": "21 May 2026 (14:17)",
+          "credentialId": "id-79a2281f",
+          "description": "Cred-481177",
+          "group": "Org-d47d75",
+          "products": "SSL.com DV SSL UCC",
+          "status": "Active",
+          "tags": [],
+          "user": "Name-e5784d"
+        },
+        {
+          "apiType": "ACME",
+          "caConnector": "EMSIGN",
+          "createdDate": "21 May 2026 (14:17)",
+          "credentialId": "id-37d38efc",
+          "description": "Cred-9950b9",
+          "group": "Org-b425a8",
+          "products": "SSL.com OV SSL UCC",
+          "status": "Active",
+          "tags": [],
+          "user": "Name-c5eddb"
+        },
+        {
+          "apiType": "ACME",
+          "caConnector": "EMSIGN",
+          "createdDate": "21 May 2026 (14:17)",
+          "credentialId": "id-53ab6e8d",
+          "description": "Cred-7a5c66",
+          "group": "Org-b425a8",
+          "products": "SSL.com DV SSL UCC",
+          "status": "Active",
+          "tags": [],
+          "user": "Name-c5eddb"
+        },
+        {
+          "apiType": "ACME",
+          "caConnector": "EMSIGN",
+          "createdDate": "21 May 2026 (14:17)",
+          "credentialId": "id-5dff3a1a",
+          "description": "Cred-775bf5",
+          "group": "Org-b425a8",
+          "products": "SSL.com OV SSL UCC",
+          "status": "Active",
+          "tags": [],
+          "user": "Name-c5eddb"
+        },
+        {
+          "apiType": "ACME",
+          "caConnector": "EMSIGN",
+          "createdDate": "21 May 2026 (14:17)",
+          "credentialId": "id-7ad4a804",
+          "description": "Cred-aa62ec",
+          "group": "Org-d47d75",
+          "products": "SSL.com OV SSL UCC",
+          "status": "Active",
+          "tags": [],
+          "user": "Name-e5784d"
+        }
+      ],
+      "pageNumber": 1,
+      "pageSize": 100,
+      "totalResults": 14
+    },
+    "headers": {
+      "access-control-allow-methods": "GET, POST",
+      "cache-control": "no-cache,no-store,private,must-revalidate,max-stale=0,post-check=0,pre-check=0",
+      "connection": "keep-alive",
+      "content-security-policy": "frame-ancestors 'self';manifest-src 'self';",
+      "content-type": "application/json",
+      "date": "Mon, 23 Nov 2026 17:29:07 GMT",
+      "expires": "Thu, 01 Jan 1970 00:00:00 GMT",
+      "pragma": "no-cache",
+      "referrer-policy": "origin-when-cross-origin",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-content-type-options": "nosniff",
+      "x-frame-options": "DENY",
+      "x-time-zone": "Z",
+      "x-xss-protection": "0; mode=block"
+    },
+    "status": 200
+  }
+}

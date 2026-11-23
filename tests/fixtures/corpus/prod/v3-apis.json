@@ -1,0 +1,290 @@
+{
+  "request": {
+    "method": "GET",
+    "params": {
+      "pageNumber": 1,
+      "pageSize": 100
+    },
+    "path": "/api/v3/certinext/apis"
+  },
+  "response": {
+    "body": {
+      "credentials": [
+        {
+          "apiType": "ACME",
+          "caConnector": "EMSIGN",
+          "createdDate": "16 Jul 2026 (19:05)",
+          "credentialId": "id-2c58bc81",
+          "description": "Cred-7e4c12",
+          "group": "Org-d47d75",
+          "products": "SSL.com DV SSL UCC",
+          "status": "Active",
+          "tags": [],
+          "user": "Name-dcecf2"
+        },
+        {
+          "apiType": "REST",
+          "caConnector": "SSLCOM",
+          "createdDate": "16 Jul 2026 (14:09)",
+          "credentialId": "id-9ead1a9e",
+          "description": "Cred-2dda1a",
+          "group": "Org-d47d75",
+          "products": null,
+          "status": "Active",
+          "tags": [],
+          "user": "Name-4b25a4"
+        },
+        {
+          "apiType": "REST",
+          "caConnector": "SSLCOM",
+          "createdDate": "14 Jul 2026 (18:41)",
+          "credentialId": "id-553581cf",
+          "description": "Cred-f8b622",
+          "group": "Org-f8b622",
+          "products": null,
+          "status": "Active",
+          "tags": [],
+          "user": "Name-dcecf2"
+        },
+        {
+          "apiType": "ACME",
+          "caConnector": "EMSIGN",
+          "createdDate": "06 Jul 2026 (18:05)",
+          "credentialId": "id-f124d8bc",
+          "description": "Cred-f2105f",
+          "group": "Org-f2105f",
+          "products": "SSL.com DV SSL UCC",
+          "status": "Active",
+          "tags": [],
+          "user": "Name-dcecf2"
+        },
+        {
+          "apiType": "REST",
+          "caConnector": "SSLCOM",
+          "createdDate": "25 Jun 2026 (11:42)",
+          "credentialId": "id-0041ac4c",
+          "description": "Cred-758641",
+          "group": "Org-d47d75",
+          "products": null,
+          "status": "Active",
+          "tags": [],
+          "user": "Name-0d4717"
+        },
+        {
+          "apiType": "REST",
+          "caConnector": "SSLCOM",
+          "createdDate": "12 Jun 2026 (20:22)",
+          "credentialId": "id-fb3b698f",
+          "description": "Cred-252241",
+          "group": "Org-d47d75",
+          "products": null,
+          "status": "Active",
+          "tags": [],
+          "user": "Name-d53c61"
+        },
+        {
+          "apiType": "REST",
+          "caConnector": "SSLCOM",
+          "createdDate": "12 Jun 2026 (13:12)",
+          "credentialId": "id-45f9ed01",
+          "description": "Cred-562ae9",
+          "group": "Org-d47d75",
+          "products": null,
+          "status": "Active",
+          "tags": [],
+          "user": "Name-1b054e"
+        },
+        {
+          "apiType": "ACME",
+          "caConnector": "EMSIGN",
+          "createdDate": "04 Jun 2026 (23:53)",
+          "credentialId": "id-39161fb4",
+          "description": "Cred-31c420",
+          "group": "Org-161289",
+          "products": "SSL.com DV SSL UCC",
+          "status": "Active",
+          "tags": [],
+          "user": "Name-0d4717"
+        },
+        {
+          "apiType": "ACME",
+          "caConnector": "EMSIGN",
+          "createdDate": "03 Jun 2026 (21:29)",
+          "credentialId": "id-0d522cac",
+          "description": "Cred-161289",
+          "group": "Org-d47d75",
+          "products": "SSL.com DV SSL UCC",
+          "status": "Active",
+          "tags": [],
+          "user": "Name-0d4717"
+        },
+        {
+          "apiType": "ACME",
+          "caConnector": "EMSIGN",
+          "createdDate": "20 May 2026 (19:00)",
+          "credentialId": "id-3b6d8ba4",
+          "description": "Cred-0539a1",
+          "group": "Org-d47d75",
+          "products": "SSL.com DV SSL UCC",
+          "status": "Active",
+          "tags": [],
+          "user": "Name-c5eddb"
+        },
+        {
+          "apiType": "ACME",
+          "caConnector": "EMSIGN",
+          "createdDate": "12 May 2026 (16:56)",
+          "credentialId": "id-2e246e21",
+          "description": "Cred-a7753f",
+          "group": "Org-d47d75",
+          "products": "SSL.com DV SSL Wildcard UCC",
+          "status": "Active",
+          "tags": [],
+          "user": "Name-c5eddb"
+        },
+        {
+          "apiType": "REST",
+          "caConnector": "SSLCOM",
+          "createdDate": "06 May 2026 (19:23)",
+          "credentialId": "id-6773611d",
+          "description": "Cred-a00311",
+          "group": null,
+          "products": null,
+          "status": "Active",
+          "tags": [],
+          "user": "Name-c5eddb"
+        },
+        {
+          "apiType": "ACME",
+          "caConnector": "EMSIGN",
+          "createdDate": "06 May 2026 (13:50)",
+          "credentialId": "id-2a7981e1",
+          "description": "Cred-f4c56a",
+          "group": "Org-d47d75",
+          "products": "SSL.com DV SSL UCC",
+          "status": "Active",
+          "tags": [],
+          "user": "Name-c5eddb"
+        },
+        {
+          "apiType": "ACME",
+          "caConnector": "EMSIGN",
+          "createdDate": "05 May 2026 (13:44)",
+          "credentialId": "id-cf251595",
+          "description": "Cred-872d64",
+          "group": "Org-d47d75",
+          "products": "SSL.com DV SSL UCC",
+          "status": "Active",
+          "tags": [],
+          "user": "Name-c5eddb"
+        },
+        {
+          "apiType": "ACME",
+          "caConnector": "EMSIGN",
+          "createdDate": "04 May 2026 (21:27)",
+          "credentialId": "id-cc06ef99",
+          "description": "Cred-aa62ec",
+          "group": "Org-d47d75",
+          "products": "SSL.com DV SSL",
+          "status": "Active",
+          "tags": [],
+          "user": "Name-4dc9a3"
+        },
+        {
+          "apiType": "ACME",
+          "caConnector": "EMSIGN",
+          "createdDate": "04 May 2026 (21:27)",
+          "credentialId": "id-6c098732",
+          "description": "Cred-481177",
+          "group": "Org-d47d75",
+          "products": "SSL.com DV SSL",
+          "status": "Active",
+          "tags": [],
+          "user": "Name-4dc9a3"
+        },
+        {
+          "apiType": "ACME",
+          "caConnector": "EMSIGN",
+          "createdDate": "04 May 2026 (21:27)",
+          "credentialId": "id-1e88383d",
+          "description": "Cred-b154f4",
+          "group": "Org-d47d75",
+          "products": "SSL.com DV SSL",
+          "status": "Active",
+          "tags": [],
+          "user": "Name-4dc9a3"
+        },
+        {
+          "apiType": "ACME",
+          "caConnector": "EMSIGN",
+          "createdDate": "04 May 2026 (21:27)",
+          "credentialId": "id-c428f898",
+          "description": "Cred-9950b9",
+          "group": "Org-b425a8",
+          "products": "SSL.com DV SSL",
+          "status": "Active",
+          "tags": [],
+          "user": "Name-c5eddb"
+        },
+        {
+          "apiType": "ACME",
+          "caConnector": "EMSIGN",
+          "createdDate": "04 May 2026 (21:27)",
+          "credentialId": "id-8f01ccb0",
+          "description": "Cred-775bf5",
+          "group": "Org-b425a8",
+          "products": "SSL.com DV SSL",
+          "status": "Active",
+          "tags": [],
+          "user": "Name-c5eddb"
+        },
+        {
+          "apiType": "ACME",
+          "caConnector": "EMSIGN",
+          "createdDate": "04 May 2026 (21:27)",
+          "credentialId": "id-552e6dec",
+          "description": "Cred-61e027",
+          "group": "Org-b425a8",
+          "products": "SSL.com DV SSL",
+          "status": "Active",
+          "tags": [],
+          "user": "Name-c5eddb"
+        },
+        {
+          "apiType": "ACME",
+          "caConnector": "EMSIGN",
+          "createdDate": "04 May 2026 (21:27)",
+          "credentialId": "id-7a02b676",
+          "description": "Cred-7a5c66",
+          "group": "Org-b425a8",
+          "products": "SSL.com DV SSL",
+          "status": "Active",
+          "tags": [],
+          "user": "Name-c5eddb"
+        }
+      ],
+      "pageNumber": 1,
+      "pageSize": 100,
+      "totalResults": 21
+    },
+    "headers": {
+      "access-control-allow-methods": "GET, POST",
+      "cache-control": "no-cache,no-store,private,must-revalidate,max-stale=0,post-check=0,pre-check=0",
+      "connection": "keep-alive",
+      "content-security-policy": "frame-ancestors 'self';manifest-src 'self';",
+      "content-type": "application/json",
+      "date": "Mon, 23 Nov 2026 17:29:22 GMT",
+      "expires": "Thu, 01 Jan 1970 00:00:00 GMT",
+      "pragma": "no-cache",
+      "referrer-policy": "origin-when-cross-origin",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-content-type-options": "nosniff",
+      "x-frame-options": "DENY",
+      "x-time-zone": "Z",
+      "x-xss-protection": "0; mode=block"
+    },
+    "status": 200
+  }
+}

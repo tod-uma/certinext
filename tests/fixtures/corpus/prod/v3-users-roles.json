@@ -1,0 +1,68 @@
+{
+  "request": {
+    "method": "GET",
+    "params": {
+      "pageNumber": 1,
+      "recordLimit": 100
+    },
+    "path": "/api/v3/certinext/users/roles"
+  },
+  "response": {
+    "body": {
+      "customRoles": [
+        {
+          "createdDate": "06 Oct 2026 (15:44)",
+          "customRoleId": "id-461826c1",
+          "customRoleName": "Org-93c7e0",
+          "status": "Active"
+        },
+        {
+          "createdDate": "25 Sep 2026 (15:44)",
+          "customRoleId": "id-78c3b836",
+          "customRoleName": "API User",
+          "status": "Active"
+        },
+        {
+          "createdDate": "16 Jul 2026 (17:53)",
+          "customRoleId": "id-df5e2f92",
+          "customRoleName": "ISO Issuer",
+          "status": "Active"
+        },
+        {
+          "createdDate": "14 Jul 2026 (18:32)",
+          "customRoleId": "id-57cf9591",
+          "customRoleName": "Name-dcecf2 DCV",
+          "status": "Active"
+        },
+        {
+          "createdDate": "06 Jul 2026 (17:54)",
+          "customRoleId": "id-98f301d1",
+          "customRoleName": "Name-dcecf2",
+          "status": "Active"
+        }
+      ],
+      "pageNumber": 1,
+      "pageSize": 100,
+      "totalResults": 5
+    },
+    "headers": {
+      "access-control-allow-methods": "GET, POST",
+      "cache-control": "no-cache,no-store,private,must-revalidate,max-stale=0,post-check=0,pre-check=0",
+      "connection": "keep-alive",
+      "content-security-policy": "frame-ancestors 'self';manifest-src 'self';",
+      "content-type": "application/json",
+      "date": "Mon, 23 Nov 2026 17:29:21 GMT",
+      "expires": "Thu, 01 Jan 1970 00:00:00 GMT",
+      "pragma": "no-cache",
+      "referrer-policy": "origin-when-cross-origin",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-content-type-options": "nosniff",
+      "x-frame-options": "DENY",
+      "x-time-zone": "Z",
+      "x-xss-protection": "0; mode=block"
+    },
+    "status": 200
+  }
+}

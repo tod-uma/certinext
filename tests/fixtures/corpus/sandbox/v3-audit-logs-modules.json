@@ -1,0 +1,42 @@
+{
+  "request": {
+    "method": "GET",
+    "params": null,
+    "path": "/api/v3/certinext/audit-logs/modules"
+  },
+  "response": {
+    "body": [
+      "Account Configuration",
+      "ACME APIs",
+      "API's",
+      "Authentication",
+      "Domains",
+      "Groups",
+      "Manage Organizations",
+      "Orders",
+      "Organizations",
+      "Other common activities",
+      "REST APIs",
+      "Users"
+    ],
+    "headers": {
+      "access-control-allow-methods": "GET, POST",
+      "cache-control": "no-cache,no-store,private,must-revalidate,max-stale=0,post-check=0,pre-check=0",
+      "connection": "keep-alive",
+      "content-security-policy": "frame-ancestors 'self';manifest-src 'self';",
+      "content-type": "application/json",
+      "date": "Mon, 23 Nov 2026 17:29:08 GMT",
+      "expires": "Thu, 01 Jan 1970 00:00:00 GMT",
+      "pragma": "no-cache",
+      "referrer-policy": "origin-when-cross-origin",
+      "strict-transport-security": "max-age=31536000; includeSubDomains",
+      "transfer-encoding": "chunked",
+      "vary": "Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+      "x-content-type-options": "nosniff",
+      "x-frame-options": "DENY",
+      "x-time-zone": "Z",
+      "x-xss-protection": "0; mode=block"
+    },
+    "status": 200
+  }
+}
