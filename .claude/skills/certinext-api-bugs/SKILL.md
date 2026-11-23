@@ -1,6 +1,6 @@
 ---
 name: certinext-api-bugs
-description: Known CertiNext vendor API bugs and quirks in certificate ordering (SSL.com, X-Product-Code, EMS-1162) and in domain listing and filtering. Use when editing certinext/ssl_certificates.py, certinext/domains.py, certinext/cli/issue_cert.py, dcv_update.py, or README.md sections about ordering certificates or listing domains, or when an order fails with EMS-1162 Invalid Product Code. Also when creating SSL.com domain records or debugging dns-persist DCV (a 400 on create, a verify that 422s with MPIC failed, or `policy=wildcard`).
+description: Known CertiNext vendor API bugs and quirks in certificate ordering (SSL.com, X-Product-Code, EMS-1162) and in domain listing and filtering. Use when editing certinext/ssl_certificates.py, certinext/domains.py, certinext/cli/issue_cert.py, dcv_update.py, or README.md sections about ordering certificates or listing domains, or when an order fails with EMS-1162 Invalid Product Code. Also when creating SSL.com domain records or debugging dns-persist DCV (a 400 on create, a verify that 422s with MPIC failed, or `policy=wildcard`). Also for the v3 CLM paths (`/api/v3/certinext/` orders, audit-logs, users, roles, apis, discovery), their paging parameters, 404 on `orders/{id}`, 400 on `users/groups/members`, or when capturing fixtures with `scripts/capture_corpus.py` or probing a credential with `scripts/probe_access.py`.
 ---
 
 ## Ordering from SSL.com (GitLab #39, vendor #187868, ADR 0020 amendment)
@@ -156,6 +156,50 @@ of #38), so a name with more than 200 rows is still complete.
 **`validatedBy` list filter** was in the sandbox spec only as of 2026-11-05.
 `get_list(validated_by=...)` sends it and then filters again client-side,
 because a prod that ignored it would return rows from every CA.
+
+## v3 CLM paths (`/api/v3/certinext/`, probed 2026-11-23, prod and sandbox)
+
+These are the reads the Splunk ingest needs (audit logs, users, roles, API
+credentials, orders). Fixtures are `tests/fixtures/corpus/{prod,sandbox}/v3-*.json`;
+`scripts/probe_access.py` re-runs every probe below with any credential.
+
+- **Envelope:** `totalResults`, `pageNumber`, `pageSize` plus a list key that
+  differs per path (`orders`, `auditLogs`, `users`, `customRoles`,
+  `credentials`, `certificates`, `members`). `users/detailed` and
+  `audit-logs/modules` are bare arrays. Stop paging on `totalResults` and on a
+  short page.
+- **Page-size parameter differs.** `orders`, `audit-logs`, `apis` and
+  `discovery/certificates` take `pageNumber`/`pageSize`; `users` and
+  `users/roles` take `pageNumber`/**`recordLimit`** (per the spec). On `users`,
+  `pageSize` is ignored and the page defaults to 20, which looks like a cap
+  until you send `recordLimit`.
+- **`orders/{id}` takes the row's `orderId`.** `orderNumber`, the key v2 uses,
+  returns 404 "No such order.".
+- **`users/groups/members` needs `groupId` or `userIds`.** With neither it
+  returns 400. A v2 `groupNumber` as `groupId` returns 404 "No such group.", and
+  no list returns a v3 group id. `userIds` (a user's `userId`) works.
+- **`excludeIgnored` on `orders` must be `0` or `1`.** `true`/`false` return 400.
+  It changed nothing on this account (no row has `ignored` set).
+- **Audit logs:** `fromDate`/`toDate` are whole days, `YYYY-MM-DD`, and filter
+  correctly (a ten-year window returns the unfiltered total).
+- **v3 dates are display strings, `DD Mon YYYY (HH:MM)`**, not ISO 8601.
+- **v2 `/reports/orders` and v3 `/orders` are different sets, neither a
+  superset.** On 2026-11-23: v2 1,763, v3 1,694, 1,642 in both. v3 adds
+  unsubmitted portal drafts ("Auto Save"); v2 adds "Order Accepted" orders with
+  no product or certificate status (mostly ACME). Every issued certificate is in
+  both.
+- **`reports/certificates` answers 200 with only `{"status":"success"}`.** Why is
+  unresolved (permission or a missing `X-Tenant-Context`; library #35).
+- **Access is per credential and can change.** The same credential got 403 on
+  these paths on 2026-10-21 and 200 on 2026-11-23, cause unknown, and v3 lists
+  are scoped to the token's user, so a new credential can see less while still
+  answering 200. Compare `totalResults` when switching credentials.
+
+**Capturing v3 fixtures:** audit `activity` text embeds the names of users,
+groups and API credentials, including deleted ones that no list returns.
+`capture_corpus.py` scrubs known names, matches the known audit templates and
+fails the run with `LEAK` lines if a raw value survives. A `LEAK` means a rule
+is missing; fix the sanitizer, don't commit.
 
 ## Filing a new issue
 
