@@ -175,6 +175,15 @@ credentials, orders). Fixtures are `tests/fixtures/corpus/{prod,sandbox}/v3-*.js
   until you send `recordLimit`.
 - **`orders/{id}` takes the row's `orderId`.** `orderNumber`, the key v2 uses,
   returns 404 "No such order.".
+- **`orders/{id}` has no order history,** although the spec's description
+  promises history, SANs, organization and contacts. Prod, 2026-11-23: two
+  orders from each of all 20 (`orderStatus`, `certificateStatus`,
+  `originator`) groups added only `certificate`, `issuerCA`, `requestor`,
+  `orderedDate` and `renewalNotificationsEnabled` to the list row's keys, plus
+  `revocationDate`/`revocationReason` on revoked orders and
+  `additionalInformation` on cancelled ones. Don't model a history field;
+  re-check with `probe_access.py --order-details N`. Some `certificateStatus`
+  values are bare numeric codes (`14`, `15`, `24`), so keep it a string.
 - **`users/groups/members` needs `groupId` or `userIds`.** With neither it
   returns 400. A v2 `groupNumber` as `groupId` returns 404 "No such group.", and
   no list returns a v3 group id. `userIds` (a user's `userId`) works.
