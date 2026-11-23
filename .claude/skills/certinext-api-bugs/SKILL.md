@@ -191,7 +191,16 @@ credentials, orders). Fixtures are `tests/fixtures/corpus/{prod,sandbox}/v3-*.js
   It changed nothing on this account (no row has `ignored` set).
 - **Audit logs:** `fromDate`/`toDate` are whole days, `YYYY-MM-DD`, and filter
   correctly (a ten-year window returns the unfiltered total).
-- **v3 dates are display strings, `DD Mon YYYY (HH:MM)`**, not ISO 8601.
+- **v3 dates are display strings, `DD Mon YYYY (HH:MM)`**, not ISO 8601, **with
+  no offset marker.** v3 **order** dates are UTC: on 2026-11-23 `requestedDate`
+  and `expiresOn` equalled v2 `orderDate`/`certificateExpiryDate` (UTC per #20)
+  to the minute for 1,533 prod and 151 sandbox orders, July to November, so
+  across a DST change. Audit `timestamp` is UTC too (portal logins at a noted
+  time, both environments). All v3 models use `_V3DisplayDatetimeUTC`.
+  **`discovery/certificates` is different:** its
+  `expiresOn` shows `16:59`/`17:59` (prod) and `05:29` (sandbox) for
+  certificates that expire 23:59:59 UTC, so it is in some local zone; don't
+  generalise from it. `users/profile` has no timezone field.
 - **v2 `/reports/orders` and v3 `/orders` are different sets, neither a
   superset.** On 2026-11-23: v2 1,763, v3 1,694, 1,642 in both. v3 adds
   unsubmitted portal drafts ("Auto Save"); v2 adds "Order Accepted" orders with
