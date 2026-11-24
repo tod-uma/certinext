@@ -25,6 +25,8 @@ import httpx
 
 from certinext._chain import split_pem_certificates
 from certinext._inspection_cache import InspectionCache
+from certinext._serial import normalize_serial
+from certinext._serial import serial_matches_leaf as _serial_matches_leaf
 from certinext.exceptions import CertiNextAPIError
 from certinext.models.orders import OrderRecord
 from certinext.models.ssl_certificates import CertificateDownload
@@ -49,27 +51,6 @@ def _scan_policy(sess: CertiNextSession) -> RetryPolicy:
         The session's policy, or a default :class:`RetryPolicy`.
     """
     return sess.retry or RetryPolicy()
-
-
-def normalize_serial(value: str) -> str:
-    """Normalize a hexadecimal serial, including colon separators and zero padding.
-
-    No decimal interpretation is attempted. Invalid hex remains an exact string.
-    """
-    compact = value.strip().lower().replace(":", "")
-    if compact.startswith("0x"):
-        compact = compact[2:]
-    if compact and all(c in "0123456789abcdef" for c in compact):
-        return compact.lstrip("0") or "0"
-    return value.strip().casefold()
-
-
-def _serial_matches_leaf(report_serial: str, leaf_serial: int) -> bool:
-    """Accept the report's hex serial or its observed decimal emSign form."""
-    if normalize_serial(report_serial) == format(leaf_serial, "x"):
-        return True
-    compact = report_serial.strip()
-    return compact.isascii() and compact.isdecimal() and int(compact, 10) == leaf_serial
 
 
 def _name(value: str) -> str:

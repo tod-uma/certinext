@@ -84,7 +84,8 @@ def _name(cn: str) -> x509.Name:
 
 
 def _cert(
-    subject: str, key: _KeyT, issuer: str, issuer_key: _KeyT, *, ca: bool, sans: list[str] | None = None
+    subject: str, key: _KeyT, issuer: str, issuer_key: _KeyT, *, ca: bool, sans: list[str] | None = None,
+    serial: int | None = None,
 ) -> str:
     """Build and sign a certificate, returning its PEM.
 
@@ -95,6 +96,7 @@ def _cert(
         issuer_key: The issuer's private key (signs the certificate).
         ca: Whether to mark it as a CA.
         sans: DNS SANs to add to a leaf.
+        serial: Serial number; random when ``None``.
 
     Returns:
         The PEM-encoded certificate.
@@ -104,7 +106,7 @@ def _cert(
         .subject_name(_name(subject))
         .issuer_name(_name(issuer))
         .public_key(key.public_key())
-        .serial_number(x509.random_serial_number())
+        .serial_number(serial if serial is not None else x509.random_serial_number())
         .not_valid_before(NOW - dt.timedelta(days=1))
         .not_valid_after(NOW + dt.timedelta(days=90))
         .add_extension(x509.BasicConstraints(ca=ca, path_length=None), critical=True)
@@ -139,7 +141,9 @@ _BAD_KEY, _BAD_CHAIN = _hierarchy(BAD_ROOT, BAD_INT)
 _GOOD_KEY, _GOOD_CHAIN = _hierarchy(GOOD_ROOT, GOOD_INT)
 
 
-def _download(leaf_key: _KeyT, *, bad: bool, sans: list[str] | None = None, bundle: bool = False) -> dict[str, Any]:
+def _download(
+    leaf_key: _KeyT, *, bad: bool, sans: list[str] | None = None, bundle: bool = False, serial: int | None = None,
+) -> dict[str, Any]:
     """Build a JSON certificate-download payload.
 
     Args:
@@ -147,6 +151,8 @@ def _download(leaf_key: _KeyT, *, bad: bool, sans: list[str] | None = None, bund
         bad: Issue from the distrusted hierarchy instead of the good one.
         sans: Leaf SANs (defaults to ``host.example.edu``).
         bundle: Serve the chain as one concatenated string inside the list.
+        serial: The leaf's serial; pass :func:`_serial_int` of the order so it
+            matches the report row (the report checks it, R2b finding 6).
 
     Returns:
         A wire-shaped download payload.
@@ -154,7 +160,7 @@ def _download(leaf_key: _KeyT, *, bad: bool, sans: list[str] | None = None, bund
     int_key, chain = (_BAD_KEY, _BAD_CHAIN) if bad else (_GOOD_KEY, _GOOD_CHAIN)
     issuer = BAD_INT if bad else GOOD_INT
     names = sans or ["host.example.edu"]
-    leaf = _cert(names[0], leaf_key, issuer, int_key, ca=False, sans=names)
+    leaf = _cert(names[0], leaf_key, issuer, int_key, ca=False, sans=names, serial=serial)
     return {"orderId": "ORDER-X", "certificatePem": leaf, "chainPem": ["".join(chain)] if bundle else chain}
 
 
@@ -453,6 +459,30 @@ def test_superseded_needs_every_name_covered() -> None:
 _API = "/api/certinext/v2"
 
 
+def _serial_int(n: int) -> int:
+    """Return the leaf serial for fake order ``n``.
+
+    Args:
+        n: Order sequence number.
+
+    Returns:
+        A serial unique to the order.
+    """
+    return 0x5E7A10000 + n
+
+
+def _serial(n: int) -> str:
+    """Return the orders-report hex serial for fake order ``n``.
+
+    Args:
+        n: Order sequence number.
+
+    Returns:
+        :func:`_serial_int` as lower-case hex, as the report writes it.
+    """
+    return format(_serial_int(n), "x")
+
+
 def _order_row(n: int, **kwargs: Any) -> dict[str, Any]:
     """Build an orders-report row.
 
@@ -466,7 +496,7 @@ def _order_row(n: int, **kwargs: Any) -> dict[str, Any]:
     row = {
         "orderNumber": f"ORDER-{n:05d}", "domainName": f"host{n}.example.edu",
         "issuerCA": BAD_INT, "originator": "CERTInext", "groupNumber": "G-1",
-        "productCode": "100", "certificateSerialNumber": f"SERIAL-{n}",
+        "productCode": "100", "certificateSerialNumber": _serial(n),
         "orderStatus": "Order Fulfilled", "certificateStatus": "Certificate Downloaded",
         "orderDate": "2026-10-01T00:00:00", "certificateExpiryDate": "2027-01-01T00:00:00",
     }
@@ -548,11 +578,11 @@ def _routes() -> dict[str, Any]:
             "orderedBy": {"name": "Jane Doe", "email": "jane@example.edu"},
         },
         f"{_API}/ssl-certificates/ORDER-00001/certificate": _download(
-            ec.generate_private_key(ec.SECP384R1()), bad=True, sans=["host1.example.edu"]
+            ec.generate_private_key(ec.SECP384R1()), bad=True, sans=["host1.example.edu"], serial=_serial_int(1)
         ),
         f"{_API}/ssl-certificates/ORDER-00002": {"orderId": "ORDER-00002", "status": "issued"},
         f"{_API}/ssl-certificates/ORDER-00002/certificate": _download(
-            rsa.generate_private_key(65537, 2048), bad=False, sans=["host2.example.edu"]
+            rsa.generate_private_key(65537, 2048), bad=False, sans=["host2.example.edu"], serial=_serial_int(2)
         ),
     }
 
@@ -1408,9 +1438,9 @@ def test_expired_entries_are_refetched_and_pruned(monkeypatch: pytest.MonkeyPatc
     assert DEFAULT_MAX_AGE == dt.timedelta(days=30)  # ADR 0021
     day = dt.timedelta(days=1)
     old = rp.InspectionCache(tmp_path, clock=lambda: t0 + DEFAULT_MAX_AGE + day)
-    assert old.get("ORDER-00001", "SERIAL-1") is None
+    assert old.get("ORDER-00001", _serial(1)) is None
     fresh = rp.InspectionCache(tmp_path, clock=lambda: t0 + DEFAULT_MAX_AGE - day)
-    assert fresh.get("ORDER-00001", "SERIAL-1") is not None
+    assert fresh.get("ORDER-00001", _serial(1)) is not None
     assert old.prune() == 2
     assert _entries(tmp_path) == []
 
@@ -1455,7 +1485,10 @@ def test_new_serial_is_a_miss(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -
     sess, _ = _session(monkeypatch, _routes())
     rp.build_report(sess, CRITERIA, inspect=True, now=NOW, cache=rp.InspectionCache(tmp_path))
     routes = _routes()
-    routes[f"{_API}/reports/orders"]["content"][0]["certificateSerialNumber"] = "SERIAL-1-REKEY"
+    routes[f"{_API}/reports/orders"]["content"][0]["certificateSerialNumber"] = _serial(101)
+    routes[f"{_API}/ssl-certificates/ORDER-00001/certificate"] = _download(
+        ec.generate_private_key(ec.SECP384R1()), bad=True, sans=["host1.example.edu"], serial=_serial_int(101)
+    )
     sess, api = _session(monkeypatch, routes)
     report = rp.build_report(sess, CRITERIA, inspect=True, now=NOW, cache=rp.InspectionCache(tmp_path))
     assert _ssl_calls(api) == [
@@ -1464,13 +1497,38 @@ def test_new_serial_is_a_miss(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -
     assert report.cache and report.cache.hits == 1
 
 
+def test_download_of_another_serial_is_an_error_and_not_cached(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A leaf whose serial is not the report's is never classified or cached (R2b finding 6)."""
+    routes = _routes()
+    routes[f"{_API}/ssl-certificates/ORDER-00001/certificate"] = _download(
+        ec.generate_private_key(ec.SECP384R1()), bad=True, sans=["host1.example.edu"], serial=_serial_int(77)
+    )
+    sess, _ = _session(monkeypatch, routes)
+    report = rp.build_report(sess, CRITERIA, inspect=True, now=NOW, cache=rp.InspectionCache(tmp_path))
+    row = report.rows[0].facts
+    assert row.error == "download serial differs from the orders report"
+    assert row.inspection is None
+    assert rp.InspectionCache(tmp_path).get("ORDER-00001", _serial(1)) is None
+
+
+def test_decimal_report_serial_matches_its_leaf(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """The observed decimal emSign serial form still matches the leaf."""
+    routes = _routes()
+    routes[f"{_API}/reports/orders"]["content"][0]["certificateSerialNumber"] = str(_serial_int(1))
+    sess, _ = _session(monkeypatch, routes)
+    report = rp.build_report(sess, CRITERIA, inspect=True, now=NOW, cache=rp.InspectionCache(tmp_path))
+    assert report.rows[0].facts.error is None and report.rows[0].facts.inspection is not None
+
+
 @pytest.mark.parametrize("damage", ["garbage", "bad-pem", "other-cert"])
 def test_damaged_entry_is_a_miss_not_an_error(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, damage: str) -> None:
     """Unreadable JSON, a payload that no longer parses, or a mismatched entry is downloaded afresh."""
     sess, _ = _session(monkeypatch, _routes())
     rp.build_report(sess, CRITERIA, inspect=True, now=NOW, cache=rp.InspectionCache(tmp_path))
     cache = rp.InspectionCache(tmp_path)
-    path = cache._path("ORDER-00001", "SERIAL-1")
+    path = cache._path("ORDER-00001", _serial(1))
     entry = json.loads(path.read_text(encoding="utf-8"))
     if damage == "garbage":
         path.write_text("{not json", encoding="utf-8")
@@ -1478,14 +1536,14 @@ def test_damaged_entry_is_a_miss_not_an_error(monkeypatch: pytest.MonkeyPatch, t
         entry["download"]["certificatePem"] = "-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----\n"
         path.write_text(json.dumps(entry), encoding="utf-8")
     else:
-        entry["serial"] = "SERIAL-9"
+        entry["serial"] = _serial(9)
         path.write_text(json.dumps(entry), encoding="utf-8")
 
     sess, api = _session(monkeypatch, _routes())
     report = rp.build_report(sess, CRITERIA, inspect=True, now=NOW, cache=cache)
     assert len(_ssl_calls(api)) == 2
     assert report.rows[0].facts.error is None and not report.rows[0].facts.from_cache
-    assert cache.get("ORDER-00001", "SERIAL-1") is not None  # rewritten
+    assert cache.get("ORDER-00001", _serial(1)) is not None  # rewritten
 
 
 def test_unwritable_cache_is_not_fatal(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -1945,7 +2003,7 @@ def _migration_routes(*, replaced: bool = True) -> dict[str, Any]:
         ))
         routes[f"{_API}/ssl-certificates/ORDER-00005"] = {"orderId": "ORDER-00005", "status": "issued"}
         routes[f"{_API}/ssl-certificates/ORDER-00005/certificate"] = _download(
-            rsa.generate_private_key(65537, 2048), bad=False, sans=["host1.example.edu"]
+            rsa.generate_private_key(65537, 2048), bad=False, sans=["host1.example.edu"], serial=_serial_int(5)
         )
     return routes
 
@@ -2048,7 +2106,7 @@ def test_cli_superseded_emsign_is_counted_separately(run_cli: Callable[..., tupl
     ))
     routes[f"{_API}/ssl-certificates/ORDER-00006"] = {"orderId": "ORDER-00006", "status": "issued"}
     routes[f"{_API}/ssl-certificates/ORDER-00006/certificate"] = _download(
-        rsa.generate_private_key(65537, 2048), bad=False, sans=["host1.example.edu"]
+        rsa.generate_private_key(65537, 2048), bad=False, sans=["host1.example.edu"], serial=_serial_int(6)
     )
     code, out, _ = run_cli(["--inspect"], routes=routes)
     assert code == 0

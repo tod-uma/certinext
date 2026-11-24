@@ -77,6 +77,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from certinext._chain import split_pem_certificates
 from certinext._inspection_cache import InspectionCache
+from certinext._serial import serial_matches_leaf
 from certinext.exceptions import CertiNextAPIError, CertiNextRateLimitError
 from certinext.models.domains import EMSIGN, UNKNOWN_CA
 from certinext.retry import RetryPolicy
@@ -331,6 +332,7 @@ class Inspection:
         sans: DNS subject alternative names on the leaf.
         leaf_issuer: Common name of the leaf's issuer.
         chain_cas: Common names of every certificate in the served chain.
+        leaf_serial: The leaf's serial number, or ``None`` when not parsed.
     """
 
     key_type: str
@@ -339,6 +341,7 @@ class Inspection:
     sans: list[str]
     leaf_issuer: str | None
     chain_cas: list[str]
+    leaf_serial: int | None = None
 
 
 @dataclass
@@ -882,7 +885,26 @@ def inspect_download(download: "CertificateDownload") -> Inspection:
     return Inspection(
         key_type=key_type, key_size=key_size, key_label=key_label, sans=list(sans),
         leaf_issuer=_common_name(leaf.issuer), chain_cas=chain_cas,
+        leaf_serial=leaf.serial_number,
     )
+
+
+def _serial_mismatch(facts: CertificateFacts, inspection: Inspection) -> bool:
+    """Return whether the inspected leaf is not the certificate the report names.
+
+    Without a report serial or a parsed leaf serial there is nothing to
+    compare, so that is not a mismatch.
+
+    Args:
+        facts: The row, carrying the orders report's serial.
+        inspection: What the download revealed.
+
+    Returns:
+        True when both serials are known and differ.
+    """
+    if not facts.serial_number or inspection.leaf_serial is None:
+        return False
+    return not serial_matches_leaf(facts.serial_number, inspection.leaf_serial)
 
 
 def classify(facts: CertificateFacts, criteria: ReplacementCriteria) -> Classification:
@@ -1243,6 +1265,9 @@ def _inspect_from_cache(facts: CertificateFacts, cache: InspectionCache) -> bool
         return False
     if not inspection.chain_cas:
         return False
+    if _serial_mismatch(facts, inspection):
+        log.debug("Cached download serial differs from the report; downloading", order=facts.order_number)
+        return False
     _apply_ordered_by(facts, entry.ordered_by)
     facts.inspection = inspection
     facts.from_cache = True
@@ -1304,10 +1329,15 @@ def _inspect_into(
     detail = order.as_dict()
     _apply_ordered_by(facts, detail.get("orderedBy") or detail.get("requestor") or {})
     try:
-        facts.inspection = inspect_download(download)
+        inspection = inspect_download(download)
     except ValueError as exc:
         facts.error = f"unparseable certificate: {exc}"
         return
+    if _serial_mismatch(facts, inspection):
+        # Never classify or cache another certificate's evidence under this serial.
+        facts.error = "download serial differs from the orders report"
+        return
+    facts.inspection = inspection
     if not facts.inspection.chain_cas:
         facts.error = "download served no chain; chain signal not evaluated"
         return
