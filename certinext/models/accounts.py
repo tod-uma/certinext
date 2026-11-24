@@ -23,10 +23,15 @@ property.
 
 from typing import Any, cast
 
+import httpx
+import structlog
 from pydantic import ConfigDict, Field, PrivateAttr, field_validator
 
 from ..client import CertiNextClient
+from ..exceptions import CertiNextAPIError
 from ._base import CertiNextModel, _LenientDatetime
+
+log = structlog.get_logger()
 
 # Org CA-validation timestamps arrive as "YYYY-MM-DD HH:MM:SS" with no offset
 # (sandbox 2026-11-09) and the vendor has not said which zone they are in, so
@@ -253,9 +258,12 @@ class Organization(CertiNextModel):
         """Fetch the detail endpoint once and merge the result into the raw payload.
 
         No-op when the client is absent, the detail was already loaded, or
-        ``organization_number`` is missing.  API errors are silently swallowed
-        so that a network failure degrades gracefully to ``None`` returns rather
-        than raising from a property accessor.
+        ``organization_number`` is missing.  An API or transport error
+        (or a body that is not JSON) is logged as ``org_detail_unavailable``
+        and not raised, so a property
+        accessor degrades to ``None`` rather than raising. The fetch is not
+        retried on this instance: every detail property would otherwise
+        repeat a failing request. Build a fresh instance to try again.
         """
         if self._detail_loaded or self._client is None:
             return
@@ -269,8 +277,12 @@ class Organization(CertiNextModel):
                 if self._raw is None:
                     self._raw = {}
                 self._raw.update(detail)
-        except Exception:
-            pass
+        except (CertiNextAPIError, httpx.HTTPError, ValueError) as exc:  # ValueError: a non-JSON body
+            # R2b finding 17: this used to swallow every exception silently.
+            log.warning(
+                "org_detail_unavailable", organization_number=org_num,
+                error=str(exc) or type(exc).__name__,
+            )
 
     def _detail_get(self, key: str) -> Any:
         """Return a detail-endpoint field from the raw payload, lazy-loading first.
