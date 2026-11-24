@@ -16,12 +16,16 @@
 
 from collections.abc import Iterable
 
+import structlog
+
 from ._v3 import V3_BASE, iter_v3_rows, unwrap_v3
 from .client import CertiNextClient, path_segment
 from .exceptions import CertiNextAPIError  # noqa: F401 — referenced in Raises docstrings
 from .models.users import CustomRole, GroupMember, RolePermission, User, UserDetail
 
 __all__ = ["CustomRole", "GroupMember", "RolePermission", "User", "UserAccessor", "UserDetail"]
+
+log = structlog.get_logger()
 
 _PATH = f"{V3_BASE}/users"
 
@@ -121,6 +125,11 @@ class UserAccessor:
         ``group_id`` must be a v3 group id, which no list returns, and a v2
         ``groupNumber`` gets 404 "No such group.".
 
+        The response is a paged envelope, but whether this endpoint honours
+        ``pageNumber``/``pageSize`` has not been checked live, so only the
+        first page is read. When ``totalResults`` exceeds the rows returned,
+        ``v3_members_incomplete`` is logged at warning: the list is partial.
+
         Args:
             user_ids: :attr:`User.user_id` values, sent comma-separated.
             group_id: A v3 group id.
@@ -146,5 +155,7 @@ class UserAccessor:
             params["groupId"] = group_id
         if not params:
             raise ValueError("pass user_ids or group_id; the API rejects a request with neither")
-        rows, _ = unwrap_v3(self._client.get(f"{_PATH}/groups/members", params=params), "members")
+        rows, total = unwrap_v3(self._client.get(f"{_PATH}/groups/members", params=params), "members")
+        if total is not None and total > len(rows):
+            log.warning("v3_members_incomplete", rows_seen=len(rows), total=total)
         return [GroupMember.model_validate(r) for r in rows]

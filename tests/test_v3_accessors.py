@@ -302,6 +302,20 @@ class TestUsers:
         assert client.get.call_args.kwargs["params"] == {"userIds": "id-a,id-b"}
         assert members
 
+    def test_group_members_warns_when_total_exceeds_rows(self) -> None:
+        """A first page short of totalResults logs v3_members_incomplete (R2b finding 1)."""
+        body = {"members": [{"userId": "id-a"}], "pageNumber": 1, "pageSize": 1, "totalResults": 3}
+        with capture_logs() as logs:
+            members = UserAccessor(_client(body)).group_members(user_ids=["id-a"])
+        assert len(members) == 1
+        assert _events(logs) == [("v3_members_incomplete", "warning")]
+
+    def test_group_members_silent_when_complete(self) -> None:
+        """The live fixture (total equals rows) logs nothing."""
+        with capture_logs() as logs:
+            UserAccessor(_client(_body("v3-users-groups-members.json"))).group_members(user_ids=["id-a"])
+        assert _events(logs) == []
+
     @pytest.mark.parametrize("kwargs", [{}, {"user_ids": []}])
     def test_group_members_needs_an_argument(self, kwargs: dict[str, Any]) -> None:
         """Neither argument (or no ids) is refused locally instead of a 400."""
