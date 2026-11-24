@@ -804,8 +804,10 @@ keychain (see [Credentials](#credentials) above).
 CA (emSign and SSL.com today), each with its own DCV. `list` shows a
 `validated_by` column. Wherever a subcommand takes a domain *name*, add
 `--validated-by SSLCOM` (or `EMSIGN`) to pick that CA's record. Without it, a
-name with records under both CAs resolves to the emSign record, with a
-warning. A domain ID is already unambiguous.
+read command resolves a name with records under both CAs to the emSign
+record, with a warning, while the write commands (`verify-dcv`,
+`change-dcv-method`, `deactivate`) refuse it (exit 2). A domain ID is already
+unambiguous.
 
 <details>
 <summary>Subcommands</summary>
@@ -872,8 +874,8 @@ Trigger DCV verification for a domain, by name or ID. For an SSL.com domain,
 `--option-id` checks a different option from the `get-dcv` list instead of
 the selected one. Unlike the read commands, a name held under more than one
 CA is refused (exit 2) rather than resolved to the emSign record: pass
-`--validated-by` or the domain ID. `deactivate` refuses such a name the
-same way.
+`--validated-by` or the domain ID. `change-dcv-method` and `deactivate`
+refuse such a name the same way.
 
 ```bash
 certinext domains verify-dcv DOMAIN_ID
@@ -882,10 +884,13 @@ certinext domains verify-dcv maine.edu --validated-by SSLCOM --option-id OPTION_
 
 #### change-dcv-method
 
-Change the DCV method for a domain. Accepted values: `DNS-TXT`, `HTTP-URL`.
+Change the DCV method for a domain, by name or ID. Accepted values:
+`DNS-TXT`, `HTTP-URL`. Like `verify-dcv`, it refuses a name held under more
+than one CA (exit 2): pass `--validated-by` or the domain ID.
 
 ```bash
 certinext domains change-dcv-method DOMAIN_ID DNS-TXT
+certinext domains change-dcv-method maine.edu DNS-TXT --validated-by EMSIGN
 ```
 
 #### last-dcv-attempt
@@ -929,7 +934,7 @@ and running balance) with automatic pagination.
 #### Arguments
 
 ```
---last N   Show only the N most recent transactions
+--last N   Show only the N most recent transactions (N >= 1)
 --json     Output raw JSON instead of tabular format
 ```
 
@@ -1419,6 +1424,15 @@ csr_file                    PEM-encoded CSR file (positional; omit to read from 
 --log-mode MODE             Non-interactive field verbosity: auto (default), syslog, verbose
 --debug-log-path PATH       Append a human-readable DEBUG log (with tracebacks) to PATH (env: CERTINEXT_DEBUG_LOG)
 ```
+
+**When an output fails.** `--fullchain-out` exits 1 if the download has no
+end-entity certificate, rather than writing the intermediates alone. A failed
+DER download or write (`--der-out`) is only a warning when a PEM output that
+carries the certificate was also requested (`--cert-out`, `--fullchain-out`,
+`--output` or `--all-formats-out`); otherwise, including beside `--chain-out`
+alone, it exits 1 ([ADR 0029](docs/adr/0029-der-only-output-failure-is-fatal.md)).
+In `--all-formats-out` file names, `*` becomes `wildcard` and any character
+other than letters, digits, `.`, `-` and `_` becomes `_`.
 
 Requestor and certificate values can also come from stored defaults — see
 [Storing issue-cert defaults](#storing-issue-cert-defaults-optional).
@@ -2485,6 +2499,7 @@ users = sess.users.get_list()
 details = sess.users.list_detailed()       # extra fields: designation, is_active, user_blocked, ...
 for role in sess.users.list_roles():
     perms = sess.users.role_permissions(role.custom_role_id)
+# First page only (paging params unverified); logs v3_members_incomplete if partial
 members = sess.users.group_members(user_ids=[u.user_id for u in users[:5]])
 
 # API credentials (metadata only, never secrets)
