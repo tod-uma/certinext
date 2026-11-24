@@ -1597,7 +1597,11 @@ class OrderWorkflow:
                 if self._order.status != current:
                     self._emit("status_change", current, self._order.status)
             except CertiNextAPIError as exc:
-                log.debug(
+                # Not raised: the order may still advance on its own, and the
+                # next advance() refreshes and tries again. But a refusal that
+                # never clears (auth, permissions) must be visible, not left
+                # at debug while the workflow polls to its timeout (R2b finding 11).
+                log.warning(
                     "accept_agreement returned HTTP error - order may advance on its own",
                     status_code=exc.status_code, order_id=self._order.order_id,
                 )

@@ -16,6 +16,10 @@
 
 from unittest.mock import MagicMock
 
+import httpx
+import pytest
+from structlog.testing import capture_logs
+
 from certinext.accounts import AccountAccessor, AccountInfo, BusinessCategory, Group, Organization
 from certinext.client import CertiNextClient
 
@@ -246,14 +250,24 @@ class TestOrganizationLazyDetail:
         assert org.subscriber_agreement_signed is None
         assert org.org_representatives == []
 
-    def test_fetch_error_swallowed_once(self) -> None:
-        """An API error during the lazy fetch degrades to None and is not retried."""
+    def test_fetch_error_logged_once(self) -> None:
+        """A transport error degrades to None, is logged, and is not retried (R2b finding 17)."""
+        client, mock_session = _make_client()
+        mock_session.get.side_effect = httpx.ConnectError("boom")
+        org = Organization.from_payload(dict(self._LIST_DATA), client=client)
+        with capture_logs() as logs:
+            assert org.validation_status is None
+            assert org.validation_for is None
+        assert mock_session.get.call_count == 1
+        assert [(e["event"], e["log_level"]) for e in logs] == [("org_detail_unavailable", "warning")]
+
+    def test_fetch_programming_error_is_not_swallowed(self) -> None:
+        """An exception that is not an API, transport or decode failure propagates."""
         client, mock_session = _make_client()
         mock_session.get.side_effect = RuntimeError("boom")
         org = Organization.from_payload(dict(self._LIST_DATA), client=client)
-        assert org.validation_status is None
-        assert org.validation_for is None
-        assert mock_session.get.call_count == 1
+        with pytest.raises(RuntimeError):
+            _ = org.validation_status
 
     def test_as_dict_includes_merged_detail(self) -> None:
         """as_dict() triggers the detail fetch and includes merged detail fields."""

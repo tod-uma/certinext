@@ -1736,7 +1736,7 @@ sess = certinext.session(
     scope="",           # optional
     sandbox=False,      # True → use sandbox endpoints automatically
     base_url="",        # override; defaults to production (or sandbox when sandbox=True)
-    token_url="",       # override; defaults to match base_url
+    token_url="",       # override; defaults to <base_url>/oauth/token when base_url is given
     timeout=None,       # httpx.Timeout or seconds; default 10s connect / 60s read
     create_timeout=None,  # certificate creation only; default 10s connect / 180s read
     client_secret_file=None,  # path to a file holding the secret, instead of client_secret
@@ -1755,6 +1755,20 @@ always take precedence over the `sandbox` flag.
 </details>
 
 The session obtains and caches an OAuth 2.0 bearer token automatically, refreshing it before it expires.
+
+### Supported API
+
+Through 1.x, certinext keeps these compatible
+([ADR 0028](docs/adr/0028-public-api-surface.md)):
+
+- everything exported from the root package (`certinext.__all__`);
+- every module whose name has no leading underscore, and its public names:
+  for example `certinext.exceptions`, `certinext.models.domains`,
+  `certinext.cli_support`, `certinext.settings` and `certinext.replacement`.
+
+Anything with a leading underscore (`certinext._v3`, `certinext.models._base`)
+and the `certinext.cli` command-line package are internal and may change in
+any release.
 
 ### Building your own CLI on certinext
 

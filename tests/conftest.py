@@ -16,11 +16,13 @@
 
 import json
 import os
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any, Callable, cast
 from unittest.mock import MagicMock
 
 import pytest
+import structlog
 
 from certinext.client import CertiNextClient
 from certinext.domains import Domain, DomainAccessor
@@ -79,6 +81,35 @@ def _clear_systemd_env_vars(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     monkeypatch.delenv("INVOCATION_ID", raising=False)
     monkeypatch.delenv("JOURNAL_STREAM", raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_structlog(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Keep one test's ``setup_logging()`` from filtering another test's log capture.
+
+    ``setup_logging()`` configures ``cache_logger_on_first_use=True``, so a
+    module-level ``structlog.get_logger()`` proxy used after a CLI test stays
+    bound to that test's level filter (INFO by default) for the rest of the
+    session, and a later :func:`structlog.testing.capture_logs` sees no debug
+    events. Whether a test passed then depended on which tests ran before it.
+    Caching is turned off for tests and the configuration reset afterwards.
+
+    Args:
+        monkeypatch: Used to wrap :func:`structlog.configure` for this test.
+
+    Yields:
+        Nothing; the test runs in between.
+    """
+    real_configure = structlog.configure
+
+    def _configure_uncached(*args: Any, **kwargs: Any) -> None:
+        """Call :func:`structlog.configure` with logger caching disabled."""
+        kwargs["cache_logger_on_first_use"] = False
+        real_configure(*args, **kwargs)
+
+    monkeypatch.setattr(structlog, "configure", _configure_uncached)
+    yield
+    structlog.reset_defaults()
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:

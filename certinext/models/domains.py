@@ -28,7 +28,7 @@ from typing import Any, Literal
 import structlog
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 
-from ..client import CertiNextClient
+from ..client import CertiNextClient, path_segment
 from ._base import CertiNextModel, _LenientDatetime, _LenientDatetimeUTC
 from .dcv_attempts import DcvAttempt, DcvAttemptSummary
 
@@ -995,10 +995,11 @@ class Domain(CertiNextModel):
             the payload exactly as received.
 
         Raises:
+            ValueError: If ``attempt_id`` is not a single path segment.
             CertiNextAPIError: On a non-2xx API response (502 when SSL.com
                 cannot be reached). Provides ``.status_code`` and ``.body``.
         """
-        result = self._require_client().get(f"{_BASE}/{self.id}/dcv/attempts/{attempt_id}")
+        result = self._require_client().get(f"{_BASE}/{self.id}/dcv/attempts/{path_segment(attempt_id)}")
         attempt = DcvAttempt.model_validate(result if isinstance(result, dict) else {})
         if attempt.attempt_id is None:
             attempt.attempt_id = str(attempt_id)

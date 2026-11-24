@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
+from structlog.testing import capture_logs
 
 from certinext.client import CertiNextClient
 from certinext.exceptions import CertiNextAPIError, CertiNextTimeoutError
@@ -53,6 +54,25 @@ def _ok_response(payload: object) -> MagicMock:
     resp.is_error = False
     resp.json.return_value = payload
     resp.content = b"{}"
+    return resp
+
+
+def _error_response(status: int) -> MagicMock:
+    """Return a mock HTTP error response.
+
+    Args:
+        status: The HTTP status code.
+
+    Returns:
+        A response the client turns into a CertiNextAPIError.
+    """
+    resp = MagicMock()
+    resp.status_code = status
+    resp.is_error = True
+    resp.json.return_value = {"message": "refused"}
+    resp.text = '{"message": "refused"}'
+    resp.content = b'{"message": "refused"}'
+    resp.headers = {}
     return resp
 
 
@@ -979,6 +999,17 @@ class TestOrderWorkflowAdvance:
         assert result == "accepted-agreement"
         post_url = mock_session.post.call_args[0][0]
         assert "agreement" in post_url
+
+    def test_agreement_failure_is_logged_at_warning(self) -> None:
+        """A refused agreement still returns its state but is visible (R2b finding 11)."""
+        wf, _, mock_session = _make_workflow("pending-agreement")
+        mock_session.get.return_value = _refresh_response("pending-agreement")
+        mock_session.post.return_value = _error_response(403)
+        with capture_logs() as logs:
+            assert wf.advance() == "accepted-agreement"
+        assert ("accept_agreement returned HTTP error - order may advance on its own", "warning") in [
+            (e["event"], e["log_level"]) for e in logs
+        ]
 
     def test_submits_csr_when_pending_csr(self) -> None:
         """advance() submits the CSR when status is pending-csr."""

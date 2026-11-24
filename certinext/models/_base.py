@@ -202,7 +202,11 @@ _OptionalFlag = Annotated[bool | None, BeforeValidator(_optional_flag)]
 
 
 def _lenient_datetime(value: Any) -> datetime | None:
-    """Parse a wire timestamp into a timezone-aware datetime, or ``None``.
+    """Parse a wire timestamp into a datetime, or ``None``.
+
+    The result is timezone-aware only when the wire value carries an offset
+    or ``Z``; an offset-free value stays naive. Use
+    :func:`_lenient_datetime_utc` for fields known to be UTC.
 
     Absent/null/empty values and unparseable strings yield ``None`` rather
     than a ``ValidationError`` (ADR 0005).
