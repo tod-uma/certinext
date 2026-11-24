@@ -534,6 +534,20 @@ def test_write_outputs_der_only_unwritable_path_is_fatal(tmp_path: Path) -> None
     assert not missing_dir.exists()
 
 
+@pytest.mark.parametrize("chain_pem", [[], ["-----BEGIN CERTIFICATE-----\nINTERMEDIATE\n-----END CERTIFICATE-----"]])
+def test_write_outputs_der_failure_beside_chain_out_is_fatal(tmp_path: Path, chain_pem: list[str]) -> None:
+    """--chain-out never carries the leaf, so it does not excuse a failed DER (R2c finding 2)."""
+    missing_dir = tmp_path / "no-such-dir" / "cert.der"
+    order = FakeOrder({"certificatePem": LEAF, "chainPem": chain_pem})
+    chain = tmp_path / "chain.pem"
+    with pytest.raises(SystemExit) as exc_info:
+        _write_outputs(
+            order, _args(der_out=str(missing_dir), chain_out=str(chain), raw_chain=True), BUNDLE,  # type: ignore[arg-type]
+        )
+    assert exc_info.value.code == 1
+    assert not missing_dir.exists()
+
+
 def test_write_outputs_binary_unwritable_path_warns_and_continues(tmp_path: Path) -> None:
     """Beside a PEM output, an unwritable --der-out path only warns (ADR 0001)."""
     missing_dir = tmp_path / "no-such-dir" / "cert.der"

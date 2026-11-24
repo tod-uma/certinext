@@ -26,11 +26,22 @@ behaviour.
 
 ## Decision outcome
 
-Chosen: **exit 1 when DER is the only requested output and it fails.**
-Beside any PEM output (`--cert-out`, `--chain-out`, `--fullchain-out`,
-`--output`, `--all-formats-out`) a DER failure stays a warning, as ADR 0001
-decided. This narrows ADR 0001 to the case its own justification covers; it
-does not replace it.
+Chosen: **exit 1 when a DER output fails and no requested PEM output carries
+the leaf certificate.** Beside a leaf-bearing PEM output (`--cert-out`,
+`--fullchain-out`, `--output`, `--all-formats-out`) a DER failure stays a
+warning, as ADR 0001 decided. `--chain-out` does not count: it holds the
+intermediates only, and is written as an empty file when there are none. This
+narrows ADR 0001 to the case its own justification covers; it does not
+replace it.
+
+### Amendment, 2026-11-24 (before any release)
+
+As first accepted, the rule treated any PEM output, `--chain-out` included,
+as the primary certificate. A follow-up review (Codex, R2c finding 2)
+showed `--chain-out --der-out` with an empty chain and a failed DER still
+exited 0 with no certificate written. The same holds for a non-empty
+chain, since intermediates are not the certificate. The decision above was
+corrected before it reached a tagged release.
 
 ---
 > **AI-assistant disclaimer:** Drafted by Claude Code (Claude Opus 5.5,

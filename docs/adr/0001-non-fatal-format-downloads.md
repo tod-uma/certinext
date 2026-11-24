@@ -1,6 +1,6 @@
 # Non-fatal error handling for optional certificate format downloads
 
-- Status: accepted (narrowed by [ADR 0029](0029-der-only-output-failure-is-fatal.md): DER as the only output is fatal)
+- Status: accepted (narrowed by [ADR 0029](0029-der-only-output-failure-is-fatal.md): a failed DER with no leaf-bearing PEM output is fatal)
 - Date: 2026-06-11
 
 ## Context
