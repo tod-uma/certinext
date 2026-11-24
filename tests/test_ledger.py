@@ -341,3 +341,12 @@ class TestLedgerAccessorGetList:
         result = accessor.get_list(page_size=2)
         assert len(result) == 2
         assert mock_session.get.call_count == 1
+
+    def test_wrapper_equal_pages_follow_the_total(self) -> None:
+        """Equal pages under a larger totalPages do not end the walk early (R2c finding 1)."""
+        client, mock_session = _make_client()
+        page = {"content": [_make_record(1), _make_record(2)], "totalElements": 6, "totalPages": 3}
+        mock_session.get.side_effect = [_ok_response(page)] * 3 + [AssertionError("walked past the total")]
+        result = LedgerAccessor(client).get_list(page_size=2)
+        assert len(result) == 6
+        assert mock_session.get.call_count == 3

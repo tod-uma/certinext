@@ -42,6 +42,6 @@ Numbering is sequential and never reused.
 | [0026](0026-cli-dependencies-in-an-extra.md) | Move typer, rich and tomlkit into a `cli` extra; the library imports none of them | accepted |
 | [0027](0027-python-version-support-policy.md) | Deprecate Python 3.10 with a `FutureWarning`; remove it only on a named trigger; test the next release in an optional CI job | accepted |
 | [0028](0028-public-api-surface.md) | Root exports and every non-underscore module are stable through 1.x; `_`-prefixed modules and `certinext.cli` are internal | accepted |
-| [0029](0029-der-only-output-failure-is-fatal.md) | A DER download or write that is the only requested output exits 1 (narrows 0001) | accepted |
+| [0029](0029-der-only-output-failure-is-fatal.md) | A failed DER output exits 1 unless a PEM output carrying the leaf was requested (narrows 0001) | accepted |
 
 See also: [docs/wishlist/](../wishlist/) for deferred ideas not yet committed to.

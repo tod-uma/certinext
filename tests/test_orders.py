@@ -426,6 +426,18 @@ class TestOrderAccessorGetList:
         assert len(result) == 2
         assert mock_client.get.call_count == 1
 
+    def test_wrapper_equal_pages_follow_the_total(self, accessor: OrderAccessor, mock_client: MagicMock) -> None:
+        """Equal pages under a larger totalPages do not end the walk early (R2c finding 1)."""
+        rows = [SAMPLE_ORDER, SAMPLE_ORDER_EXPIRED]
+        mock_client.get.side_effect = [
+            {"content": rows, "page": n, "size": 2, "totalElements": 6, "totalPages": 3} for n in (1, 2, 3)
+        ]
+        with capture_logs() as logs:
+            result = accessor.get_list(page_size=2)
+        assert len(result) == 6
+        assert mock_client.get.call_count == 3
+        assert logs == []
+
 
 # ---------------------------------------------------------------------------
 # _build_rows join logic

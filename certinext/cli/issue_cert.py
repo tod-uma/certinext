@@ -832,10 +832,12 @@ def _write_outputs(order: SslOrder, opts: OutputOptions, pem: str) -> None:
 
     if opts.der_out:
         wrote = _try_download_write_binary("certificate (DER)", opts.der_out, order.download_certificate_der)
-        der_only = not (opts.cert_out or opts.chain_out or opts.fullchain_out or opts.all_formats_out or opts.output)
-        if not wrote and der_only:
-            # ADR 0001 keeps a failed binary format non-fatal because a PEM was
-            # written; with DER the only output nothing was, so it fails (ADR 0029).
+        # --chain-out holds intermediates only (possibly none), never the
+        # leaf, so it does not stand in for a failed DER (R2c finding 2).
+        leaf_pem = opts.cert_out or opts.fullchain_out or opts.all_formats_out or opts.output
+        if not wrote and not leaf_pem:
+            # ADR 0001 keeps a failed binary format non-fatal because a PEM
+            # carrying the leaf was written; without one it fails (ADR 0029).
             log.error("No certificate output was written", output="certificate (DER)", path=opts.der_out)
             raise SystemExit(1)
 
