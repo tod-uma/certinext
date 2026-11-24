@@ -19,6 +19,7 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
+from structlog.testing import capture_logs
 
 from certinext.client import CertiNextClient
 from certinext.domain_cert_count import apex_domain as _apex_domain
@@ -320,6 +321,16 @@ class TestOrderAccessorGetList:
         result = accessor.get_list(page_size=2)
         assert len(result) == 3
         assert mock_client.get.call_count == 2
+
+    def test_repeated_full_bare_page_ends_the_walk(self, accessor: OrderAccessor, mock_client: MagicMock) -> None:
+        """A clamped page repeating the last full one stops the walk, rows not doubled (R2b finding 18)."""
+        last = [SAMPLE_ORDER, SAMPLE_ORDER_EXPIRED]
+        mock_client.get.side_effect = [last, last, AssertionError("walked past the repeat")]
+        with capture_logs() as logs:
+            result = accessor.get_list(page_size=2)
+        assert len(result) == 2
+        assert mock_client.get.call_count == 2
+        assert [(e["event"], e["log_level"]) for e in logs] == [("v2_page_repeated", "warning")]
 
     def test_empty_account(self, accessor: OrderAccessor, mock_client: MagicMock) -> None:
         """get_list() returns an empty list when the API returns no records."""

@@ -4,7 +4,7 @@
  Show the CertiNext account ledger (transaction history).                                           
                                                                                                     
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --last        N  Show only the N most recent transactions                                        │
-│ --help           Show this message and exit.                                                     │
+│ --last        N [x>=1]  Show only the N most recent transactions                                 │
+│ --help                  Show this message and exit.                                              │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 

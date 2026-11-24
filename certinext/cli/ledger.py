@@ -27,7 +27,7 @@ from certinext.cli._shared import data_console, rows_table, session
 def ledger(
     ctx: typer.Context,
     last: Optional[int] = typer.Option(
-        None, "--last", metavar="N",
+        None, "--last", metavar="N", min=1,
         help="Show only the N most recent transactions",
     ),
 ) -> None:

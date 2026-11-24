@@ -20,6 +20,8 @@ Spring-style page/size pagination as the Orders Report.
 
 from typing import Any
 
+import structlog
+
 from .client import CertiNextClient
 from .exceptions import CertiNextAPIError  # noqa: F401 — referenced in Raises docstrings
 from .models.ledger import LedgerRecord
@@ -27,6 +29,8 @@ from .models.ledger import LedgerRecord
 __all__ = ["LedgerAccessor", "LedgerRecord"]
 
 _BASE = "/api/certinext/v2/reports/ledger"
+
+log = structlog.get_logger()
 
 
 class LedgerAccessor:
@@ -123,7 +127,9 @@ class LedgerAccessor:
         out-of-range pages to the last page instead of returning an empty
         list: when the total is an exact multiple of ``page_size``, the page
         after the last would repeat the last page forever. The short-page
-        rule remains only as a fallback for bare-array responses.
+        rule remains only as a fallback for bare-array responses, so a page
+        identical to the previous one also ends the walk (without adding its
+        rows again) and logs ``v2_page_repeated``.
 
         The API has no date filter for the ledger, so consumers that want
         history have to pull it in full.
@@ -146,8 +152,14 @@ class LedgerAccessor:
         """
         records: list[LedgerRecord] = []
         page = 1
+        previous: list[Any] | None = None
         while True:
             raw, total_pages = self._fetch_page(page, page_size, group_number)
+            if raw and raw == previous:
+                # The server clamped an out-of-range page (R2b finding 18).
+                log.warning("v2_page_repeated", path=_BASE, page=page, rows=len(records))
+                break
+            previous = raw
             records.extend(LedgerRecord.model_validate(item) for item in raw if isinstance(item, dict))
             if total_pages is not None:
                 if page >= total_pages:

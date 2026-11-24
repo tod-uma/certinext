@@ -247,6 +247,15 @@ class TestLedgerAccessorGetPage:
 class TestLedgerAccessorGetList:
     """LedgerAccessor.get_list() auto-paginates through all pages."""
 
+    def test_repeated_full_bare_page_ends_the_walk(self) -> None:
+        """A clamped page repeating the last full one stops the walk (R2b finding 18)."""
+        client, mock_session = _make_client()
+        page = [_make_record(1), _make_record(2)]
+        mock_session.get.side_effect = [_ok_response(page), _ok_response(page), AssertionError("looped")]
+        result = LedgerAccessor(client).get_list(page_size=2)
+        assert len(result) == 2
+        assert mock_session.get.call_count == 2
+
     def test_single_page(self) -> None:
         """get_list() returns all records when they fit on one page."""
         client, mock_session = _make_client()
