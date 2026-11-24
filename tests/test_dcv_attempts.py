@@ -143,6 +143,14 @@ class TestDcvAttemptsPager:
         assert row.attempted_at is None
         assert row.overall_status == "VERIFIED"
 
+    @pytest.mark.parametrize("wire", ["2026-10-26T19:12:49Z", "2026-10-26T19:12:49", "2026-10-26 19:12:49"])
+    def test_attempted_at_is_always_utc_aware(self, wire: str) -> None:
+        """attemptedAt is UTC-aware with or without a Z, like attemptTimestamp (R2b finding 13)."""
+        row = DcvAttemptSummary.model_validate({"attemptId": "1", "attemptedAt": wire})
+        assert row.attempted_at is not None
+        assert row.attempted_at.utcoffset() is not None
+        assert row.attempted_at.astimezone(timezone.utc).hour == 19
+
 
 class TestGetDcvAttempt:
     """Domain.get_dcv_attempt() returns a typed DcvAttempt."""
@@ -152,6 +160,13 @@ class TestGetDcvAttempt:
         mock_client.get.return_value = {"status": "VERIFIED"}
         domain.get_dcv_attempt("729645")
         mock_client.get.assert_called_once_with(f"/api/certinext/v2/domains/{domain.id}/dcv/attempts/729645")
+
+    @pytest.mark.parametrize("bad", ["1/../../x", "1/2", ".."])
+    def test_attempt_id_must_be_one_path_segment(self, domain: Domain, mock_client: MagicMock, bad: str) -> None:
+        """An id that would change the route is refused before any request (R2b finding 12)."""
+        with pytest.raises(ValueError, match="path segment"):
+            domain.get_dcv_attempt(bad)
+        mock_client.get.assert_not_called()
 
     def test_emsign_attempt_id_filled_in_raw_untouched(self, domain: Domain, mock_client: MagicMock) -> None:
         """The wire lacks attemptId for emSign; the model fills it, as_dict() does not."""

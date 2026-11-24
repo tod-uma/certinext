@@ -198,7 +198,11 @@ def _named(name: str, ca: str) -> MagicMock:
 
 @pytest.mark.parametrize(
     "argv",
-    [["domains", "verify-dcv", "example.edu"], ["domains", "deactivate", "example.edu", "--yes"]],
+    [
+        ["domains", "verify-dcv", "example.edu"],
+        ["domains", "deactivate", "example.edu", "--yes"],
+        ["domains", "change-dcv-method", "example.edu", "DNS-TXT"],  # R2b finding 10
+    ],
 )
 def test_write_refuses_name_held_under_two_cas(
     sess: MagicMock, capsys: pytest.CaptureFixture[str], argv: list[str]
@@ -211,6 +215,14 @@ def test_write_refuses_name_held_under_two_cas(
     for rec in sess.domain.get_list.return_value:
         rec.verify.assert_not_called()
         rec.deactivate.assert_not_called()
+        rec.change_dcv_method.assert_not_called()
+
+
+def test_change_dcv_method_validated_by_picks_the_record(sess: MagicMock) -> None:
+    """``--validated-by`` resolves a two-CA name to the chosen record."""
+    assert cli_main(["domains", "change-dcv-method", "example.edu", "DNS-TXT", "--validated-by", "EMSIGN"]) == 0
+    sess.domain.get.assert_called_once_with("example.edu", validated_by="EMSIGN")
+    sess.domain.get.return_value.change_dcv_method.assert_called_once_with("DNS-TXT")
 
 
 def test_verify_dcv_single_name_match_is_used(sess: MagicMock) -> None:

@@ -129,7 +129,7 @@ class DcvAttemptSummary(CertiNextModel):
         alias="attemptId",
         description="Attempt id: a numeric string (emSign) or ``sslcom-latest``.",
     )
-    attempted_at: _LenientDatetime = Field(
+    attempted_at: _LenientDatetimeUTC = Field(
         default=None,
         alias="attemptedAt",
         description="When the attempt ran (UTC). Absent on SSL.com rows.",

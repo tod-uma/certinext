@@ -1,14 +1,17 @@
                                                                                                     
- Usage: certinext domains change-dcv-method [OPTIONS] ID METHOD:{DNS-TXT|HTTP-                      
-                                            URL}                                                    
+ Usage: certinext domains change-dcv-method [OPTIONS] NAME_OR_ID METHOD:{DNS-                       
+                                            TXT|HTTP-URL}                                           
                                                                                                     
  Change the DCV method for a domain.                                                                
                                                                                                     
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
-│ *    ID                             TEXT    Domain ID [required]                                 │
+│ *    NAME_OR_ID                     TEXT    Domain name (e.g. maine.edu) or domain ID [required] │
 │ *    method:{DNS-TXT|HTTP-URL}      CHOICE  DCV method: DNS-TXT or HTTP-URL [required]           │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --help          Show this message and exit.                                                      │
+│ --validated-by        CA  Only consider records validated by this CA (e.g. SSLCOM, EMSIGN). An   │
+│                           organization can hold the same name once per CA; a name with more than │
+│                           one record is refused unless this (or a domain ID) picks one.          │
+│ --help                    Show this message and exit.                                            │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 

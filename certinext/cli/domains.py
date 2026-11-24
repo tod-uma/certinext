@@ -342,11 +342,15 @@ class _DcvMethod(str, Enum):
 @domains_app.command("change-dcv-method")
 def change_dcv_method(
     ctx: typer.Context,
-    domain_id: str = typer.Argument(..., metavar="ID", help="Domain ID"),
+    domain_id: str = typer.Argument(
+        ..., metavar="NAME_OR_ID", help="Domain name (e.g. maine.edu) or domain ID",
+    ),
     method: _DcvMethod = typer.Argument(..., help="DCV method: DNS-TXT or HTTP-URL"),
+    validated_by: Optional[str] = _validated_by_option(_VALIDATED_BY_WRITE_HELP),
 ) -> None:
     """Change the DCV method for a domain."""
-    _show_data(ctx, session(ctx).domain.get(domain_id).change_dcv_method(method.value))
+    domain = _lookup_for_write(ctx, domain_id, validated_by, hint="pass --validated-by CA or the domain ID")
+    _show_data(ctx, domain.change_dcv_method(method.value))
 
 
 @domains_app.command("last-dcv-attempt")
