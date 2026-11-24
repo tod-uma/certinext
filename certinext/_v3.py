@@ -25,9 +25,11 @@ v3 list envelopes differ from v2:
   on ``users`` and ``users/roles``, where ``pageSize`` is silently ignored
   and the page defaults to 20.
 
-:func:`iter_v3_rows` stops on whichever comes first: the reported total, a
-short page, or a page identical to the previous one (the v2 report repeats
-its last page past the end; v3 is unverified, so guard anyway).
+:func:`iter_v3_rows` treats ``totalResults`` as a hint, never as proof that
+the list is exhausted; see its docstring for the termination rules. The walk
+is offset paging, not a snapshot: rows inserted or removed between page
+requests can be yielded twice or skipped, so pollers should dedupe on the
+row's id and re-read an overlapping window.
 """
 
 from collections.abc import Iterator
@@ -66,6 +68,11 @@ def _as_int(value: Any) -> int | None:
 def unwrap_v3(body: Any, list_key: str) -> tuple[list[dict[str, Any]], int | None]:
     """Split a v3 response body into its row dicts and reported total.
 
+    An unexpected shape (not a list or dict, or a dict whose ``list_key`` is
+    missing or not a list) still yields no rows, per ADR 0005 leniency, but
+    logs ``v3_envelope_unexpected``: a 200 with a changed envelope must not
+    pass silently as an empty list.
+
     Args:
         body: The decoded JSON body (an envelope dict or a bare list).
         list_key: The envelope key holding the rows.
@@ -78,9 +85,11 @@ def unwrap_v3(body: Any, list_key: str) -> tuple[list[dict[str, Any]], int | Non
     if isinstance(body, list):
         return [r for r in body if isinstance(r, dict)], None
     if not isinstance(body, dict):
+        log.warning("v3_envelope_unexpected", list_key=list_key, body_type=type(body).__name__)
         return [], None
     rows = body.get(list_key)
     if not isinstance(rows, list):
+        log.warning("v3_envelope_unexpected", list_key=list_key, keys=sorted(body))
         rows = []
     return [r for r in rows if isinstance(r, dict)], _as_int(body.get("totalResults"))
 
@@ -127,9 +136,26 @@ def iter_v3_rows(
 ) -> Iterator[dict[str, Any]]:
     """Yield every row of a paged v3 list, fetching pages as needed.
 
-    Stops on the reported ``totalResults``, on a short page, or on a page
-    identical to the previous one (logged as a warning, since it means the
-    server clamped an out-of-range page).
+    ``totalResults`` is a hint, not proof of exhaustion. The walk stops on:
+
+    - an empty page;
+    - a short page, unless a known total says rows remain (the server capped
+      ``page_size`` below what was asked, e.g. 100 on audit logs);
+    - a page identical to the previous one (the server clamped an
+      out-of-range page, as the v2 report does).
+
+    A full page never ends the walk, even when the total has been reached, so
+    a stale or zero total cannot truncate it; the cost is one extra request
+    when the last page is exactly full. Ending with fewer rows than a known
+    total logs ``v3_walk_incomplete``.
+
+    The repeated-page check compares whole row dicts. Every paged v3 list
+    carries a unique id per row, so two equal adjacent pages mean the server
+    repeated itself, not that the data did.
+
+    This is offset paging, not a snapshot: rows inserted or removed while the
+    walk runs can be yielded twice or skipped. Callers that need completeness
+    should dedupe on the row id and re-read an overlapping window.
 
     Args:
         client: The HTTP client.
@@ -155,12 +181,19 @@ def iter_v3_rows(
         rows, total = get_v3_page(
             client, path, list_key, page=page, page_size=page_size, size_param=size_param, params=params
         )
-        if previous is not None and rows and rows == previous:
-            log.warning("v3_page_repeated", path=path, page=page, rows_seen=seen, total=total)
-            return
+        if not rows:
+            break
+        if rows == previous:
+            # Past the end once the total is reached; a server fault before it.
+            reached = total is not None and seen >= total
+            emit = log.debug if reached else log.warning
+            emit("v3_page_repeated", path=path, page=page, rows_seen=seen, total=total)
+            break
         yield from rows
         seen += len(rows)
-        if len(rows) < page_size or (total is not None and seen >= total):
-            return
+        if len(rows) < page_size and (total is None or seen >= total):
+            break
         previous = rows
         page += 1
+    if total is not None and seen < total:
+        log.warning("v3_walk_incomplete", path=path, pages=page, rows_seen=seen, total=total)

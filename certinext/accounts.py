@@ -24,7 +24,7 @@ re-exported here for backward compatibility.
 
 from typing import Any
 
-from .client import CertiNextClient
+from .client import CertiNextClient, path_segment
 from .exceptions import CertiNextAPIError  # noqa: F401 — referenced in Raises docstrings
 from .models.accounts import (
     _ORGS_BASE,
@@ -192,10 +192,11 @@ class AccountAccessor:
             :class:`Organization` for the given ID.
 
         Raises:
+            ValueError: If ``organization_id`` is not a single path segment.
             CertiNextAPIError: On a non-2xx API response (404 if not found).
                 Provides ``.status_code`` and ``.body``.
         """
-        result = self._client.get(f"{_ORGS_BASE}/{organization_id}")
+        result = self._client.get(f"{_ORGS_BASE}/{path_segment(organization_id)}")
         return Organization.from_payload(result, detail_loaded=True)
 
     # --- validation with a non-emSign CA (SSL.com today) ---
@@ -212,7 +213,7 @@ class AccountAccessor:
         Returns:
             The endpoint path.
         """
-        return f"{_ORGS_BASE}/{organization_id}/ca-validations/{_ca_key(ca)}"
+        return f"{_ORGS_BASE}/{path_segment(organization_id)}/ca-validations/{_ca_key(ca)}"
 
     def get_ca_validation(self, organization_id: str, ca: str = "SSLCOM") -> OrgCaValidation:
         """Return an organization's validation status with a non-emSign CA.

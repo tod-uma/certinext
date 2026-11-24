@@ -26,7 +26,7 @@ from typing import Any
 
 import structlog
 
-from .client import CertiNextClient
+from .client import CertiNextClient, path_segment
 from .exceptions import CertiNextAPIError  # noqa: F401 — referenced in Raises docstrings
 from .models.catalog import LEGACY_EMSIGN_CODES, CustomField, Product, ProductCategory
 from .models.domains import EMSIGN, UNKNOWN_CA
@@ -144,9 +144,10 @@ class CatalogAccessor:
             has no custom fields.
 
         Raises:
+            ValueError: If ``product_code`` is not a single path segment.
             CertiNextAPIError: On a non-2xx API response. Provides ``.status_code`` and ``.body``.
         """
-        result = self._client.get(f"{_PRODUCTS_BASE}/{product_code}/custom-fields")
+        result = self._client.get(f"{_PRODUCTS_BASE}/{path_segment(product_code)}/custom-fields")
         raw: list[Any] = []
         if isinstance(result, list):
             raw = result
