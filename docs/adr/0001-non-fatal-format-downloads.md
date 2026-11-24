@@ -1,6 +1,6 @@
 # Non-fatal error handling for optional certificate format downloads
 
-- Status: accepted
+- Status: accepted (narrowed by [ADR 0029](0029-der-only-output-failure-is-fatal.md): DER as the only output is fatal)
 - Date: 2026-06-11
 
 ## Context

@@ -250,7 +250,9 @@ class CertificateDownload(CertiNextModel):
         Returns:
             Leaf-first PEM chain (end-entity certificate followed by its
             intermediates) ending in a single newline, or an empty string if
-            no certificate is present.
+            no certificate is present. A download with no leaf returns its
+            intermediates alone, which is not a fullchain: check
+            :attr:`certificate_pem` first when the leaf is required.
 
         Raises:
             ImportError: If ``sort=True`` and the ``cryptography`` package is

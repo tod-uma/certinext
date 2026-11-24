@@ -34,6 +34,7 @@ a pure function.
 """
 
 import os
+import re
 import sys
 import time
 from collections.abc import Callable, Mapping
@@ -596,6 +597,10 @@ def _stem_from_domain(domain: str | None) -> str:
 
     Replaces ``*`` (wildcard) with the literal string ``wildcard`` so that
     wildcard certificate filenames do not contain shell-glob characters.
+    The domain comes from the API, so anything outside letters, digits,
+    ``.``, ``-`` and ``_`` becomes ``_`` and leading dots are dropped: a
+    path separator or ``..`` cannot steer the file out of the chosen
+    directory (R2b finding 15).
 
     Args:
         domain: The primary domain (CN) of the certificate, or ``None``.
@@ -603,7 +608,8 @@ def _stem_from_domain(domain: str | None) -> str:
     Returns:
         A non-empty string safe to use as a filename stem.
     """
-    return (domain or "certificate").replace("*", "wildcard")
+    stem = re.sub(r"[^A-Za-z0-9._-]", "_", (domain or "").replace("*", "wildcard")).lstrip(".")
+    return stem or "certificate"
 
 
 def _write_file(path: str, content: str, label: str) -> None:
@@ -810,6 +816,11 @@ def _write_outputs(order: SslOrder, opts: OutputOptions, pem: str) -> None:
                 log.warning("Download contained no intermediate certificates")
             _write_file(opts.chain_out, "\n".join(chain) + "\n" if chain else "", "chain")
         if opts.fullchain_out:
+            if not (dl.certificate_pem or "").strip():
+                # as_pem_chain() would return the intermediates alone, which
+                # is not a fullchain (R2b finding 8).
+                log.error("Download contained no end-entity certificate for the fullchain")
+                raise SystemExit(1)
             try:
                 fullchain = dl.as_pem_chain(sort=sort)
             except ImportError as exc:
@@ -820,7 +831,13 @@ def _write_outputs(order: SslOrder, opts: OutputOptions, pem: str) -> None:
             _write_file(opts.fullchain_out, fullchain, "fullchain")
 
     if opts.der_out:
-        _try_download_write_binary("certificate (DER)", opts.der_out, order.download_certificate_der)
+        wrote = _try_download_write_binary("certificate (DER)", opts.der_out, order.download_certificate_der)
+        der_only = not (opts.cert_out or opts.chain_out or opts.fullchain_out or opts.all_formats_out or opts.output)
+        if not wrote and der_only:
+            # ADR 0001 keeps a failed binary format non-fatal because a PEM was
+            # written; with DER the only output nothing was, so it fails (ADR 0029).
+            log.error("No certificate output was written", output="certificate (DER)", path=opts.der_out)
+            raise SystemExit(1)
 
     if opts.all_formats_out:
         stem = _stem_from_domain(order.domain)

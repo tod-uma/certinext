@@ -284,6 +284,20 @@ def test_stem_from_domain_sanitizes_wildcard() -> None:
     assert _stem_from_domain("*.example.com") == "wildcard.example.com"
 
 
+@pytest.mark.parametrize(
+    ("domain", "stem"),
+    [
+        ("../../etc/passwd", "_.._etc_passwd"),
+        ("a/b\\c.example.com", "a_b_c.example.com"),
+        ("..", "certificate"),
+        ("host name.example.com", "host_name.example.com"),
+    ],
+)
+def test_stem_from_domain_cannot_escape_the_directory(domain: str, stem: str) -> None:
+    """Separators and leading dots from an API-supplied domain are neutralised (R2b finding 15)."""
+    assert _stem_from_domain(domain) == stem
+
+
 def test_stem_from_domain_handles_none() -> None:
     """None falls back to 'certificate'."""
     assert _stem_from_domain(None) == "certificate"
@@ -352,6 +366,17 @@ def test_write_outputs_empty_fullchain_is_fatal(tmp_path: Path) -> None:
     with pytest.raises(SystemExit) as excinfo:
         _write_outputs(order, _args(fullchain_out=str(tmp_path / "fc.pem")), BUNDLE)  # type: ignore[arg-type]
     assert excinfo.value.code == 1
+
+
+@pytest.mark.parametrize("raw_chain", [False, True])
+def test_write_outputs_fullchain_without_leaf_is_fatal(tmp_path: Path, raw_chain: bool) -> None:
+    """Intermediates alone are not a fullchain: exit 1, write nothing (R2b finding 8)."""
+    order = FakeOrder({"chainPem": [INT1, INT2]})
+    fc = tmp_path / "fc.pem"
+    with pytest.raises(SystemExit) as excinfo:
+        _write_outputs(order, _args(fullchain_out=str(fc), raw_chain=raw_chain), BUNDLE)  # type: ignore[arg-type]
+    assert excinfo.value.code == 1
+    assert not fc.exists()
 
 
 def test_write_outputs_empty_chain_is_warning_not_error(tmp_path: Path) -> None:
@@ -500,11 +525,23 @@ def test_write_outputs_binary_and_pem_combine(
     assert "-----BEGIN CERTIFICATE-----" not in capsys.readouterr().out
 
 
-def test_write_outputs_binary_unwritable_path_warns_and_continues(tmp_path: Path) -> None:
-    """An unwritable --der-out path logs a warning but does not raise or exit."""
+def test_write_outputs_der_only_unwritable_path_is_fatal(tmp_path: Path) -> None:
+    """With DER the only output, a failed write exits 1: nothing was written (R2b finding 9)."""
     missing_dir = tmp_path / "no-such-dir" / "cert.der"
-    _write_outputs(FakeOrder({}), _args(der_out=str(missing_dir)), BUNDLE)  # type: ignore[arg-type]
+    with pytest.raises(SystemExit) as exc_info:
+        _write_outputs(FakeOrder({}), _args(der_out=str(missing_dir)), BUNDLE)  # type: ignore[arg-type]
+    assert exc_info.value.code == 1
     assert not missing_dir.exists()
+
+
+def test_write_outputs_binary_unwritable_path_warns_and_continues(tmp_path: Path) -> None:
+    """Beside a PEM output, an unwritable --der-out path only warns (ADR 0001)."""
+    missing_dir = tmp_path / "no-such-dir" / "cert.der"
+    order = FakeOrder({"certificatePem": LEAF, "chainPem": []})
+    cert = tmp_path / "cert.pem"
+    _write_outputs(order, _args(der_out=str(missing_dir), cert_out=str(cert)), BUNDLE)  # type: ignore[arg-type]
+    assert not missing_dir.exists()
+    assert cert.read_text() == LEAF + "\n"
 
 
 # ---------------------------------------------------------------------------
