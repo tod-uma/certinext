@@ -118,3 +118,7 @@ ignore_missing_imports = true
 # are unannotated. Allow calling into the keyring package without per-call
 # `# type: ignore[no-untyped-call]`; our own code is still fully type-checked.
 untyped_calls_exclude = ["keyring"]
+# A local build leaves build/lib/certinext/, a second copy of the package that
+# stops `mypy .` with "Duplicate module named certinext". CI's clean checkout
+# never has it, so only local runs broke.
+exclude = ["^build/", "^dist/"]
