@@ -1,6 +1,6 @@
 ---
 name: certinext-api-bugs
-description: Known CertiNext vendor API bugs and quirks in certificate ordering (SSL.com, X-Product-Code, EMS-1162) and in domain listing and filtering. Use when editing certinext/ssl_certificates.py, certinext/domains.py, certinext/cli/issue_cert.py, dcv_update.py, or README.md sections about ordering certificates or listing domains, or when an order fails with EMS-1162 Invalid Product Code. Also when creating SSL.com domain records or debugging dns-persist DCV (a 400 on create, a verify that 422s with MPIC failed, or `policy=wildcard`). Also for the v3 CLM paths (`/api/v3/certinext/` orders, audit-logs, users, roles, apis, discovery), their paging parameters, 404 on `orders/{id}`, 400 on `users/groups/members`, or when capturing fixtures with `scripts/capture_corpus.py` or probing a credential with `scripts/probe_access.py`.
+description: Known CertiNext vendor API bugs and quirks in certificate ordering (SSL.com, X-Product-Code, EMS-1162) and in domain listing and filtering. Use when editing certinext/ssl_certificates.py, certinext/domains.py, certinext/cli/issue_cert.py, dcv_update.py, or README.md sections about ordering certificates or listing domains, or when an order fails with EMS-1162 Invalid Product Code. Also when creating SSL.com domain records or debugging dns-persist DCV (a 400 on create, a verify that 422s with MPIC failed, or `policy=wildcard`). Also for the v3 CLM paths (`/api/v3/certinext/` orders, audit-logs, users, roles, apis, discovery), their paging parameters, 404 on `orders/{id}`, 400 on `users/groups/members`, or when capturing fixtures with `scripts/capture_corpus.py` or probing a credential with `scripts/probe_access.py`. Also when setting up a read-only or service API user, choosing its role permissions or group, or when a new credential's lists come back empty.
 ---
 
 ## Ordering from SSL.com (GitLab #39, vendor #187868, ADR 0020 amendment)
@@ -206,12 +206,34 @@ credentials, orders). Fixtures are `tests/fixtures/corpus/{prod,sandbox}/v3-*.js
   unsubmitted portal drafts ("Auto Save"); v2 adds "Order Accepted" orders with
   no product or certificate status (mostly ACME). Every issued certificate is in
   both.
-- **`reports/certificates` answers 200 with only `{"status":"success"}`.** Why is
-  unresolved (permission or a missing `X-Tenant-Context`; library #35).
+- **`reports/certificates` answers 200 with only `{"status":"success"}`,** for
+  an Administrator and for a view-only role holding "View All Certificates
+  Report". Why is unresolved (permission or a missing `X-Tenant-Context`;
+  library #35, vendor #191815).
 - **Access is per credential and can change.** The same credential got 403 on
-  these paths on 2026-10-21 and 200 on 2026-11-23, cause unknown, and v3 lists
-  are scoped to the token's user, so a new credential can see less while still
-  answering 200. Compare `totalResults` when switching credentials.
+  these paths on 2026-10-21 and 200 on 2026-11-23, cause unknown. A new
+  credential can answer 200 and still see less, so compare `totalResults` with
+  `probe_access.py --profile <name>` when switching.
+- **The user's group decides what many lists show (2026-11-24).** With the
+  service user in a new, empty group, v3 `orders`, `apis`,
+  `discovery/certificates` and `users` returned 0, and so did v2
+  `reports/orders`. Audit logs, domains, organizations, roles and
+  `users/detailed` were unaffected. Back in group "All", every total matched an
+  Administrator's. The trap: a REST credential must belong to a group, and in
+  the portal's group settings, "Allow specific users to access this group"
+  silently *moves* those users into it. Keep the credential in its own group and
+  the user in "All".
+- **`apis` lists credentials without secrets, but `apis/{id}` returns them**
+  (vendor spec: ACME EAB key id + MAC key, REST access key; the console's
+  "View"). The "View all/own REST API keys" and "View … ACME EAB credentials"
+  permissions most likely unlock that View, and they did **not** make `GET
+  apis` list anything for a view-only role (still 0 rows; an Administrator gets
+  them all). So a read-only role can't list credentials without risking every
+  secret, admin keys included. Never grant those permissions to a monitoring
+  role, and never wrap `apis/{id}` in the library. Vendor #191815 asks for a
+  list-only permission.
+- **User and credential `createdDate` are UTC too:** a user and a credential
+  created at known times on 2026-11-24 came back at those UTC minutes.
 
 **Capturing v3 fixtures:** audit `activity` text embeds the names of users,
 groups and API credentials, including deleted ones that no list returns.
