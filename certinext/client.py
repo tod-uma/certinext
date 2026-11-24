@@ -45,6 +45,52 @@ log = structlog.get_logger(__name__)
 TimeoutSpec = httpx.Timeout | float
 """A timeout setting: an :class:`httpx.Timeout`, or seconds applied to every phase."""
 
+_PATH_FORBIDDEN = frozenset("?#\\")
+
+
+def _check_path(path: str) -> None:
+    """Reject an API path that could leave the route it was built for.
+
+    Paths are built by interpolating ids into f-strings, so an id carrying
+    ``?``, ``#``, ``\\``, an empty segment or a ``.``/``..`` segment would
+    add a query, drop the tail, or climb to another route. Query parameters
+    always travel in ``params=``, so none of these is ever legitimate here.
+
+    Args:
+        path: API path relative to ``base_url``.
+
+    Raises:
+        ValueError: If the path has a forbidden character or segment.
+    """
+    if _PATH_FORBIDDEN & set(path):
+        raise ValueError(f"API path {path!r} contains one of ? # \\")
+    segments = path.split("/")[1:] if path.startswith("/") else path.split("/")
+    if any(seg in ("", ".", "..") for seg in segments):
+        raise ValueError(f"API path {path!r} has an empty, '.' or '..' segment")
+
+
+def path_segment(value: object) -> str:
+    """Return ``value`` as a string that is safe to use as one URL path segment.
+
+    The value is returned unchanged (no percent-encoding, so every id that
+    worked before still reaches the server byte for byte); anything that is
+    not a single opaque segment is rejected instead.
+
+    Args:
+        value: A caller-supplied id, e.g. an order id or role id.
+
+    Returns:
+        ``str(value)``.
+
+    Raises:
+        ValueError: If the value is empty, ``.`` or ``..``, or contains
+            ``/``, ``?``, ``#`` or ``\\``.
+    """
+    text = str(value)
+    if text in ("", ".", "..") or "/" in text or _PATH_FORBIDDEN & set(text):
+        raise ValueError(f"{text!r} is not a valid id: it must be one path segment without / ? # \\")
+    return text
+
 
 def _as_timeout(value: TimeoutSpec | None, default: httpx.Timeout) -> httpx.Timeout:
     """Normalise a user-supplied timeout.
@@ -246,6 +292,24 @@ class CertiNextClient:
                 policy.sleep(wait)
                 attempt += 1
 
+    def _url(self, path: str) -> str:
+        """Return the absolute URL for ``path`` after checking it.
+
+        Every request method builds its URL here, so :func:`_check_path`
+        guards all of them.
+
+        Args:
+            path: API path relative to ``base_url``.
+
+        Returns:
+            ``base_url`` + ``path``.
+
+        Raises:
+            ValueError: If the path has a forbidden character or segment.
+        """
+        _check_path(path)
+        return f"{self.base_url}{path}"
+
     def get(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any] | list[Any]:
         """Send a GET request and return the parsed JSON response.
 
@@ -277,7 +341,7 @@ class CertiNextClient:
             CertiNextAPIError: On a non-2xx response.
         """
         resp = self._execute(
-            lambda: self._session.get(f"{self.base_url}{path}", headers=self._headers(), params=params)
+            lambda: self._session.get(self._url(path), headers=self._headers(), params=params)
         )
         self._raise_api_error(resp)
         return cast(dict[str, Any], resp.json())
@@ -304,7 +368,7 @@ class CertiNextClient:
         def _req() -> httpx.Response:
             headers = self._headers()
             headers["Accept"] = accept
-            return self._session.get(f"{self.base_url}{path}", headers=headers, params=params)
+            return self._session.get(self._url(path), headers=headers, params=params)
 
         def _once() -> bytes:
             """Send the request once and return the body, raising on an error status."""
@@ -343,7 +407,7 @@ class CertiNextClient:
             headers = self._headers()
             if extra_headers:
                 headers.update(extra_headers)
-            return self._session.post(f"{self.base_url}{path}", headers=headers, json=json, **kwargs)
+            return self._session.post(self._url(path), headers=headers, json=json, **kwargs)
         resp = self._execute(_req)
         self._raise_api_error(resp)
         return cast(dict[str, Any], resp.json() if resp.content else {})
@@ -371,7 +435,7 @@ class CertiNextClient:
             headers = self._headers()
             if extra_headers:
                 headers.update(extra_headers)
-            return self._session.put(f"{self.base_url}{path}", headers=headers, json=json)
+            return self._session.put(self._url(path), headers=headers, json=json)
         resp = self._execute(_req)
         self._raise_api_error(resp)
         return cast(dict[str, Any], resp.json() if resp.content else {})
@@ -390,7 +454,7 @@ class CertiNextClient:
             CertiNextAPIError: On a non-2xx response. Provides ``.status_code`` and ``.body``.
         """
         resp = self._execute(
-            lambda: self._session.patch(f"{self.base_url}{path}", headers=self._headers(), json=json)
+            lambda: self._session.patch(self._url(path), headers=self._headers(), json=json)
         )
         self._raise_api_error(resp)
         return cast(dict[str, Any], resp.json() if resp.content else {})
@@ -408,7 +472,7 @@ class CertiNextClient:
             CertiNextAPIError: On a non-2xx response. Provides ``.status_code`` and ``.body``.
         """
         resp = self._execute(
-            lambda: self._session.delete(f"{self.base_url}{path}", headers=self._headers())
+            lambda: self._session.delete(self._url(path), headers=self._headers())
         )
         self._raise_api_error(resp)
         return resp.json() if resp.content else None

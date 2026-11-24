@@ -17,7 +17,7 @@
 from collections.abc import Iterable
 
 from ._v3 import V3_BASE, iter_v3_rows, unwrap_v3
-from .client import CertiNextClient
+from .client import CertiNextClient, path_segment
 from .exceptions import CertiNextAPIError  # noqa: F401 — referenced in Raises docstrings
 from .models.users import CustomRole, GroupMember, RolePermission, User, UserDetail
 
@@ -104,10 +104,12 @@ class UserAccessor:
             The role's permissions.
 
         Raises:
+            ValueError: If ``custom_role_id`` is not a single path segment.
             CertiNextNotFoundError: If no role has that id.
             CertiNextAPIError: On any other non-2xx API response.
         """
-        rows, _ = unwrap_v3(self._client.get(f"{_PATH}/roles/{custom_role_id}/permissions"), "permissions")
+        body = self._client.get(f"{_PATH}/roles/{path_segment(custom_role_id)}/permissions")
+        rows, _ = unwrap_v3(body, "permissions")
         return [RolePermission.model_validate(r) for r in rows]
 
     def group_members(
@@ -127,10 +129,14 @@ class UserAccessor:
             The membership rows.
 
         Raises:
+            TypeError: If ``user_ids`` is a bare ``str`` (it would iterate by
+                character); pass ``[user_id]``.
             ValueError: If neither argument is given, or ``user_ids`` is empty.
             CertiNextAPIError: On a non-2xx API response.
         """
         params: dict[str, str] = {}
+        if isinstance(user_ids, str):
+            raise TypeError("user_ids must be an iterable of ids, not a str; pass [user_id]")
         if user_ids is not None:
             ids = [str(u) for u in user_ids]
             if not ids:

@@ -20,7 +20,7 @@ from unittest.mock import MagicMock
 import httpx
 import pytest
 
-from certinext.client import CertiNextClient
+from certinext.client import CertiNextClient, path_segment
 from certinext.exceptions import CertiNextAPIError, CertiNextNotFoundError
 
 
@@ -292,3 +292,45 @@ class TestTokenRefreshOn401:
         with pytest.raises(CertiNextAPIError):
             client.get("/api/certinext/v2/missing")
         assert mock_session.get.call_count == 1
+
+
+class TestPathGuard:
+    """Ids interpolated into paths cannot re-route a request (R2 finding 4)."""
+
+    @pytest.mark.parametrize("good", ["12345", "a1b2-c3d4", "example.edu", "*.example.edu", 678])
+    def test_path_segment_passes_valid_ids_unchanged(self, good: object) -> None:
+        """Valid ids, including domain names, come back byte for byte (no percent-encoding)."""
+        assert path_segment(good) == str(good)
+
+    @pytest.mark.parametrize("bad", ["", ".", "..", "a/b", "../x", "a?b=1", "a#b", "a\\b"])
+    def test_path_segment_rejects(self, bad: str) -> None:
+        """Anything that is not one opaque segment is refused."""
+        with pytest.raises(ValueError):
+            path_segment(bad)
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/api/certinext/v2/domains/../organizations",
+            "/api/certinext/v2/domains/./5",
+            "/api/certinext/v2/domains//deactivate",
+            "/api/certinext/v2/domains/5?x=1",
+            "/api/certinext/v2/domains/5#frag",
+            "/api/certinext/v2/domains/5\\deactivate",
+            "/api/certinext/v2/domains/..",
+        ],
+    )
+    @pytest.mark.parametrize("method", ["get", "post", "put", "patch", "delete"])
+    def test_client_refuses_bad_paths_before_sending(self, method: str, path: str) -> None:
+        """Every verb checks its path, so model methods that interpolate self.id are covered too."""
+        client, mock_session = _make_client()
+        with pytest.raises(ValueError):
+            getattr(client, method)(path)
+        getattr(mock_session, method).assert_not_called()
+
+    def test_client_sends_a_normal_path(self) -> None:
+        """A normal path reaches the session as base_url + path."""
+        client, mock_session = _make_client()
+        mock_session.get.return_value = _ok_response({"ok": True})
+        assert client.get("/api/certinext/v2/domains/5") == {"ok": True}
+        assert mock_session.get.call_args.args[0] == "https://us-api.certinext.io/api/certinext/v2/domains/5"

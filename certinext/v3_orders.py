@@ -17,7 +17,7 @@
 from typing import Any
 
 from ._v3 import V3_BASE, get_v3_page, iter_v3_rows
-from .client import CertiNextClient
+from .client import CertiNextClient, path_segment
 from .exceptions import CertiNextAPIError  # noqa: F401 — referenced in Raises docstrings
 from .models.v3_orders import V3CertificateInfo, V3IssuerCA, V3Order, V3OrderDetail, V3Requestor
 
@@ -94,6 +94,12 @@ class V3OrderAccessor:
         A full prod walk at 100 per page took about 19 s for 1,694 orders
         (2026-11-23).
 
+        The walk is offset paging, not a snapshot. An order created during
+        it can appear twice, and one removed during it (portal "Auto Save"
+        drafts come and go) can shift another past the page boundary and be
+        missed. Dedupe on :attr:`V3Order.order_id`; a poller that needs
+        every order should not treat one walk as complete.
+
         Args:
             page_size: Rows per page (default 100).
             exclude_ignored: When set, sent as ``excludeIgnored=1``/``0``.
@@ -122,8 +128,9 @@ class V3OrderAccessor:
             The order detail.
 
         Raises:
+            ValueError: If ``order_id`` is not a single path segment.
             CertiNextNotFoundError: If no order has that id.
             CertiNextAPIError: On any other non-2xx API response.
         """
-        body = self._client.get(f"{_PATH}/{order_id}")
+        body = self._client.get(f"{_PATH}/{path_segment(order_id)}")
         return V3OrderDetail.model_validate(body)

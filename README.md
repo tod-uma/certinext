@@ -2500,6 +2500,13 @@ print(detail.certificate.serial_number, detail.issuer_ca.subordinate_ca)
 > less-privileged credential returns fewer rows while still answering 200.
 > Only filters verified against the live API are exposed (audit
 > `since`/`until`, orders `exclude_ignored`).
+>
+> **Note:** the v3 list walks are offset paging, not snapshots. A row added
+> or removed while a walk runs can be returned twice or skipped, so a poller
+> should de-duplicate on the row's id (`audit_log_id`, `order_id`) and
+> re-read an overlapping window. `totalResults` is treated as a hint: a walk
+> keeps going past a stale total and stops on an empty or short page, and
+> one that ends short of the total logs a `v3_walk_incomplete` warning.
 
 ### Working with SSL/TLS certificates
 

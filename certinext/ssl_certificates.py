@@ -72,7 +72,7 @@ from typing import TYPE_CHECKING, Any
 import httpx
 import structlog
 
-from .client import CertiNextClient
+from .client import CertiNextClient, path_segment
 from .exceptions import (  # noqa: F401 — CertiNextAPIError/CertiNextTimeoutError referenced in Raises docstrings
     CertiNextAPIError,
     CertiNextCreateTimeoutError,
@@ -1308,11 +1308,12 @@ class SslAccessor:
             :class:`SslOrder` reflecting the current order state.
 
         Raises:
+            ValueError: If ``order_id`` is not a single path segment.
             ValueError: If the API returns an unexpected (non-dict) response.
             CertiNextAPIError: On a non-2xx API response (404 if not found).
                 Provides ``.status_code`` and ``.body``.
         """
-        result = self._client.get(f"{_SSL_BASE}/{order_id}")
+        result = self._client.get(f"{_SSL_BASE}/{path_segment(order_id)}")
         if not isinstance(result, dict):
             raise ValueError(f"Unexpected response type for order {order_id!r}")
         return SslOrder.from_payload(self._client, result)

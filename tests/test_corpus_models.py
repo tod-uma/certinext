@@ -176,19 +176,58 @@ def test_corpus_rows_parse(env: str, filename: str) -> None:
 def _extras(instance: CertiNextModel, prefix: str = "") -> list[str]:
     """Return undeclared wire keys on ``instance`` and its nested models.
 
+    Descends into nested models held directly, in lists, or as dict values,
+    so a future ``list[SomeModel]`` field is covered too.
+
     Args:
         instance: A validated model.
         prefix: Dotted path of ``instance`` within its parent.
 
     Returns:
-        Dotted names of every key that landed in ``model_extra``.
+        Dotted names of every key that landed in ``model_extra``; list
+        elements appear as ``field[i].key`` and dict values as ``field[k].key``.
     """
     found = [f"{prefix}{k}" for k in (instance.model_extra or {})]
     for name in type(instance).model_fields:
         value = getattr(instance, name)
         if isinstance(value, CertiNextModel):
             found.extend(_extras(value, f"{prefix}{name}."))
+        elif isinstance(value, (list, tuple)):
+            for i, item in enumerate(value):
+                if isinstance(item, CertiNextModel):
+                    found.extend(_extras(item, f"{prefix}{name}[{i}]."))
+        elif isinstance(value, dict):
+            for key, item in value.items():
+                if isinstance(item, CertiNextModel):
+                    found.extend(_extras(item, f"{prefix}{name}[{key}]."))
     return found
+
+
+class _Leaf(CertiNextModel):
+    """Throwaway nested model for :func:`test_extras_descends_into_lists_and_dicts`."""
+
+    name: str | None = None
+
+
+class _Parent(CertiNextModel):
+    """Throwaway parent with a nested model, a list of them, and a dict of them."""
+
+    one: _Leaf | None = None
+    many: list[_Leaf] = []
+    keyed: dict[str, _Leaf] = {}
+
+
+def test_extras_descends_into_lists_and_dicts() -> None:
+    """Undeclared keys inside list and dict elements are reported, with their path."""
+    parent = _Parent.model_validate(
+        {
+            "one": {"name": "a", "x": 1},
+            "many": [{"name": "b"}, {"name": "c", "y": 2}],
+            "keyed": {"k": {"z": 3}},
+            "top": 0,
+        }
+    )
+    assert sorted(_extras(parent)) == ["keyed[k].z", "many[1].y", "one.x", "top"]
 
 
 def _v3_cases() -> list[tuple[str, str]]:

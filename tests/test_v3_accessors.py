@@ -15,12 +15,14 @@
 """Tests for the v3 CLM paging helper and read-only accessors."""
 
 import json
+from collections.abc import Mapping, Sequence
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
+from structlog.testing import capture_logs
 
 from certinext._v3 import iter_v3_rows, unwrap_v3
 from certinext.api_credentials import ApiCredentialAccessor
@@ -94,29 +96,100 @@ class TestUnwrap:
         """Missing keys and odd bodies yield no rows and no total."""
         assert unwrap_v3(body, "orders") == ([], None)
 
+    @pytest.mark.parametrize("body", [{"items": [{"a": 1}]}, {"orders": None}, None, "text"])
+    def test_unexpected_envelope_warns(self, body: Any) -> None:
+        """A changed envelope is logged, not passed off silently as an empty list."""
+        with capture_logs() as logs:
+            assert unwrap_v3(body, "orders") == ([], None)
+        assert [e["event"] for e in logs] == ["v3_envelope_unexpected"]
+
+    def test_expected_envelope_is_quiet(self) -> None:
+        """An empty but well-formed envelope logs nothing."""
+        with capture_logs() as logs:
+            unwrap_v3({"orders": [], "totalResults": "0"}, "orders")
+        assert logs == []
+
+
+def _events(logs: Sequence[Mapping[str, Any]]) -> list[tuple[str, str]]:
+    """Return ``(event, log_level)`` pairs from captured structlog entries.
+
+    Args:
+        logs: Entries from :func:`structlog.testing.capture_logs`.
+
+    Returns:
+        One pair per entry.
+    """
+    return [(e["event"], e["log_level"]) for e in logs]
+
 
 class TestIterRows:
-    """iter_v3_rows stops on total, short page, or a repeated page."""
+    """iter_v3_rows treats totalResults as a hint and stops on empty, short or repeated pages."""
 
-    def test_stops_on_total_exact_multiple(self) -> None:
-        """A total that is an exact multiple of page_size needs no extra call."""
-        client = _client(_page("x", range(0, 2), "4"), _page("x", range(2, 4), "4"))
-        rows = list(iter_v3_rows(client, "/p", "x", page_size=2))
+    def test_full_last_page_costs_one_extra_call(self) -> None:
+        """A full page never ends the walk; an exact multiple needs one empty page to confirm."""
+        client = _client(_page("x", range(0, 2), "4"), _page("x", range(2, 4), "4"), _page("x", range(0), "4"))
+        with capture_logs() as logs:
+            rows = list(iter_v3_rows(client, "/p", "x", page_size=2))
         assert [r["id"] for r in rows] == ["0", "1", "2", "3"]
-        assert client.get.call_count == 2
+        assert client.get.call_count == 3
         assert client.get.call_args_list[1].kwargs["params"] == {"pageNumber": 2, "pageSize": 2}
+        assert logs == []
+
+    def test_short_page_with_total_reached_stops(self) -> None:
+        """A short page that reaches the total ends the walk without an extra call."""
+        client = _client(_page("x", range(0, 2), 3), _page("x", range(2, 3), 3))
+        assert len(list(iter_v3_rows(client, "/p", "x", page_size=2))) == 3
+        assert client.get.call_count == 2
 
     def test_stops_on_short_page_without_total(self) -> None:
         """With no total, a short page ends the walk."""
         client = _client(_page("x", range(0, 2), None), _page("x", range(2, 3), None))
         assert len(list(iter_v3_rows(client, "/p", "x", page_size=2))) == 3
 
+    def test_server_page_cap_keeps_walking(self) -> None:
+        """Asked for 4 but capped at 2: short pages continue while the total says rows remain."""
+        client = _client(_page("x", range(0, 2), 5), _page("x", range(2, 4), 5), _page("x", range(4, 5), 5))
+        rows = list(iter_v3_rows(client, "/p", "x", page_size=4))
+        assert [r["id"] for r in rows] == ["0", "1", "2", "3", "4"]
+        assert client.get.call_count == 3
+
+    @pytest.mark.parametrize("total", [0, "2", 3])
+    def test_stale_low_total_does_not_truncate(self, total: Any) -> None:
+        """A total below the real row count (including 0) cannot end a walk of full pages."""
+        client = _client(_page("x", range(0, 2), total), _page("x", range(2, 4), total), _page("x", range(4, 5), total))
+        assert len(list(iter_v3_rows(client, "/p", "x", page_size=2))) == 5
+
+    def test_empty_first_page(self) -> None:
+        """An empty first page yields nothing after one call."""
+        client = _client(_page("x", range(0), 0))
+        with capture_logs() as logs:
+            assert list(iter_v3_rows(client, "/p", "x", page_size=2)) == []
+        assert client.get.call_count == 1
+        assert logs == []
+
     def test_repeated_page_stops(self) -> None:
-        """A clamped (repeated) page ends the walk without duplicating rows."""
+        """A clamped (repeated) page with no total ends the walk with a warning, without duplicating rows."""
         same = _page("x", range(0, 2), None)
         client = _client(same, dict(same), dict(same))
-        assert len(list(iter_v3_rows(client, "/p", "x", page_size=2))) == 2
+        with capture_logs() as logs:
+            assert len(list(iter_v3_rows(client, "/p", "x", page_size=2))) == 2
         assert client.get.call_count == 2
+        assert _events(logs) == [("v3_page_repeated", "warning")]
+
+    def test_repeat_after_total_is_a_clean_end(self) -> None:
+        """Past the end, a server that repeats its last page is normal: debug, not warning."""
+        last = _page("x", range(2, 4), 4)
+        client = _client(_page("x", range(0, 2), 4), last, dict(last))
+        with capture_logs() as logs:
+            assert len(list(iter_v3_rows(client, "/p", "x", page_size=2))) == 4
+        assert _events(logs) == [("v3_page_repeated", "debug")]
+
+    def test_walk_short_of_total_warns(self) -> None:
+        """Ending with fewer rows than the reported total logs v3_walk_incomplete."""
+        client = _client(_page("x", range(0, 2), 9), _page("x", range(0), 9))
+        with capture_logs() as logs:
+            assert len(list(iter_v3_rows(client, "/p", "x", page_size=2))) == 2
+        assert _events(logs) == [("v3_walk_incomplete", "warning")]
 
     def test_record_limit_and_filters(self) -> None:
         """size_param and filters reach the query string."""
@@ -136,9 +209,15 @@ class TestV3Orders:
     """V3OrderAccessor."""
 
     def test_get_list_parses_corpus(self) -> None:
-        """The prod capture parses; order dates are UTC-aware (verified against v2)."""
+        """The prod capture parses; order dates are UTC-aware (verified against v2).
+
+        The capture is one 100-row page of 1694, so asking for 1000 is the
+        server-cap case: the pager walks on and the empty second page ends it.
+        """
         body = _body("v3-orders.json")
-        orders = V3OrderAccessor(_client(body)).get_list(page_size=1000)
+        client = _client(body, {"orders": [], "totalResults": body["totalResults"]})
+        orders = V3OrderAccessor(client).get_list(page_size=1000)
+        assert client.get.call_count == 2
         assert len(orders) == len(body["orders"])
         issued = next(o for o in orders if o.expires_on is not None)
         assert isinstance(issued.expires_on, datetime) and issued.expires_on.tzinfo == timezone.utc
@@ -229,6 +308,36 @@ class TestUsers:
         client = _client()
         with pytest.raises(ValueError):
             UserAccessor(client).group_members(**kwargs)
+        client.get.assert_not_called()
+
+    def test_group_members_rejects_bare_string(self) -> None:
+        """A bare str would iterate by character (userIds=i,d,-,a); it is refused."""
+        client = _client()
+        with pytest.raises(TypeError, match="not a str"):
+            UserAccessor(client).group_members(user_ids="id-abc")
+        client.get.assert_not_called()
+
+
+_BAD_IDS = ["", ".", "..", "a/b", "../x", "a?b=1", "a#b", "a\\b"]
+
+
+class TestPathSegmentGuard:
+    """Caller ids cannot leave the route their path was built for (R2 finding 4)."""
+
+    @pytest.mark.parametrize("bad", _BAD_IDS)
+    def test_v3_order_get_rejects(self, bad: str) -> None:
+        """v3 orders/{id} refuses a non-segment id before any request."""
+        client = _client()
+        with pytest.raises(ValueError):
+            V3OrderAccessor(client).get(bad)
+        client.get.assert_not_called()
+
+    @pytest.mark.parametrize("bad", _BAD_IDS)
+    def test_role_permissions_rejects(self, bad: str) -> None:
+        """users/roles/{id}/permissions refuses a non-segment id before any request."""
+        client = _client()
+        with pytest.raises(ValueError):
+            UserAccessor(client).role_permissions(bad)
         client.get.assert_not_called()
 
 

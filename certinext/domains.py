@@ -18,7 +18,7 @@ from typing import Any
 
 import structlog
 
-from .client import CertiNextClient
+from .client import CertiNextClient, path_segment
 from .exceptions import CertiNextAPIError  # noqa: F401 — referenced in Raises docstrings
 from .models.domains import (
     _BASE,
@@ -451,8 +451,9 @@ class DomainAccessor:
         Raises:
             KeyError: If a name lookup finds no matching domain.
             ValueError: If a name matches several non-emSign records and
-                ``validated_by`` was not given, or the API returns an
-                unexpected response type for an ID lookup.
+                ``validated_by`` was not given, the API returns an
+                unexpected response type for an ID lookup, or an ID is not
+                a single path segment.
             CertiNextAPIError: On a non-2xx API response. Provides ``.status_code`` and ``.body``.
         """
         if "." in domain_id_or_name:
@@ -477,7 +478,7 @@ class DomainAccessor:
                 f"Domain name {domain_id_or_name!r} matches {len(matches)} records (CAs: {cas}); "
                 "pass validated_by= to choose one"
             )
-        result = self._client.get(f"{_BASE}/{domain_id_or_name}")
+        result = self._client.get(f"{_BASE}/{path_segment(domain_id_or_name)}")
         if not isinstance(result, dict):
             raise ValueError(f"Unexpected list response for domain {domain_id_or_name!r}")
         return Domain.from_payload(self._client, result)
@@ -625,7 +626,8 @@ class DomainAccessor:
             A :class:`Domain` reflecting the deactivated state.
 
         Raises:
+            ValueError: If ``domain_id`` is not a single path segment.
             CertiNextAPIError: On a non-2xx API response. Provides ``.status_code`` and ``.body``.
         """
-        data = self._client.post(f"{_BASE}/{domain_id}/deactivate")
+        data = self._client.post(f"{_BASE}/{path_segment(domain_id)}/deactivate")
         return Domain.from_payload(self._client, data)
