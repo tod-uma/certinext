@@ -133,6 +133,26 @@ class TestSessionFactory:
         )
         assert sess._client.base_url == custom
 
+    def test_custom_base_url_derives_its_token_url(self) -> None:
+        """A custom base_url without token_url sends OAuth to that host (R2b finding 7)."""
+        sess = certinext.session(base_url="https://qa-api.example.invalid/", client_id="a", client_secret="s")
+        assert sess._client._auth.token_url == "https://qa-api.example.invalid/oauth/token"
+
+    def test_custom_base_url_derives_token_url_even_with_sandbox(self) -> None:
+        """An explicit base_url beats sandbox=True for the token URL too."""
+        sess = certinext.session(base_url="https://qa-api.example.invalid", sandbox=True)
+        assert sess._client._auth.token_url == "https://qa-api.example.invalid/oauth/token"
+
+    def test_explicit_token_url_wins_over_derivation(self) -> None:
+        """An explicit token_url is used verbatim alongside a custom base_url."""
+        sess = certinext.session(base_url="https://qa-api.example.invalid", token_url="https://auth.example.invalid/t")
+        assert sess._client._auth.token_url == "https://auth.example.invalid/t"
+
+    def test_dcv_verify_result_is_exported(self) -> None:
+        """DcvVerifyResult, Domain.verify()'s return type, is a root export (R2b finding 3)."""
+        assert "DcvVerifyResult" in certinext.__all__
+        assert certinext.DcvVerifyResult.__name__ == "DcvVerifyResult"
+
     def test_sandbox_flag_stored_on_session(self) -> None:
         """session.sandbox reflects the sandbox argument."""
         assert certinext.session(sandbox=True).sandbox is True

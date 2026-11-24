@@ -82,6 +82,7 @@ from .domains import (
     DcvMethod,
     DcvOption,
     DcvStatus,
+    DcvVerifyResult,
     Domain,
     DomainAccessor,
     DomainStatus,
@@ -178,8 +179,9 @@ def session(
     Args:
         base_url: CertiNext API base URL. Defaults to the US production
             endpoint, or the US sandbox endpoint when ``sandbox=True``.
-        token_url: OAuth 2.0 token endpoint URL. Defaults to the production
-            (or sandbox) token endpoint to match ``base_url``.
+        token_url: OAuth 2.0 token endpoint URL. Defaults to
+            ``<base_url>/oauth/token`` when ``base_url`` is given, otherwise
+            to the production (or sandbox) token endpoint.
         client_id: Your CertiNext account number (used as the OAuth client ID).
         client_secret: OAuth client secret generated in the CertiNext portal
             under Integrations → APIs → OAuth mode.
@@ -214,7 +216,15 @@ def session(
             raise ValueError("pass client_secret or client_secret_file, not both")
         client_secret = read_secret_file(client_secret_file)
     resolved_base = base_url or (SANDBOX_BASE_URL if sandbox else BASE_URL)
-    resolved_token = token_url or (SANDBOX_TOKEN_URL if sandbox else TOKEN_URL)
+    if token_url:
+        resolved_token = token_url
+    elif base_url:
+        # Every CertiNext deployment serves its token at <base>/oauth/token;
+        # falling back to the production endpoint would send a custom host's
+        # credentials to the wrong deployment (R2b finding 7).
+        resolved_token = f"{base_url.rstrip('/')}/oauth/token"
+    else:
+        resolved_token = SANDBOX_TOKEN_URL if sandbox else TOKEN_URL
     return CertiNextSession(
         resolved_base, resolved_token, client_id, client_secret, scope, sandbox,
         timeout=timeout, create_timeout=create_timeout, retry=retry,
@@ -269,6 +279,7 @@ __all__ = [
     "CertificateAuthority",
     "DcvMethod",
     "DcvStatus",
+    "DcvVerifyResult",
     "DomainStatus",
     "VALID_DCV_METHODS",
     "DcvAttempt",
