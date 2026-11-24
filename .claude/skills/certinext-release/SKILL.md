@@ -40,7 +40,7 @@ Cut a release for certinext. The tag message is the source of truth — GitLab C
    - Credential resolution order
    - Python library sections (new properties, new methods, changed return types)
 
-   If the README is missing any changes, **stop**. Create a `docs/` branch, update the README, bump to the next rc, merge it, and tag that version instead. Do not skip this check or defer it to a follow-up PR — the release is the public record.
+   If the README is missing any changes, **stop**. Create a `docs/` branch, update the README, merge it, and tag at that merge instead. Do not skip this check or defer it to a follow-up PR — the release is the public record. Bump to the next rc only if the version in `pyproject.toml` is already tagged; a bumped-but-untagged version (the usual case right after the bump MR) is tagged as-is at the docs merge, since an rc2 bump would only leave an rc1 that never existed. Done this way for v1.5.0rc1 (!173, 2026-11-24).
 
 4. **Stable release only — clear pre-1.0-style debt before tagging.** Skip this step for alpha/beta/rc tags; run it before any `X.Y.0`-first-stable or long-deferred stable tag:
    - **Suppressed checks.** Search for `noqa`, `type: ignore`, `# pragma: no cover`, `xfail`, `pytest.mark.skip`, and any CI job with `allow_failure: true` or commented out. Every hit needs an inline reason comment (not just the suppression) — if one is missing, either add the justification or fix the underlying issue. Distinguish real suppressions from ordinary pipeline-dedup patterns (`when: never` guarding duplicate branch/MR pipelines is not a suppressed check).
