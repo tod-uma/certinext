@@ -157,9 +157,11 @@ class OrderAccessor:
         out-of-range pages to the last page instead of returning an empty
         list: when the total is an exact multiple of ``page_size``, the page
         after the last would repeat the last page forever. The short-page
-        rule remains only as a fallback for bare-array responses, so a page
-        identical to the previous one also ends the walk (without adding its
-        rows again) and logs ``v2_page_repeated``.
+        rule remains only as a fallback for bare-array responses. On that
+        fallback alone, a page identical to the previous one also ends the
+        walk (without adding its rows again) and logs ``v2_page_repeated``.
+        A known ``totalPages`` is trusted instead: equal content there does
+        not prove a clamped page, and the total already stops the walk.
 
         Args:
             status: Optional order status filter (e.g. ``"issued"``,
@@ -209,8 +211,10 @@ class OrderAccessor:
         previous: list[Any] | None = None
         while True:
             raw, total_pages = self._fetch_page(page, page_size, status, since, until, group_number)
-            if raw and raw == previous:
-                # The server clamped an out-of-range page (R2b finding 18).
+            if total_pages is None and raw and raw == previous:
+                # Bare-array fallback only: the server clamped an out-of-range
+                # page (R2b finding 18). With a known total, equal pages are not
+                # proof of a clamp and must not end the walk (R2c finding 1).
                 log.warning("v2_page_repeated", path=_BASE, page=page, rows=len(records))
                 break
             previous = raw
