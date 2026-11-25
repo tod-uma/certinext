@@ -2,8 +2,8 @@
 
 - **Status:** Proposed
 - **Created:** 2026-10-21
-- **Updated:** 2026-11-20 (scope widened beyond the certificate report; see
-  [Scope widened](#scope-widened-2026-11-20))
+- **Updated:** 2026-11-25 (read-only user exists; two items left with the
+  vendor; see [Status](#status-2026-11-25))
 - **Coordinating issue:** #35
 
 This started as a request for the CLM certificate report alone, to give
@@ -61,6 +61,34 @@ under `/api/v3/certinext/`):
 The same grant unblocks [IDEA-007](IDEA-007-users-roles-accessor.md) (#22) and
 an audit-log accessor.
 
+## Status (2026-11-25)
+
+Most of the ask is done without a vendor grant:
+
+- Since 2026-11-23 the existing credential reads the v3 audit-log, users,
+  roles, API-credential and orders paths (they returned 403 on 2026-10-21).
+- On 2026-11-24 Tod created a read-only user in the portal: a custom role
+  with view permissions only, a service user in group All, and a REST
+  credential. Its probe totals match the existing credential on every path
+  except `apis`. The accessors shipped in 1.5.0rc1;
+  [ADR 0030](../adr/0030-v3-accessors-beside-v2-verified-filters-utc-dates.md) records the v3 choices.
+- `orders/{id}` returns no history, although the spec says it does.
+
+Two items are with the vendor (ticket #191815, sent 2026-11-24, which
+answered the same day that it is investigating):
+
+1. **`apis` returns 0 for the read-only role.** The permissions that might
+   allow it ("View … REST API keys") most likely also allow
+   `GET /apis/{id}`, which returns credential secrets, so they are not
+   granted. We asked for a list-only permission.
+2. **`reports/certificates` is still empty.** It returns only
+   `{"status":"success"}` for an Administrator user and for the read-only
+   role, which holds "View All Certificates Report". That's true with and
+   without the documented `pageNumber`/`recordLimit` parameters, and with
+   no custom headers sent. On 2026-11-25 we sent the vendor the
+   `x-correlation-id` of each call (see
+   [IDEA-017](IDEA-017-vendor-correlation-id.md)).
+
 ## Why not now
 
 CertiNext has its hands full with the eMudhra ECC distrust (October 2026), and
@@ -96,11 +124,13 @@ in `build_report`.
 
 ## Next steps
 
-1. Ask the vendor for the read-only API user described in
-   [Scope widened](#scope-widened-2026-11-20). Tod decides when the request
-   goes out; it has not been sent as of 2026-11-20.
-2. Once granted, probe each path read-only and capture a corpus sample before
-   modelling (this is Phase 0 of the UMS_certinext plan).
+1. Wait for the vendor's answer on #191815 (both items in
+   [Status](#status-2026-11-25)).
+2. If `reports/certificates` starts returning rows, capture a corpus sample
+   before modelling, then add the accessor and the `replacement-report`
+   option described above.
+3. If a list-only API-credentials permission appears, add it to the
+   read-only role and re-probe `apis`.
 
 ## References
 

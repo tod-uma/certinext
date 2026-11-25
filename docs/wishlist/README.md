@@ -35,3 +35,4 @@ a terminal state. Numbering is sequential and never reused.
 | [IDEA-014](IDEA-014-clm-certificate-report-access.md) | Request read-only CLM (v3) API access (audit logs, users/roles, API credentials, orders, certificate report) | Proposed | #35 | 2026-10-21 |
 | [IDEA-015](IDEA-015-list-certificates-status-values.md) | `list-certificates --status` help advertises values that return 422 | Proposed | #36 | 2026-10-21 |
 | [IDEA-016](IDEA-016-powershell-completion-env-leak.md) | Interrupted PowerShell tab completion leaves certinext silently doing nothing | Proposed | #41 | 2026-11-16 |
+| [IDEA-017](IDEA-017-vendor-correlation-id.md) | Show the vendor's `x-correlation-id` in API errors and logs | Proposed | #45 | 2026-11-25 |
